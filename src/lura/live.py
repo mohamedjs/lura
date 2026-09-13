@@ -205,8 +205,9 @@ class Conversation:
             raise
 
     async def _watchdog(self) -> None:
-        """End the conversation on silence, explicit ending, or hard cap."""
-        log.info("Watchdog started (idle_timeout=%.1fs)", self.settings.idle_timeout)
+        """End the conversation on explicit ending or hard cap only."""
+        log.info("Watchdog started (session stays open until 'bye' or %.0fs cap)",
+                 self.settings.max_session_seconds)
         while True:
             await asyncio.sleep(0.5)
             now = time.monotonic()
@@ -215,11 +216,6 @@ class Conversation:
                 return
             if now - self._started > self.settings.max_session_seconds:
                 log.info("Session hit its time cap.")
-                return
-            if self._speaking.is_set():
-                continue
-            if now - self._last_voice > self.settings.idle_timeout:
-                log.info("Nothing said for %.0fs — closing.", self.settings.idle_timeout)
                 return
 
     async def run(self) -> None:
