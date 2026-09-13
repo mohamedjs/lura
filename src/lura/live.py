@@ -18,10 +18,17 @@ IN_BLOCK = 800    # 50ms at 16kHz — small enough that barge-in stays responsiv
 OUT_BLOCK = 1200  # 50ms at 24kHz
 
 
-def build_config(settings: Settings) -> types.LiveConnectConfig:
+def build_config(settings: Settings, history: str = "") -> types.LiveConnectConfig:
     from .tools import GEMINI_TOOLS, get_machine_context
 
     system_instruction = f"{settings.system_instruction}\n{get_machine_context()}"
+    if history:
+        system_instruction += (
+            "\n\n[Conversation so far — you are resuming mid-conversation]\n"
+            + history
+            + "\n[Continue naturally from here. Do not repeat greetings or "
+            "re-introduce yourself.]"
+        )
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -54,6 +61,35 @@ class Conversation:
         self._ending = False
         self._last_voice = time.monotonic()
         self._started = time.monotonic()
+        # Conversation transcript for context across reconnections
+        self._transcript: list[str] = []
+        self._user_buf: list[str] = []
+        self._model_buf: list[str] = []
+
+    def _flush_user(self) -> None:
+        """Finalize accumulated user speech fragments into the transcript."""
+        if self._user_buf:
+            text = "".join(self._user_buf).strip()
+            if text:
+                self._transcript.append(f"User: {text}")
+            self._user_buf.clear()
+
+    def _flush_model(self) -> None:
+        """Finalize accumulated model speech fragments into the transcript."""
+        if self._model_buf:
+            text = "".join(self._model_buf).strip()
+            if text:
+                self._transcript.append(f"Assistant: {text}")
+            self._model_buf.clear()
+
+    def _get_history(self) -> str:
+        """Return the conversation transcript, capped at ~4000 chars."""
+        if not self._transcript:
+            return ""
+        full = "\n".join(self._transcript)
+        if len(full) > 4000:
+            full = "…" + full[-4000:]
+        return full
 
     # ── audio in ────────────────────────────────────────────────────────────
     async def _pump_mic(self, session, loop: asyncio.AbstractEventLoop) -> None:
@@ -187,20 +223,35 @@ class Conversation:
                         if text:
                             self._last_voice = time.monotonic()
                             log.info("you: %s", text)
+                            # New user speech → flush any pending model turn
+                            if self._model_buf:
+                                self._flush_model()
+                            self._user_buf.append(text)
                     if getattr(server, "output_transcription", None):
                         text = server.output_transcription.text
                         if text:
                             log.info("gemini: %s", text)
+                            # Model speaking → flush any pending user turn
+                            if self._user_buf:
+                                self._flush_user()
+                            self._model_buf.append(text)
                     if getattr(server, "interrupted", False):
                         # The model was cut off: drop whatever is still queued so
                         # the old answer does not keep playing over the new one.
                         while not chunks.empty():
                             chunks.get_nowait()
                         self._speaking.clear()
+                        self._flush_model()
                     if getattr(server, "turn_complete", False):
+                        self._flush_model()
                         await chunks.put(None)
+            # Session closed — flush any remaining buffers
+            self._flush_user()
+            self._flush_model()
             log.info("session.receive() completed.")
         except Exception as exc:
+            self._flush_user()
+            self._flush_model()
             log.exception("_receive task failed: %s", exc)
             raise
 
@@ -227,8 +278,9 @@ class Conversation:
 
         try:
             while not self._ending and not watchdog.done():
-                config = build_config(self.settings)
-                log.info("Opening Gemini Live session…")
+                config = build_config(self.settings, history=self._get_history())
+                log.info("Opening Gemini Live session… (history: %d turns)",
+                         len(self._transcript))
                 try:
                     async with self.client.aio.live.connect(
                         model=self.settings.model, config=config
