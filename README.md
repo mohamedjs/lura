@@ -8,7 +8,7 @@ separate thing — see [Changing the wake word](#changing-the-wake-word).
 
 **[USAGE.md](USAGE.md)** is the day-to-day guide. This file covers installing
 and the full reference. **[AGENTS.md](AGENTS.md)** is for anyone (or anything)
-changing the code.
+changing the code. Repository: [mohamedjs/lura](https://github.com/mohamedjs/lura).
 
 ## Install
 
