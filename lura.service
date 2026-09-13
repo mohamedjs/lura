@@ -1,0 +1,38 @@
+[Unit]
+Description=Lura voice assistant (wake word listener)
+Documentation=file:/var/www/html/lura/README.md
+# The audio session, not just login: starting before PipeWire is up means no
+# microphone and an immediate crash loop.
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/var/www/html/lura/.venv/bin/lura run
+Restart=on-failure
+RestartSec=5
+# 78 is EX_CONFIG: no API key, or no wake model. Restarting cannot fix either,
+# so the service waits for a human rather than respawning forever.
+RestartPreventExitStatus=78
+# Give PipeWire a moment on a cold login before the first attempt.
+ExecStartPre=/bin/sleep 3
+
+Environment=PYTHONUNBUFFERED=1
+# sounddevice finds PipeWire through the socket under XDG_RUNTIME_DIR; without
+# it the service sees no devices at all even though a terminal run works.
+Environment=XDG_RUNTIME_DIR=%t
+
+# It listens to a microphone all day: give it nothing it does not need.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# …except its own config and the wake-word model.
+ReadWritePaths=%h/.config/lura %h/.local/share/lura
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=no
+
+[Install]
+WantedBy=graphical-session.target
