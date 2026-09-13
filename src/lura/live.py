@@ -179,7 +179,14 @@ class Conversation:
 async def probe(settings: Settings, client: genai.Client) -> str:
     """One canned text turn, for --selftest. Returns what the model said."""
     config = types.LiveConnectConfig(
-        response_modalities=["TEXT"],
+        response_modalities=["AUDIO"],
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=settings.voice)
+            ),
+            language_code=settings.language,
+        ),
+        output_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=types.Content(parts=[types.Part(text=settings.system_instruction)]),
     )
     reply: list[str] = []
@@ -194,6 +201,10 @@ async def probe(settings: Settings, client: genai.Client) -> str:
             if getattr(message, "text", None):
                 reply.append(message.text)
             server = getattr(message, "server_content", None)
-            if server is not None and getattr(server, "turn_complete", False):
-                break
+            if server is not None:
+                ot = getattr(server, "output_transcription", None)
+                if ot and getattr(ot, "text", None):
+                    reply.append(ot.text)
+                if getattr(server, "turn_complete", False):
+                    break
     return "".join(reply).strip()
