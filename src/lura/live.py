@@ -18,17 +18,10 @@ IN_BLOCK = 800    # 50ms at 16kHz — small enough that barge-in stays responsiv
 OUT_BLOCK = 1200  # 50ms at 24kHz
 
 
-def build_config(settings: Settings, history: str = "") -> types.LiveConnectConfig:
+def build_config(settings: Settings) -> types.LiveConnectConfig:
     from .tools import GEMINI_TOOLS, get_machine_context
 
     system_instruction = f"{settings.system_instruction}\n{get_machine_context()}"
-    if history:
-        system_instruction += (
-            "\n\n[Conversation so far — you are resuming mid-conversation]\n"
-            + history
-            + "\n[Continue naturally from here. Do not repeat greetings or "
-            "re-introduce yourself.]"
-        )
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -82,14 +75,23 @@ class Conversation:
                 self._transcript.append(f"Assistant: {text}")
             self._model_buf.clear()
 
-    def _get_history(self) -> str:
-        """Return the conversation transcript, capped at ~4000 chars."""
+    async def _replay_history(self, session) -> None:
+        """Send prior conversation turns to restore context in a new session."""
         if not self._transcript:
-            return ""
-        full = "\n".join(self._transcript)
-        if len(full) > 4000:
-            full = "…" + full[-4000:]
-        return full
+            return
+        turns = []
+        for entry in self._transcript[-20:]:  # cap at last 20 turns
+            if entry.startswith("User: "):
+                turns.append(types.Content(
+                    role="user", parts=[types.Part(text=entry[6:])]
+                ))
+            elif entry.startswith("Assistant: "):
+                turns.append(types.Content(
+                    role="model", parts=[types.Part(text=entry[11:])]
+                ))
+        if turns:
+            log.info("Replaying %d history turns…", len(turns))
+            await session.send_client_content(turns=turns, turn_complete=False)
 
     # ── audio in ────────────────────────────────────────────────────────────
     async def _pump_mic(self, session, loop: asyncio.AbstractEventLoop) -> None:
@@ -278,13 +280,15 @@ class Conversation:
 
         try:
             while not self._ending and not watchdog.done():
-                config = build_config(self.settings, history=self._get_history())
+                config = build_config(self.settings)
                 log.info("Opening Gemini Live session… (history: %d turns)",
                          len(self._transcript))
                 try:
                     async with self.client.aio.live.connect(
                         model=self.settings.model, config=config
                     ) as session:
+                        await self._replay_history(session)
+
                         mic = asyncio.create_task(
                             self._pump_mic(session, loop), name="pump_mic"
                         )
