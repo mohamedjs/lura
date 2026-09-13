@@ -40,11 +40,11 @@ def build_config(settings: Settings) -> types.LiveConnectConfig:
 
 
 class Conversation:
-    """A single wake-to-idle exchange.
+    """A persistent voice conversation, wake-to-goodbye.
 
-    A Live session is not held open between invocations: the API caps session
-    length, and an idle socket for hours is a reconnect storm waiting to
-    happen. "Running all day" is the wake loop, not the session.
+    The Gemini Live server may close the WebSocket after each turn.  This
+    class auto-reconnects transparently so the user experiences one
+    uninterrupted session until they say "bye" or the hard time cap fires.
     """
 
     def __init__(self, settings: Settings, client: genai.Client):
@@ -219,33 +219,63 @@ class Conversation:
                 return
 
     async def run(self) -> None:
-        config = build_config(self.settings)
-        async with self.client.aio.live.connect(
-            model=self.settings.model, config=config
-        ) as session:
-            chunks: asyncio.Queue = asyncio.Queue()
-            loop = asyncio.get_running_loop()
+        chunks: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
 
-            tasks = [
-                asyncio.create_task(self._pump_mic(session, loop), name="pump_mic"),
-                asyncio.create_task(self._play(chunks), name="play"),
-                asyncio.create_task(self._receive(session, chunks), name="receive"),
-                asyncio.create_task(self._watchdog(), name="watchdog"),
-            ]
-            try:
-                # The watchdog is the only one expected to return; whichever
-                # finishes first ends the conversation.
-                done, pending = await asyncio.wait(
-                    tasks, return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in done:
-                    exc = task.exception() if not task.cancelled() else None
-                    log.info("Task '%s' finished first (exc=%s)", task.get_name(), exc)
-                    task.result()  # surface a real failure rather than hiding it
-            finally:
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
+        watchdog = asyncio.create_task(self._watchdog(), name="watchdog")
+        play_task = asyncio.create_task(self._play(chunks), name="play")
+
+        try:
+            while not self._ending and not watchdog.done():
+                config = build_config(self.settings)
+                log.info("Opening Gemini Live session…")
+                try:
+                    async with self.client.aio.live.connect(
+                        model=self.settings.model, config=config
+                    ) as session:
+                        mic = asyncio.create_task(
+                            self._pump_mic(session, loop), name="pump_mic"
+                        )
+                        recv = asyncio.create_task(
+                            self._receive(session, chunks), name="receive"
+                        )
+
+                        done, _ = await asyncio.wait(
+                            [mic, recv, watchdog],
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+
+                        mic.cancel()
+                        recv.cancel()
+                        await asyncio.gather(mic, recv, return_exceptions=True)
+
+                        if watchdog in done:
+                            break  # user said bye or hit time cap
+
+                        # Log why the session closed
+                        for t in done:
+                            exc = t.exception() if not t.cancelled() else None
+                            if exc:
+                                log.warning("Task '%s' failed: %s", t.get_name(), exc)
+                            else:
+                                log.info("Task '%s' completed, server closed session.",
+                                         t.get_name())
+
+                except Exception as exc:
+                    log.warning("Session error: %s", exc)
+
+                if self._ending or watchdog.done():
+                    break
+
+                # Reset state before transparent reconnect
+                self._speaking.clear()
+                log.info("Reconnecting in 1s…")
+                await asyncio.sleep(1)
+
+        finally:
+            watchdog.cancel()
+            play_task.cancel()
+            await asyncio.gather(watchdog, play_task, return_exceptions=True)
 
 
 async def probe(settings: Settings, client: genai.Client) -> str:
