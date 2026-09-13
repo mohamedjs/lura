@@ -19,6 +19,9 @@ OUT_BLOCK = 1200  # 50ms at 24kHz
 
 
 def build_config(settings: Settings) -> types.LiveConnectConfig:
+    from .tools import GEMINI_TOOLS, get_machine_context
+
+    system_instruction = f"{settings.system_instruction}\n{get_machine_context()}"
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -28,8 +31,9 @@ def build_config(settings: Settings) -> types.LiveConnectConfig:
             language_code=settings.language,
         ),
         system_instruction=types.Content(
-            parts=[types.Part(text=settings.system_instruction)]
+            parts=[types.Part(text=system_instruction)]
         ),
+        tools=GEMINI_TOOLS,
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
     )
@@ -47,6 +51,7 @@ class Conversation:
         self.settings = settings
         self.client = client
         self._speaking = asyncio.Event()
+        self._ending = False
         self._last_voice = time.monotonic()
         self._started = time.monotonic()
 
@@ -108,12 +113,66 @@ class Conversation:
             stream.close()
 
     # ── the session ─────────────────────────────────────────────────────────
+    async def _handle_tool_call(self, session, tool_call) -> None:
+        from .tools import open_application, run_command
+
+        responses = []
+        for fc in tool_call.function_calls:
+            name = fc.name
+            args = fc.args or {}
+            log.info("Gemini requested tool %s with args %s", name, args)
+
+            if name == "run_command":
+                cmd = args.get("command", "")
+                result = await asyncio.to_thread(run_command, cmd)
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": result},
+                    )
+                )
+            elif name == "open_application":
+                app = args.get("app_name", "")
+                result = await asyncio.to_thread(open_application, app)
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": result},
+                    )
+                )
+            elif name == "end_session":
+                self._ending = True
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": "Session ending now. Say a brief friendly goodbye."},
+                    )
+                )
+            else:
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"error": f"Unknown tool: {name}"},
+                    )
+                )
+
+        if responses:
+            self._last_voice = time.monotonic()
+            await session.send_tool_response(function_responses=responses)
+
     async def _receive(self, session, chunks: asyncio.Queue) -> None:
         async for message in session.receive():
             server = getattr(message, "server_content", None)
 
             if getattr(message, "data", None):
                 await chunks.put(message.data)
+
+            if getattr(message, "tool_call", None):
+                await self._handle_tool_call(session, message.tool_call)
 
             if server is not None:
                 if getattr(server, "input_transcription", None):
@@ -135,10 +194,13 @@ class Conversation:
                     await chunks.put(None)
 
     async def _watchdog(self) -> None:
-        """End the conversation on silence, or on the hard cap."""
+        """End the conversation on silence, explicit ending, or hard cap."""
         while True:
             await asyncio.sleep(0.5)
             now = time.monotonic()
+            if self._ending and not self._speaking.is_set():
+                log.info("Session ended by user request.")
+                return
             if now - self._started > self.settings.max_session_seconds:
                 log.info("Session hit its time cap.")
                 return

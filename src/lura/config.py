@@ -89,7 +89,7 @@ class Settings:
     min_utterance_seconds: float = 0.4
 
     # ── session limits ──────────────────────────────────────────────────────
-    idle_timeout: float = 12.0
+    idle_timeout: float = 180.0
     max_session_seconds: float = 600.0
 
     #: Mute the mic while the assistant speaks. See live.py for why.
