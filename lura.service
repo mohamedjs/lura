@@ -18,21 +18,13 @@ RestartPreventExitStatus=78
 ExecStartPre=/bin/sleep 3
 
 Environment=PYTHONUNBUFFERED=1
-# sounddevice finds PipeWire through the socket under XDG_RUNTIME_DIR; without
-# it the service sees no devices at all even though a terminal run works.
 Environment=XDG_RUNTIME_DIR=%t
+Environment=DISPLAY=:0
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+PassEnvironment=DISPLAY WAYLAND_DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS
 
-# It listens to a microphone all day: give it nothing it does not need.
-NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-# …except its own config and the wake-word model.
-ReadWritePaths=%h/.config/lura %h/.local/share/lura
-ProtectKernelTunables=yes
-ProtectControlGroups=yes
-RestrictNamespaces=yes
-RestrictRealtime=no
+ProtectHome=no
+ProtectSystem=no
 
 [Install]
 WantedBy=graphical-session.target

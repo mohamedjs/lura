@@ -107,7 +107,13 @@ class Conversation:
                     continue
                 self._speaking.set()
                 self._last_voice = time.monotonic()
-                await asyncio.to_thread(stream.write, chunk)
+                try:
+                    await asyncio.to_thread(stream.write, chunk)
+                except Exception as exc:
+                    log.warning("Audio playback write warning: %s", exc)
+        except Exception as exc:
+            log.exception("_play task failed: %s", exc)
+            raise
         finally:
             stream.stop()
             stream.close()
@@ -165,36 +171,42 @@ class Conversation:
             await session.send_tool_response(function_responses=responses)
 
     async def _receive(self, session, chunks: asyncio.Queue) -> None:
-        async for message in session.receive():
-            server = getattr(message, "server_content", None)
+        try:
+            async for message in session.receive():
+                server = getattr(message, "server_content", None)
 
-            if getattr(message, "data", None):
-                await chunks.put(message.data)
+                if getattr(message, "data", None):
+                    await chunks.put(message.data)
 
-            if getattr(message, "tool_call", None):
-                await self._handle_tool_call(session, message.tool_call)
+                if getattr(message, "tool_call", None):
+                    await self._handle_tool_call(session, message.tool_call)
 
-            if server is not None:
-                if getattr(server, "input_transcription", None):
-                    text = server.input_transcription.text
-                    if text:
-                        self._last_voice = time.monotonic()
-                        log.info("you: %s", text)
-                if getattr(server, "output_transcription", None):
-                    text = server.output_transcription.text
-                    if text:
-                        log.info("gemini: %s", text)
-                if getattr(server, "interrupted", False):
-                    # The model was cut off: drop whatever is still queued so
-                    # the old answer does not keep playing over the new one.
-                    while not chunks.empty():
-                        chunks.get_nowait()
-                    self._speaking.clear()
-                if getattr(server, "turn_complete", False):
-                    await chunks.put(None)
+                if server is not None:
+                    if getattr(server, "input_transcription", None):
+                        text = server.input_transcription.text
+                        if text:
+                            self._last_voice = time.monotonic()
+                            log.info("you: %s", text)
+                    if getattr(server, "output_transcription", None):
+                        text = server.output_transcription.text
+                        if text:
+                            log.info("gemini: %s", text)
+                    if getattr(server, "interrupted", False):
+                        # The model was cut off: drop whatever is still queued so
+                        # the old answer does not keep playing over the new one.
+                        while not chunks.empty():
+                            chunks.get_nowait()
+                        self._speaking.clear()
+                    if getattr(server, "turn_complete", False):
+                        await chunks.put(None)
+            log.info("session.receive() completed.")
+        except Exception as exc:
+            log.exception("_receive task failed: %s", exc)
+            raise
 
     async def _watchdog(self) -> None:
         """End the conversation on silence, explicit ending, or hard cap."""
+        log.info("Watchdog started (idle_timeout=%.1fs)", self.settings.idle_timeout)
         while True:
             await asyncio.sleep(0.5)
             now = time.monotonic()
@@ -219,10 +231,10 @@ class Conversation:
             loop = asyncio.get_running_loop()
 
             tasks = [
-                asyncio.create_task(self._pump_mic(session, loop)),
-                asyncio.create_task(self._play(chunks)),
-                asyncio.create_task(self._receive(session, chunks)),
-                asyncio.create_task(self._watchdog()),
+                asyncio.create_task(self._pump_mic(session, loop), name="pump_mic"),
+                asyncio.create_task(self._play(chunks), name="play"),
+                asyncio.create_task(self._receive(session, chunks), name="receive"),
+                asyncio.create_task(self._watchdog(), name="watchdog"),
             ]
             try:
                 # The watchdog is the only one expected to return; whichever
@@ -231,6 +243,8 @@ class Conversation:
                     tasks, return_when=asyncio.FIRST_COMPLETED
                 )
                 for task in done:
+                    exc = task.exception() if not task.cancelled() else None
+                    log.info("Task '%s' finished first (exc=%s)", task.get_name(), exc)
                     task.result()  # surface a real failure rather than hiding it
             finally:
                 for task in tasks:
