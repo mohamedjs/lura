@@ -45,12 +45,13 @@ def _gemini_client():
     return genai.Client(api_key=load_key("gemini"))
 
 
-def _converse(settings: Settings) -> None:
+def _converse(settings: Settings, overlay_state=None) -> None:
     """One exchange, on whichever provider is configured."""
     if settings.provider == "gemini":
         from .live import Conversation
 
-        asyncio.run(Conversation(settings, _gemini_client()).run())
+        asyncio.run(Conversation(settings, _gemini_client(),
+                                 overlay_state=overlay_state).run())
     else:
         from .openrouter import Conversation as ORConversation
 
@@ -330,15 +331,30 @@ def cmd_run(args) -> int:
     log.info("Ready. Say %r.  [%s / %s]", settings.wake_word,
              settings.provider, settings.model)
 
+    overlay = None
+    try:
+        from .overlay import OverlayState, State, start_overlay
+
+        overlay = OverlayState()
+        start_overlay(overlay)
+    except Exception as exc:
+        log.debug("Overlay not started: %s", exc)
+
     while not stop.is_set():
         try:
+            if overlay:
+                overlay.state = State.IDLE
             if not listener.listen(stop):
                 break
 
             log.info("Woken.")
+            if overlay:
+                overlay.state = State.LISTENING
             chime(rate=OUTPUT_RATE, device=settings.output_device, up=True)
 
-            _converse(settings)
+            _converse(settings, overlay_state=overlay)
+            if overlay:
+                overlay.state = State.IDLE
             chime(rate=OUTPUT_RATE, device=settings.output_device, up=False)
             listener.cooldown()
 
@@ -361,8 +377,18 @@ def cmd_say(args) -> int:
         log.error("%s", exc)
         return EXIT_NEEDS_SETUP
 
+    overlay = None
+    try:
+        from .overlay import OverlayState, State, start_overlay
+
+        overlay = OverlayState()
+        start_overlay(overlay)
+        overlay.state = State.LISTENING
+    except Exception:
+        pass
+
     log.info("Talking to %s (%s). Speak.", settings.provider, settings.model)
-    _converse(settings)
+    _converse(settings, overlay_state=overlay)
     return 0
 
 

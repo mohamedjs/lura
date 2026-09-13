@@ -39,6 +39,13 @@ say "Building the Python environment"
 [ -d "$VENV" ] || python3 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -e "$HERE"
+
+# Link system PyGObject into venv for the floating overlay GUI
+VENV_SP="$("$VENV/bin/python" -c "import site; print(site.getsitepackages()[0])" 2>/dev/null || true)"
+if [ -n "$VENV_SP" ] && [ -d "/usr/lib/python3/dist-packages/gi" ]; then
+  ln -sf "/usr/lib/python3/dist-packages/gi" "$VENV_SP/gi" 2>/dev/null || true
+fi
+
 echo "Installed into $VENV"
 
 # ── wake-word model ─────────────────────────────────────────────────────────

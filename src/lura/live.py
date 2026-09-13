@@ -47,17 +47,25 @@ class Conversation:
     uninterrupted session until they say "bye" or the hard time cap fires.
     """
 
-    def __init__(self, settings: Settings, client: genai.Client):
+    def __init__(self, settings: Settings, client: genai.Client,
+                 overlay_state=None):
         self.settings = settings
         self.client = client
         self._speaking = asyncio.Event()
         self._ending = False
         self._last_voice = time.monotonic()
         self._started = time.monotonic()
+        self._overlay = overlay_state
         # Conversation transcript for context across reconnections
         self._transcript: list[str] = []
         self._user_buf: list[str] = []
         self._model_buf: list[str] = []
+
+    def _set_overlay(self, state_name: str) -> None:
+        """Update the overlay state if an overlay is attached."""
+        if self._overlay is not None:
+            from .overlay import State
+            self._overlay.state = State(state_name)
 
     def _flush_user(self) -> None:
         """Finalize accumulated user speech fragments into the transcript."""
@@ -142,8 +150,10 @@ class Conversation:
                 chunk = await chunks.get()
                 if chunk is None:  # turn finished
                     self._speaking.clear()
+                    self._set_overlay("listening")
                     continue
                 self._speaking.set()
+                self._set_overlay("speaking")
                 self._last_voice = time.monotonic()
                 try:
                     await asyncio.to_thread(stream.write, chunk)
@@ -288,6 +298,7 @@ class Conversation:
                         model=self.settings.model, config=config
                     ) as session:
                         await self._replay_history(session)
+                        self._set_overlay("listening")
 
                         mic = asyncio.create_task(
                             self._pump_mic(session, loop), name="pump_mic"
@@ -325,10 +336,12 @@ class Conversation:
 
                 # Reset state before transparent reconnect
                 self._speaking.clear()
+                self._set_overlay("connecting")
                 log.info("Reconnecting in 1s…")
                 await asyncio.sleep(1)
 
         finally:
+            self._set_overlay("idle")
             watchdog.cancel()
             play_task.cancel()
             await asyncio.gather(watchdog, play_task, return_exceptions=True)
