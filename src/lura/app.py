@@ -48,7 +48,8 @@ def _gemini_client():
 _active_conv = None
 
 
-def _converse(settings: Settings, overlay_state=None, mcp_manager=None) -> None:
+def _converse(settings: Settings, overlay_state=None, mcp_manager=None,
+              initial_prompt: str | None = None) -> None:
     """One exchange, on whichever provider is configured."""
     global _active_conv
     if settings.provider == "gemini":
@@ -56,7 +57,8 @@ def _converse(settings: Settings, overlay_state=None, mcp_manager=None) -> None:
 
         conv = Conversation(settings, _gemini_client(),
                             overlay_state=overlay_state,
-                            mcp_manager=mcp_manager)
+                            mcp_manager=mcp_manager,
+                            initial_prompt=initial_prompt)
         _active_conv = conv
         try:
             asyncio.run(conv.run())
@@ -100,15 +102,12 @@ def cmd_logout(args) -> int:
 def cmd_config(args) -> int:
     """Show settings, or change one."""
     settings = Settings.load()
-
     if not args.name:
         print(f"# {SETTINGS_FILE}\n")
-        for field in fields(settings):
-            marker = " *" if field.name in ("provider", "gemini_model", "openrouter_model") else "  "
-            print(f"{marker} {field.name:26} {getattr(settings, field.name)!r}")
-        print(f"\n* the ones you are most likely to change")
-        print(f"\nkeys stored for: {', '.join(stored_providers()) or 'none'}")
-        print(f"active provider: {settings.provider}  ->  model {settings.model!r}")
+        for f in fields(settings):
+            marker = " *" if f.name in ("provider", "gemini_model", "openrouter_model") else "  "
+            print(f"{marker} {f.name:26} {getattr(settings, f.name)!r}")
+        print(f"\n* the ones you are most likely to change\nkeys stored for: {', '.join(stored_providers()) or 'none'}\nactive provider: {settings.provider}  ->  model {settings.model!r}")
         return 0
 
     if args.value is None:
@@ -117,100 +116,66 @@ def cmd_config(args) -> int:
 
     try:
         applied = settings.set(args.name, args.value)
-    except KeyError:
-        print(f"No such setting: {args.name}", file=sys.stderr)
-        print("Run `lura config` to see them all.", file=sys.stderr)
-        return 1
-    except ValueError as exc:
-        print(f"{exc}", file=sys.stderr)
+    except (KeyError, ValueError) as exc:
+        print(f"{exc}\nRun `lura config` to see them all.", file=sys.stderr)
         return 1
 
-    # Catch a mistyped model now rather than at the next wake word.
     if args.name == "openrouter_model":
         from .openrouter import model_exists
-
         ok, near = model_exists(applied)
         if not ok:
             print(f"Warning: no model {applied!r} on OpenRouter.", file=sys.stderr)
             if near:
-                print("Did you mean:", file=sys.stderr)
-                for candidate in near:
-                    print(f"  {candidate}", file=sys.stderr)
-            print("Saving anyway — fix it with `lura config openrouter_model <id>`.",
-                  file=sys.stderr)
+                print(f"Did you mean: {', '.join(near)}", file=sys.stderr)
+            print("Saving anyway — fix it with `lura config openrouter_model <id>`.", file=sys.stderr)
 
     settings.save()
-    print(f"{args.name} = {applied!r}")
-    print("Restart to apply:  systemctl --user restart lura")
+    print(f"{args.name} = {applied!r}\nRestart to apply:  systemctl --user restart lura")
     return 0
 
 
 def cmd_models(args) -> int:
     """List OpenRouter models, optionally filtered."""
     from .openrouter import list_models
-
     needle = (args.search or "").lower()
-    rows = []
-    for model in list_models():
-        if needle and needle not in model["id"].lower():
-            continue
-        arch = model.get("architecture", {}) or {}
-        rows.append((
-            model["id"],
-            ",".join(arch.get("input_modalities") or []),
-            ",".join(arch.get("output_modalities") or []),
-        ))
-
+    rows = [
+        (m["id"], ",".join((m.get("architecture") or {}).get("input_modalities") or []),
+         ",".join((m.get("architecture") or {}).get("output_modalities") or []))
+        for m in list_models() if not needle or needle in m["id"].lower()
+    ]
     if not rows:
         print(f"Nothing matching {args.search!r}.")
         return 1
-
-    for model_id, takes, gives in sorted(rows):
-        print(f"{model_id:58} in:{takes:28} out:{gives}")
-    print(f"\n{len(rows)} model(s).")
-    print("Use one:  lura config openrouter_model <id>")
+    for mid, takes, gives in sorted(rows):
+        print(f"{mid:58} in:{takes:28} out:{gives}")
+    print(f"\n{len(rows)} model(s).\nUse one:  lura config openrouter_model <id>")
     return 0
 
 
 def cmd_selftest(args) -> int:
     """Answer 'why isn't it working' for every layer, in order."""
     import sounddevice as sd
-
     from .wake import chime, rms_of
 
     settings = Settings.load()
     failures = 0
-
-    print(f"lura {__version__}")
-    print(f"provider: {settings.provider}   model: {settings.model}\n")
-
-    print("── audio devices ──")
+    print(f"lura {__version__}\nprovider: {settings.provider}   model: {settings.model}\n\n── audio devices ──")
     try:
         print(sd.query_devices())
-        default_in, default_out = sd.default.device
-        print(f"\ndefault input : {default_in}")
-        print(f"default output: {default_out}")
+        din, dout = sd.default.device
+        print(f"\ndefault input : {din}\ndefault output: {dout}")
     except Exception as exc:
         print(f"FAIL: cannot list audio devices: {exc}")
         return 1
 
-    print("\n── microphone (3s) ──")
-    print("Say something…")
+    print("\n── microphone (3s) ──\nSay something…")
     try:
-        recording = sd.rec(
-            int(3 * INPUT_RATE),
-            samplerate=INPUT_RATE,
-            channels=1,
-            dtype="int16",
-            device=settings.input_device,
-        )
+        rec = sd.rec(int(3 * INPUT_RATE), samplerate=INPUT_RATE, channels=1, dtype="int16", device=settings.input_device)
         sd.wait()
-        level = rms_of(recording.tobytes())
-        bar = "#" * min(40, int(level * 200))
-        print(f"level: {level:.4f} {bar}")
+        level = rms_of(rec.tobytes())
+        print(f"level: {level:.4f} {'#' * min(40, int(level * 200))}")
         if level < 0.001:
-            print("FAIL: silence. The mic is muted, or the wrong device is default.")
-            print("      Pick one above: lura config input_device <n>")
+            print("FAIL: silence. Mic muted or wrong device.\n      Pick one above: lura config input_device <n>")
             failures += 1
         else:
             print("OK")
@@ -245,23 +210,19 @@ def cmd_selftest(args) -> int:
         print(f"\n── gemini live ({settings.gemini_model}) ──")
         try:
             from .live import probe
-
             reply = asyncio.run(probe(settings, _gemini_client()))
             print(f"OK: model replied {reply!r}")
         except Exception as exc:
-            print(f"FAIL: {type(exc).__name__}: {exc}")
-            print("\nIf this says the model was not found, the preview id has been")
-            print("retired. Set a current one:")
-            print("  lura config gemini_model <id>")
+            print(f"FAIL: {type(exc).__name__}: {exc}\n\n"
+                  f"If this says the model was not found, the preview id has been retired.\n"
+                  f"  lura config gemini_model <id>")
             failures += 1
     else:
         from .openrouter import OpenRouterError, chat, check_key, model_exists
-
         print("\n── openrouter key ──")
         try:
             info = check_key(key)
-            limit = info.get("limit")
-            usage = info.get("usage")
+            limit, usage = info.get("limit"), info.get("usage")
             print(f"OK: label={info.get('label')!r} usage={usage} limit={limit}")
             if limit is not None and usage is not None and usage >= limit:
                 print("FAIL: this key is out of credit.")
@@ -275,8 +236,8 @@ def cmd_selftest(args) -> int:
         if ok:
             print("OK: model exists")
         else:
-            print(f"FAIL: no such model. Close matches: {', '.join(near) or 'none'}")
-            print("  lura config openrouter_model <id>")
+            print(f"FAIL: no such model. Close matches: {', '.join(near) or 'none'}\n"
+                  f"  lura config openrouter_model <id>")
             failures += 1
 
         print("\n── chat round-trip ──")
@@ -290,23 +251,44 @@ def cmd_selftest(args) -> int:
         print(f"\n── speech ({settings.openrouter_tts_model}) ──")
         try:
             from .openrouter import speak
-
             audio = speak(settings, key, "Test.")
             print(f"OK: {len(audio)} bytes of audio")
         except Exception as exc:
-            # TTS model ids are not in /models, so this call is the only check.
-            print(f"FAIL: {type(exc).__name__}: {exc}")
-            print("  lura config openrouter_tts_model <id>")
+            print(f"FAIL: {type(exc).__name__}: {exc}\n  lura config openrouter_tts_model <id>")
             failures += 1
 
     print("\n" + ("All good." if not failures else f"{failures} problem(s) above."))
     return 1 if failures else 0
 
 
+def _start_overlay():
+    try:
+        from .overlay import OverlayState, start_overlay
+        o = OverlayState()
+        start_overlay(o)
+        return o
+    except Exception as exc:
+        log.debug("Overlay not started: %s", exc)
+        return None
+
+
+def _start_mcp():
+    try:
+        from .mcp_client import MCP_CONFIG, MCPManager
+        if MCP_CONFIG.exists():
+            m = MCPManager(MCP_CONFIG)
+            m.start_all()
+            if m.servers:
+                log.info("Started %d MCP server(s)", len(m.servers))
+            return m
+    except Exception as exc:
+        log.warning("MCP start failed: %s", exc)
+    return None
+
+
 def cmd_run(args) -> int:
     """The daemon: wait for the wake word, converse, repeat."""
     settings = Settings.load()
-
     from .wake import WakeListener, chime
 
     try:
@@ -334,26 +316,27 @@ def cmd_run(args) -> int:
     log.info("Ready. Say %r.  [%s / %s]", settings.wake_word,
              settings.provider, settings.model)
 
-    overlay = None
+    overlay = _start_overlay()
+    mcp = _start_mcp()
+
+    from .overlay import State
     try:
-        from .overlay import OverlayState, State, start_overlay
-
-        overlay = OverlayState()
-        start_overlay(overlay)
+        from .briefing import (
+            build_briefing_prompt,
+            gather_briefing,
+            mark_briefing_done,
+            should_run_startup_briefing,
+        )
+        if should_run_startup_briefing():
+            log.info("Triggering initial boot briefing...")
+            mark_briefing_done()
+            b_data = gather_briefing(mcp)
+            prompt = build_briefing_prompt(b_data)
+            if overlay:
+                overlay.state = State.SPEAKING
+            _converse(settings, overlay_state=overlay, mcp_manager=mcp, initial_prompt=prompt)
     except Exception as exc:
-        log.debug("Overlay not started: %s", exc)
-
-    mcp = None
-    try:
-        from .mcp_client import MCP_CONFIG, MCPManager
-
-        if MCP_CONFIG.exists():
-            mcp = MCPManager(MCP_CONFIG)
-            mcp.start_all()
-            if mcp.servers:
-                log.info("Started %d MCP server(s)", len(mcp.servers))
-    except Exception as exc:
-        log.warning("MCP start failed: %s", exc)
+        log.warning("Boot briefing failed: %s", exc)
 
     try:
         while not stop.is_set():
@@ -385,6 +368,33 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_briefing(args) -> int:
+    """Trigger a voice system & weather briefing immediately."""
+    settings = Settings.load()
+    try:
+        load_key(settings.provider)
+    except MissingKeyError as exc:
+        log.error("%s", exc)
+        return EXIT_NEEDS_SETUP
+
+    overlay = _start_overlay()
+    if overlay:
+        from .overlay import State
+        overlay.state = State.SPEAKING
+    mcp = _start_mcp()
+
+    try:
+        from .briefing import build_briefing_prompt, gather_briefing
+        log.info("Gathering briefing data...")
+        b_data = gather_briefing(mcp)
+        prompt = build_briefing_prompt(b_data)
+        _converse(settings, overlay_state=overlay, mcp_manager=mcp, initial_prompt=prompt)
+    finally:
+        if mcp:
+            mcp.stop_all()
+    return 0
+
+
 def cmd_say(args) -> int:
     """Start a conversation now, without the wake word."""
     settings = Settings.load()
@@ -394,21 +404,11 @@ def cmd_say(args) -> int:
         log.error("%s", exc)
         return EXIT_NEEDS_SETUP
 
-    overlay, mcp = None, None
-    try:
-        from .overlay import OverlayState, State, start_overlay
-        overlay = OverlayState()
-        start_overlay(overlay)
+    overlay = _start_overlay()
+    if overlay:
+        from .overlay import State
         overlay.state = State.LISTENING
-    except Exception:
-        pass
-    try:
-        from .mcp_client import MCP_CONFIG, MCPManager
-        if MCP_CONFIG.exists():
-            mcp = MCPManager(MCP_CONFIG)
-            mcp.start_all()
-    except Exception:
-        pass
+    mcp = _start_mcp()
 
     log.info("Talking to %s (%s). Speak.", settings.provider, settings.model)
     try:
@@ -451,11 +451,8 @@ def main(argv=None) -> int:
     subs = parser.add_subparsers(dest="command")
 
     subs.add_parser("run", help="wait for the wake word (this is what the service runs)")
-
     login = subs.add_parser("login", help="store an API key")
-    login.add_argument("--provider", choices=PROVIDERS,
-                       help="default: whichever provider is active")
-
+    login.add_argument("--provider", choices=PROVIDERS, help="default: active provider")
     logout = subs.add_parser("logout", help="forget a stored API key")
     logout.add_argument("--provider", choices=PROVIDERS)
 
@@ -468,30 +465,23 @@ def main(argv=None) -> int:
 
     subs.add_parser("selftest", help="check audio, key and model end to end")
     subs.add_parser("say", help="talk now, skipping the wake word")
+    subs.add_parser("briefing", help="speak system & weather briefing now")
 
     mcp_p = subs.add_parser("mcp", help="list MCP tools or show config path")
     mcp_p.add_argument("action", nargs="?", choices=["list", "path"], default="list")
 
     args = parser.parse_args(argv)
-
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)-7s %(message)s",
         datefmt="%H:%M:%S",
     )
-
     handlers = {
-        "run": cmd_run,
-        "login": cmd_login,
-        "logout": cmd_logout,
-        "config": cmd_config,
-        "models": cmd_models,
-        "selftest": cmd_selftest,
-        "say": cmd_say,
-        "mcp": cmd_mcp,
+        "run": cmd_run, "login": cmd_login, "logout": cmd_logout,
+        "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest,
+        "say": cmd_say, "briefing": cmd_briefing, "mcp": cmd_mcp,
     }
-    handler = handlers.get(args.command or "run")
-    return handler(args)
+    return handlers.get(args.command or "run")(args)
 
 
 if __name__ == "__main__":

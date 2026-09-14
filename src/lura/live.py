@@ -60,9 +60,11 @@ class Conversation:
     """
 
     def __init__(self, settings: Settings, client: genai.Client,
-                 overlay_state=None, mcp_manager=None):
+                 overlay_state=None, mcp_manager=None,
+                 initial_prompt: str | None = None):
         self.settings = settings
         self.client = client
+        self.initial_prompt = initial_prompt
         self._speaking = asyncio.Event()
         self._tool_active = asyncio.Event()
         self._mic_blocks: asyncio.Queue[bytes] | None = None
@@ -229,6 +231,16 @@ class Conversation:
                         response={"output": result},
                     )
                 )
+            elif name == "get_system_briefing":
+                from .tools import get_system_briefing
+                result = await asyncio.to_thread(get_system_briefing)
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": result},
+                    )
+                )
             elif name == "end_session":
                 self._ending = True
                 responses.append(
@@ -364,6 +376,12 @@ class Conversation:
                         model=self.settings.model, config=config
                     ) as session:
                         self._set_overlay("listening")
+                        if self.initial_prompt:
+                            log.info("Dispatching initial prompt to Gemini...")
+                            self._tool_active.set()
+                            self._set_overlay("thinking")
+                            await session.send_realtime_input(text=self.initial_prompt)
+                            self.initial_prompt = None
 
                         mic = asyncio.create_task(
                             self._pump_mic(session, loop), name="pump_mic"

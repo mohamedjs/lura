@@ -192,6 +192,21 @@ def list_applications(running_only: bool = True) -> str:
     return "Running applications:\n" + ", ".join(active)
 
 
+def get_system_briefing() -> str:
+    """Return a full system briefing: weather, CPU temp, RAM, load, Internet, and GitHub commit."""
+    log.info("Executing tool get_system_briefing")
+    from .briefing import gather_briefing
+    data = gather_briefing()
+    return (
+        f"Weather: {data['weather']}\n"
+        f"CPU Temperature: {data['cpu_temp']}\n"
+        f"RAM: {data['ram']}\n"
+        f"CPU Status: {data['cpu_load']}\n"
+        f"Internet: {data['net']}\n"
+        f"Latest GitHub Commit: {data['github']}"
+    )
+
+
 GEMINI_TOOLS = [
     types.Tool(
         function_declarations=[
@@ -207,6 +222,14 @@ GEMINI_TOOLS = [
                         )
                     },
                     required=["command"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="get_system_briefing",
+                description="Get full system briefing: weather, CPU temperature, RAM usage, CPU load, internet status, and latest GitHub commit.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={},
                 ),
             ),
             types.FunctionDeclaration(
