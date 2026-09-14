@@ -18,12 +18,22 @@ IN_BLOCK = 800    # 50ms at 16kHz — small enough that barge-in stays responsiv
 OUT_BLOCK = 1200  # 50ms at 24kHz
 
 
-def build_config(settings: Settings, context_hint: str = "") -> types.LiveConnectConfig:
+def build_config(
+    settings: Settings,
+    context_hint: str = "",
+    extra_declarations: list[types.FunctionDeclaration] | None = None,
+) -> types.LiveConnectConfig:
     from .tools import GEMINI_TOOLS, get_machine_context
 
     system_instruction = f"{settings.system_instruction}\n{get_machine_context()}"
     if context_hint:
         system_instruction += context_hint
+
+    tools = list(GEMINI_TOOLS)
+    if extra_declarations:
+        base_decls = list(GEMINI_TOOLS[0].function_declarations or [])
+        tools = [types.Tool(function_declarations=base_decls + list(extra_declarations))]
+
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -35,7 +45,7 @@ def build_config(settings: Settings, context_hint: str = "") -> types.LiveConnec
         system_instruction=types.Content(
             parts=[types.Part(text=system_instruction)]
         ),
-        tools=GEMINI_TOOLS,
+        tools=tools,
         input_audio_transcription=types.AudioTranscriptionConfig(),
         output_audio_transcription=types.AudioTranscriptionConfig(),
     )
@@ -50,7 +60,7 @@ class Conversation:
     """
 
     def __init__(self, settings: Settings, client: genai.Client,
-                 overlay_state=None):
+                 overlay_state=None, mcp_manager=None):
         self.settings = settings
         self.client = client
         self._speaking = asyncio.Event()
@@ -58,6 +68,7 @@ class Conversation:
         self._last_voice = time.monotonic()
         self._started = time.monotonic()
         self._overlay = overlay_state
+        self._mcp = mcp_manager
         # Conversation transcript for context across reconnections
         self._transcript: list[str] = []
         self._user_buf: list[str] = []
@@ -68,6 +79,11 @@ class Conversation:
         if self._overlay is not None:
             from .overlay import State
             self._overlay.state = State(state_name)
+
+    def _set_overlay_transcript(self, text: str) -> None:
+        """Push transcript text to the overlay HUD."""
+        if self._overlay is not None:
+            self._overlay.transcript = text
 
     def _flush_user(self) -> None:
         """Finalize accumulated user speech fragments into the transcript."""
@@ -209,6 +225,15 @@ class Conversation:
                         response={"output": "Session ending now. Say a brief friendly goodbye."},
                     )
                 )
+            elif self._mcp and (name.startswith("mcp_") or name in getattr(self._mcp, "_tool_map", {})):
+                result = await asyncio.to_thread(self._mcp.call_tool, name, args)
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": result},
+                    )
+                )
             else:
                 responses.append(
                     types.FunctionResponse(
@@ -239,6 +264,7 @@ class Conversation:
                         if text:
                             self._last_voice = time.monotonic()
                             log.info("you: %s", text)
+                            self._set_overlay_transcript(f"You: {text}")
                             # New user speech → flush any pending model turn
                             if self._model_buf:
                                 self._flush_model()
@@ -247,6 +273,7 @@ class Conversation:
                         text = server.output_transcription.text
                         if text:
                             log.info("gemini: %s", text)
+                            self._set_overlay_transcript(f"Gemini: {text}")
                             # Model speaking → flush any pending user turn
                             if self._user_buf:
                                 self._flush_user()
@@ -300,10 +327,16 @@ class Conversation:
         watchdog = asyncio.create_task(self._watchdog(), name="watchdog")
         play_task = asyncio.create_task(self._play(chunks), name="play")
 
+        extra_decls = self._mcp.get_gemini_tools() if self._mcp else None
+        if extra_decls:
+            log.info("Loaded %d MCP tools for Gemini Live", len(extra_decls))
+
         try:
             while not self._ending and not watchdog.done():
                 config = build_config(
-                    self.settings, context_hint=self._get_context_hint()
+                    self.settings,
+                    context_hint=self._get_context_hint(),
+                    extra_declarations=extra_decls,
                 )
                 log.info("Opening Gemini Live session… (history: %d turns)",
                          len(self._transcript))

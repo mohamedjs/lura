@@ -45,13 +45,14 @@ def _gemini_client():
     return genai.Client(api_key=load_key("gemini"))
 
 
-def _converse(settings: Settings, overlay_state=None) -> None:
+def _converse(settings: Settings, overlay_state=None, mcp_manager=None) -> None:
     """One exchange, on whichever provider is configured."""
     if settings.provider == "gemini":
         from .live import Conversation
 
         asyncio.run(Conversation(settings, _gemini_client(),
-                                 overlay_state=overlay_state).run())
+                                 overlay_state=overlay_state,
+                                 mcp_manager=mcp_manager).run())
     else:
         from .openrouter import Conversation as ORConversation
 
@@ -340,29 +341,43 @@ def cmd_run(args) -> int:
     except Exception as exc:
         log.debug("Overlay not started: %s", exc)
 
-    while not stop.is_set():
-        try:
-            if overlay:
-                overlay.state = State.IDLE
-            if not listener.listen(stop):
-                break
+    mcp = None
+    try:
+        from .mcp_client import MCP_CONFIG, MCPManager
 
-            log.info("Woken.")
-            if overlay:
-                overlay.state = State.LISTENING
-            chime(rate=OUTPUT_RATE, device=settings.output_device, up=True)
+        if MCP_CONFIG.exists():
+            mcp = MCPManager(MCP_CONFIG)
+            mcp.start_all()
+            if mcp.servers:
+                log.info("Started %d MCP server(s)", len(mcp.servers))
+    except Exception as exc:
+        log.warning("MCP start failed: %s", exc)
 
-            _converse(settings, overlay_state=overlay)
-            if overlay:
-                overlay.state = State.IDLE
-            chime(rate=OUTPUT_RATE, device=settings.output_device, up=False)
-            listener.cooldown()
+    try:
+        while not stop.is_set():
+            try:
+                if overlay:
+                    overlay.state = State.IDLE
+                if not listener.listen(stop):
+                    break
 
-        except Exception as exc:
-            # One bad conversation must not take the daemon down: it is
-            # supposed to still be there tomorrow.
-            log.exception("Conversation failed: %s", exc)
-            time.sleep(2)
+                log.info("Woken.")
+                if overlay:
+                    overlay.state = State.LISTENING
+                chime(rate=OUTPUT_RATE, device=settings.output_device, up=True)
+
+                _converse(settings, overlay_state=overlay, mcp_manager=mcp)
+                if overlay:
+                    overlay.state = State.IDLE
+                chime(rate=OUTPUT_RATE, device=settings.output_device, up=False)
+                listener.cooldown()
+
+            except Exception as exc:
+                log.exception("Conversation failed: %s", exc)
+                time.sleep(2)
+    finally:
+        if mcp:
+            mcp.stop_all()
 
     log.info("Stopped.")
     return 0
@@ -377,18 +392,54 @@ def cmd_say(args) -> int:
         log.error("%s", exc)
         return EXIT_NEEDS_SETUP
 
-    overlay = None
+    overlay, mcp = None, None
     try:
         from .overlay import OverlayState, State, start_overlay
-
         overlay = OverlayState()
         start_overlay(overlay)
         overlay.state = State.LISTENING
     except Exception:
         pass
+    try:
+        from .mcp_client import MCP_CONFIG, MCPManager
+        if MCP_CONFIG.exists():
+            mcp = MCPManager(MCP_CONFIG)
+            mcp.start_all()
+    except Exception:
+        pass
 
     log.info("Talking to %s (%s). Speak.", settings.provider, settings.model)
-    _converse(settings, overlay_state=overlay)
+    try:
+        _converse(settings, overlay_state=overlay, mcp_manager=mcp)
+    finally:
+        if mcp:
+            mcp.stop_all()
+    return 0
+
+
+def cmd_mcp(args) -> int:
+    """Show or inspect MCP servers configuration."""
+    from .mcp_client import MCP_CONFIG, MCPManager
+
+    if getattr(args, "action", None) == "path":
+        print(MCP_CONFIG)
+        return 0
+
+    print(f"MCP config: {MCP_CONFIG}\n")
+    mgr = MCPManager(MCP_CONFIG)
+    servers = mgr.load_config().get("mcpServers", {})
+    if not servers:
+        print(f"No MCP servers configured yet. Edit {MCP_CONFIG} to add servers.")
+        return 0
+
+    for n, c in servers.items():
+        print(f"  • {n}: {c.get('command', '')} {' '.join(c.get('args', []))}")
+    mgr.start_all()
+    tools = mgr.get_gemini_tools()
+    print(f"\nAvailable tools ({len(tools)}):")
+    for t in tools:
+        print(f"  ✓ {t.name}: {t.description}")
+    mgr.stop_all()
     return 0
 
 
@@ -416,6 +467,9 @@ def main(argv=None) -> int:
     subs.add_parser("selftest", help="check audio, key and model end to end")
     subs.add_parser("say", help="talk now, skipping the wake word")
 
+    mcp_p = subs.add_parser("mcp", help="list MCP tools or show config path")
+    mcp_p.add_argument("action", nargs="?", choices=["list", "path"], default="list")
+
     args = parser.parse_args(argv)
 
     logging.basicConfig(
@@ -432,6 +486,7 @@ def main(argv=None) -> int:
         "models": cmd_models,
         "selftest": cmd_selftest,
         "say": cmd_say,
+        "mcp": cmd_mcp,
     }
     handler = handlers.get(args.command or "run")
     return handler(args)
