@@ -256,6 +256,7 @@ class Conversation:
                     await chunks.put(message.data)
 
                 if getattr(message, "tool_call", None):
+                    self._set_overlay("thinking")
                     await self._handle_tool_call(session, message.tool_call)
 
                 if server is not None:

@@ -1,17 +1,16 @@
-"""Dynamic Island HUD overlay — Cyberpunk AI Assistant Card (Exact Mockup Match).
+"""Lura Hologram Overlay — 3D Cyberpunk AI Wireframe Face.
 
-Floating at the top-center of each monitor with pure transparent corner clipping,
-featuring:
-- Header: '✦ LURA' title + activity waveform & settings icon buttons
-- Center: Holographic wireframe avatar with planetary orbital ring + 14 equalizer bars
-- Status: Illuminated pill chip with bright cyan LED dot
-- Prompt: 'Say "Lura" to activate' (or live conversation transcript)
-- Sparkle divider & bottom feature navigation bar (Chat | Think | Create | Explore)
+Floating in the top-right corner with zero chrome, border, or background.
+Supports three smoothly transitioned visual states:
+- Listening: Stable, gentle idle pulse/glow.
+- Thinking: Rotational 3D motion + data-processing glow animation through vertices.
+- Speaking: Audio-reactive wave/pulse animation across wireframe nodes.
 """
 
 from __future__ import annotations
 
 import enum
+import io
 import logging
 import math
 from pathlib import Path
@@ -19,31 +18,66 @@ import threading
 
 log = logging.getLogger(__name__)
 
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+# ── 3D Wireframe Face Model ──────────────────────────────────────────────────
+# 67 anatomical facial vertices centered at (0, 0, 0)
+VERTICES_3D: list[tuple[float, float, float]] = [
+    (0.0, -170.0, 3.8), (-35.0, -160.0, -4.8), (35.0, -160.0, -4.8), (-65.0, -136.0, -20.0),
+    (65.0, -136.0, -20.0), (0.0, -133.0, 24.4), (-40.0, -118.0, 22.1), (40.0, -118.0, 22.1),
+    (-88.0, -100.0, -20.0), (88.0, -100.0, -20.0), (0.0, -93.0, 41.1), (-25.0, -88.0, 40.0),
+    (25.0, -88.0, 40.0), (-55.0, -83.0, 30.1), (55.0, -83.0, 30.1), (-25.0, -66.0, 46.5),
+    (25.0, -66.0, 46.5), (0.0, -63.0, 49.7), (-55.0, -60.0, 37.6), (55.0, -60.0, 37.6),
+    (-100.0, -58.0, -20.0), (100.0, -58.0, -20.0), (-35.0, -52.0, 47.3), (35.0, -52.0, 47.3),
+    (-80.0, -48.0, 22.9), (80.0, -48.0, 22.9), (-18.0, -46.0, 45.9), (0.0, -46.0, 75.1),
+    (18.0, -46.0, 45.9), (-55.0, -43.0, 41.5), (55.0, -43.0, 41.5), (-35.0, -38.0, 49.8),
+    (35.0, -38.0, 49.8), (0.0, -18.0, 78.4), (-80.0, -13.0, 29.3), (80.0, -13.0, 29.3),
+    (-48.0, -8.0, 48.3), (48.0, -8.0, 48.3), (-16.0, 0.0, 56.1), (16.0, 0.0, 56.1),
+    (0.0, 4.0, 87.0), (0.0, 12.0, 86.7), (-35.0, 17.0, 52.0), (35.0, 17.0, 52.0),
+    (-70.0, 27.0, 35.5), (70.0, 27.0, 35.5), (0.0, 34.0, 70.9), (-20.0, 37.0, 69.0),
+    (20.0, 37.0, 69.0), (-35.0, 44.0, 48.8), (35.0, 44.0, 48.8), (-20.0, 48.0, 67.3),
+    (20.0, 48.0, 67.3), (0.0, 50.0, 68.4), (0.0, 64.0, 65.5), (-62.0, 67.0, 31.5),
+    (62.0, 67.0, 31.5), (-45.0, 102.0, 27.5), (45.0, 102.0, 27.5), (-18.0, 127.0, 39.4),
+    (18.0, 127.0, 39.4), (0.0, 132.0, 38.9), (-35.0, 137.0, 13.8), (35.0, 137.0, 13.8),
+    (-50.0, 167.0, -20.0), (50.0, 167.0, -20.0), (0.0, 170.0, 17.8),
+]
+
+# 138 connecting mesh edges
+EDGES: list[tuple[int, int]] = [
+    (0, 1), (0, 2), (1, 3), (2, 4), (3, 8), (4, 9), (8, 20), (9, 21), (20, 24), (21, 25),
+    (0, 5), (1, 6), (2, 7), (3, 6), (4, 7), (8, 13), (9, 14), (5, 1), (5, 2), (5, 6),
+    (5, 7), (5, 10), (6, 10), (7, 10), (6, 13), (7, 14), (13, 11), (14, 12), (10, 11),
+    (10, 12), (10, 17), (11, 17), (12, 17), (11, 15), (12, 16), (13, 18), (14, 19),
+    (17, 15), (17, 16), (15, 18), (16, 19), (18, 24), (19, 25), (15, 22), (18, 22),
+    (18, 29), (29, 22), (22, 26), (26, 31), (31, 29), (22, 31), (16, 23), (19, 23),
+    (19, 30), (30, 23), (23, 28), (28, 32), (32, 30), (23, 32), (17, 27), (15, 27),
+    (16, 27), (27, 26), (27, 28), (27, 33), (33, 40), (33, 38), (33, 39), (26, 38),
+    (28, 39), (38, 40), (39, 40), (40, 41), (38, 41), (39, 41), (31, 36), (32, 37),
+    (29, 34), (30, 35), (24, 34), (25, 35), (34, 36), (35, 37), (34, 44), (35, 45),
+    (36, 42), (37, 43), (38, 36), (39, 37), (38, 42), (39, 43), (42, 44), (43, 45),
+    (41, 46), (38, 47), (39, 48), (46, 47), (46, 48), (47, 49), (48, 50), (42, 49),
+    (43, 50), (49, 51), (50, 52), (53, 51), (53, 52), (46, 53), (47, 51), (48, 52),
+    (53, 54), (51, 54), (52, 54), (44, 55), (45, 56), (55, 49), (56, 50), (55, 57),
+    (56, 58), (57, 54), (58, 54), (57, 59), (58, 60), (59, 54), (60, 54), (59, 61),
+    (60, 61), (59, 62), (60, 63), (61, 62), (61, 63), (57, 64), (58, 65), (62, 64),
+    (63, 65), (62, 66), (63, 66), (64, 66), (65, 66),
+]
 
 
-# ── shared state ────────────────────────────────────────────────────────────
+# ── State Machine ────────────────────────────────────────────────────────────
 
 class State(enum.Enum):
-    IDLE = "idle"              # waiting for wake word
-    LISTENING = "listening"    # session open, user speaking
-    SPEAKING = "speaking"      # assistant is talking
-    CONNECTING = "connecting"  # reconnecting between turns
-
-
-_STATE_LABEL = {
-    State.IDLE:       "STANDBY",
-    State.LISTENING:  "LISTENING…",
-    State.SPEAKING:   "SPEAKING…",
-    State.CONNECTING: "CONNECTING…",
-}
+    LISTENING = "listening"    # Stable, gentle idle pulse/glow
+    THINKING = "thinking"      # Rotational or data-processing glow
+    SPEAKING = "speaking"      # Audio-reactive wave/pulse animation
+    # Backward compatibility aliases
+    IDLE = "idle"
+    CONNECTING = "connecting"
 
 
 class OverlayState:
-    """Thread-safe state + transcript, read by all overlay windows."""
+    """Thread-safe state container."""
 
     def __init__(self):
-        self._state = State.IDLE
+        self._state = State.LISTENING
         self._transcript = ""
         self._lock = threading.Lock()
 
@@ -53,11 +87,11 @@ class OverlayState:
             return self._state
 
     @state.setter
-    def state(self, value: State | str):
-        if isinstance(value, str):
-            value = State(value)
+    def state(self, val: State | str):
+        if isinstance(val, str):
+            val = State(val)
         with self._lock:
-            self._state = value
+            self._state = val
 
     @property
     def transcript(self) -> str:
@@ -65,24 +99,190 @@ class OverlayState:
             return self._transcript
 
     @transcript.setter
-    def transcript(self, value: str):
+    def transcript(self, val: str):
         with self._lock:
-            self._transcript = value[-120:] if len(value) > 120 else value
+            self._transcript = val
 
 
-# ── dimensions ──────────────────────────────────────────────────────────────
+class StateBlender:
+    """Smooth continuous interpolation between visual states."""
 
-ISLAND_W = 460
-ISLAND_H = 186
-AVATAR_SIZE = 56
-BARS_PER_SIDE = 7
-TOP_PADDING = 12
+    def __init__(self):
+        self.wl = 1.0  # listening weight
+        self.wt = 0.0  # thinking weight
+        self.ws = 0.0  # speaking weight
+
+    def update(self, target_st: State, dt: float = 0.04):
+        # Normalize alias states
+        if target_st in (State.IDLE, State.LISTENING):
+            tl, tt, ts = 1.0, 0.0, 0.0
+        elif target_st in (State.CONNECTING, State.THINKING):
+            tl, tt, ts = 0.0, 1.0, 0.0
+        else:  # SPEAKING
+            tl, tt, ts = 0.0, 0.0, 1.0
+
+        # Smooth exponential lerp (~300ms transition)
+        k = min(1.0, dt * 5.0)
+        self.wl += (tl - self.wl) * k
+        self.wt += (tt - self.wt) * k
+        self.ws += (ts - self.ws) * k
+
+        tot = self.wl + self.wt + self.ws
+        if tot > 0.001:
+            self.wl /= tot
+            self.wt /= tot
+            self.ws /= tot
 
 
-# ── GTK Cyber Card Window Builder ──────────────────────────────────────────
+# ── Dimensions & Placement ──────────────────────────────────────────────────
+
+OVERLAY_SIZE = 170
+MARGIN_RIGHT = 24
+MARGIN_TOP = 20
+
+
+# ── Cairo Procedural 3D Head Renderer ───────────────────────────────────────
+
+def _render_frame(t: float, blender: StateBlender, size: int = OVERLAY_SIZE) -> bytes:
+    """Render the 3D wireframe head frame to PNG bytes."""
+    import cairo
+
+    wl, wt, ws = blender.wl, blender.wt, blender.ws
+    surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
+    cr = cairo.Context(surface)
+    cr.set_operator(cairo.OPERATOR_CLEAR)
+    cr.paint()
+    cr.set_operator(cairo.OPERATOR_OVER)
+
+    cx, cy = size / 2.0, size / 2.0
+    dist = 310.0
+
+    # 1. State-specific orientations & parameters
+    # Listening: stable, gentle idle pulse
+    theta_y_l = 0.04 * math.sin(t * 0.8)
+    theta_x_l = 0.02 * math.cos(t * 0.6)
+    scale_l = 1.0 + 0.03 * math.sin(t * 2.0)
+    pulse_l = 0.7 + 0.3 * math.sin(t * 2.0)
+
+    # Thinking: continuous 3D rotational motion + vertical data-scan sweep
+    theta_y_t = 0.72 * math.sin(t * 1.5)
+    theta_x_t = 0.12 * math.cos(t * 1.1)
+    scan_y = -170.0 + 340.0 * ((t * 0.75) % 1.0)
+
+    # Speaking: organic head tilts + audio-reactive ripple wave
+    theta_y_s = 0.07 * math.sin(t * 2.4)
+    theta_x_s = 0.04 * math.sin(t * 3.0)
+
+    # Blended rotation & base scale
+    rot_y = wl * theta_y_l + wt * theta_y_t + ws * theta_y_s
+    rot_x = wl * theta_x_l + wt * theta_x_t + ws * theta_x_s
+    base_scale = 0.37 * (wl * scale_l + wt * 1.0 + ws * 1.0)
+
+    cos_y, sin_y = math.cos(rot_y), math.sin(rot_y)
+    cos_x, sin_x = math.cos(rot_x), math.sin(rot_x)
+
+    # Ambient center bloom
+    if wl > 0.05 or ws > 0.05:
+        pat = cairo.RadialGradient(cx, cy, 5, cx, cy, 70)
+        alpha_b = (0.07 * pulse_l * wl) + (0.10 * ws)
+        pat.add_color_stop_rgba(0.0, 0.0, 0.85, 1.0, alpha_b)
+        pat.add_color_stop_rgba(1.0, 0.0, 0.2, 0.8, 0.0)
+        cr.set_source(pat)
+        cr.arc(cx, cy, 70, 0, 6.283)
+        cr.fill()
+
+    # 2. Transform 3D Vertices
+    proj: list[tuple[float, float, float]] = []
+    node_glow: list[float] = []
+    node_radii: list[float] = []
+
+    for x, y, z in VERTICES_3D:
+        # Speaking: wave ripples outward from mouth center (0, 48, 68)
+        dist_m = math.sqrt(x * x + (y - 48.0) ** 2 + (z - 68.0) ** 2)
+        wave = math.sin(dist_m * 0.07 - t * 9.0)
+
+        # Displacements
+        dx = ws * (2.8 * wave * (x / 100.0))
+        dy = ws * (3.2 * wave * ((y - 48.0) / 100.0))
+        dz = ws * (4.0 * wave)
+
+        # Mouth opening cadence during speech
+        if abs(x) < 25 and 30 < y < 70:
+            dy += ws * (2.5 * abs(math.sin(t * 7.5)))
+
+        vx, vy, vz = x + dx, y + dy, z + dz
+
+        # Rotate around Y then X
+        rx = vx * cos_y + vz * sin_y
+        rz = -vx * sin_y + vz * cos_y
+        ry = vy * cos_x - rz * sin_x
+        rz = vy * sin_x + rz * cos_x
+
+        # Perspective projection
+        factor = dist / (dist - rz)
+        px = cx + rx * factor * base_scale
+        py = cy + ry * factor * base_scale
+        proj.append((px, py, rz))
+
+        # Thinking data scan glow
+        d_scan = abs(y - scan_y)
+        scan_glow = wt * max(0.0, 1.0 - d_scan / 38.0)
+        node_glow.append(scan_glow)
+
+        # Node radius modulation
+        r_base = 1.7
+        r_pulse = ws * (1.8 * max(0.0, wave)) + wt * (2.0 * scan_glow) + wl * (0.4 * math.sin(t * 2.0))
+        node_radii.append(max(1.2, r_base + r_pulse))
+
+    # 3. Draw Wireframe Edges
+    cr.set_line_width(1.2 + 0.3 * ws)
+    for i1, i2 in EDGES:
+        p1, p2 = proj[i1], proj[i2]
+        avg_z = (p1[2] + p2[2]) / 2.0
+        base_alpha = max(0.16, min(0.92, 0.48 + avg_z / 150.0))
+        e_glow = max(node_glow[i1], node_glow[i2])
+
+        # State color blending
+        r = wl * 0.0 + wt * (0.2 + 0.8 * e_glow) + ws * 0.0
+        g = wl * 0.85 + wt * (0.75 + 0.25 * e_glow) + ws * 1.0
+        b = wl * 1.0 + wt * 1.0 + ws * 0.8
+        alpha = min(1.0, base_alpha + e_glow * 0.5)
+
+        cr.set_source_rgba(r, g, b, alpha)
+        cr.move_to(p1[0], p1[1])
+        cr.line_to(p2[0], p2[1])
+        cr.stroke()
+
+    # 4. Draw Wireframe Nodes (Vertices)
+    for i, (px, py, rz) in enumerate(proj):
+        nr = node_radii[i]
+        glow = node_glow[i]
+        depth_alpha = max(0.25, min(1.0, 0.60 + rz / 130.0))
+
+        # Glowing Aura
+        if glow > 0.08 or ws > 0.3:
+            aura_alpha = (glow * 0.6 * wt) + (0.35 * ws)
+            cr.set_source_rgba(0.0, 0.95, 1.0, aura_alpha)
+            cr.arc(px, py, nr * 2.2, 0, 6.283)
+            cr.fill()
+
+        # Core node
+        cr_r = wl * 0.85 + wt * (0.85 + 0.15 * glow) + ws * 0.70
+        cr_g = wl * 0.95 + wt * 0.95 + ws * 1.00
+        cr_b = wl * 1.00 + wt * 1.00 + ws * 0.90
+        cr.set_source_rgba(cr_r, cr_g, cr_b, depth_alpha)
+        cr.arc(px, py, nr, 0, 6.283)
+        cr.fill()
+
+    bio = io.BytesIO()
+    surface.write_to_png(bio)
+    return bio.getvalue()
+
+
+# ── GTK Window Builder ──────────────────────────────────────────────────────
 
 def _build_monitor_window(monitor, shared: OverlayState):
-    """Create a Cyberpunk HUD card window matching the mockup exactly."""
+    """Build a transparent floating window in the top-right corner."""
     import gi
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
@@ -90,363 +290,81 @@ def _build_monitor_window(monitor, shared: OverlayState):
     from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
     win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-    win.set_title("Lura Cyber HUD")
+    win.set_title("Lura Hologram")
     win.set_decorated(False)
     win.set_resizable(False)
     win.set_keep_above(True)
-    win.stick()                        # visible across all workspaces
+    win.stick()
     win.set_skip_taskbar_hint(True)
     win.set_skip_pager_hint(True)
-    win.set_accept_focus(False)         # never steal keyboard focus
-    win.set_default_size(ISLAND_W, ISLAND_H)
+    win.set_accept_focus(False)
+    win.set_default_size(OVERLAY_SIZE, OVERLAY_SIZE)
     win.set_type_hint(Gdk.WindowTypeHint.DOCK)
+    win.set_app_paintable(True)
 
-    # Enable RGBA visual and cairo transparent background clearing
     screen = win.get_screen()
     visual = screen.get_rgba_visual()
     if visual:
         win.set_visual(visual)
-    win.set_app_paintable(True)
-    win.get_style_context().add_class("cyber-window")
 
-    # Center horizontally on this monitor's workarea
+    # Position in top-right corner of this monitor's work area
     wa = monitor.get_workarea()
     scale = monitor.get_scale_factor()
-    x = wa.x + ((wa.width // scale) - ISLAND_W) // 2
-    y = wa.y + TOP_PADDING
+    x = wa.x + (wa.width // scale) - OVERLAY_SIZE - MARGIN_RIGHT
+    y = wa.y + MARGIN_TOP
     win.move(x, y)
 
-    # Main Card Container
-    card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-    card.get_style_context().add_class("cyber-card")
-    card.set_size_request(ISLAND_W, ISLAND_H)
-
-    # ── 1. Header: '✦ LURA' + Action Buttons (∿, ⚙) ──
-    header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-    header.get_style_context().add_class("header-row")
-
-    title_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    sparkle = Gtk.Label(label="✦")
-    sparkle.get_style_context().add_class("header-sparkle")
-    title_lbl = Gtk.Label(label="LURA")
-    title_lbl.get_style_context().add_class("header-title")
-    title_box.pack_start(sparkle, False, False, 0)
-    title_box.pack_start(title_lbl, False, False, 0)
-    header.pack_start(title_box, True, True, 0)
-
-    btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    wave_btn = Gtk.Label(label="∿")
-    wave_btn.get_style_context().add_class("header-btn")
-    gear_btn = Gtk.Label(label="⚙")
-    gear_btn.get_style_context().add_class("header-btn")
-    btn_box.pack_start(wave_btn, False, False, 0)
-    btn_box.pack_start(gear_btn, False, False, 0)
-    header.pack_start(btn_box, False, False, 0)
-
-    card.pack_start(header, False, False, 0)
-
-    # ── 2. Mid: Left Wave Bars | Orbital Avatar Ring | Right Wave Bars ──
-    mid_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
-    mid_row.set_halign(Gtk.Align.CENTER)
-    mid_row.set_valign(Gtk.Align.CENTER)
-
-    # Left equalizer wave bars (7 bars)
-    left_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-    left_wave_box.set_valign(Gtk.Align.CENTER)
-    left_bars = []
-    for _ in range(BARS_PER_SIDE):
-        bar = Gtk.Box()
-        bar.get_style_context().add_class("wave-bar")
-        bar.set_size_request(3, 16)
-        left_wave_box.pack_start(bar, False, False, 0)
-        left_bars.append(bar)
-    mid_row.pack_start(left_wave_box, False, False, 0)
-
-    # Center Avatar Ring
-    avatar_outer = Gtk.Box()
-    avatar_outer.get_style_context().add_class("avatar-ring-outer")
-    avatar_inner = Gtk.Box()
-    avatar_inner.get_style_context().add_class("avatar-ring-inner")
-
-    pix_cache = {}
-    for st_val, svg_name in [
-        (State.IDLE, "head_loading.svg"),
-        (State.LISTENING, "head_listening.svg"),
-        (State.SPEAKING, "head_speaking.svg"),
-        (State.CONNECTING, "head_loading.svg"),
-    ]:
-        p = ASSETS_DIR / svg_name
-        if p.exists():
-            try:
-                pix_cache[st_val] = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                    str(p), AVATAR_SIZE, AVATAR_SIZE, True
-                )
-            except Exception:
-                pass
-
-    initial_pix = pix_cache.get(State.IDLE)
-    avatar_img = None
-    if initial_pix:
-        avatar_img = Gtk.Image.new_from_pixbuf(initial_pix)
-        avatar_inner.add(avatar_img)
-    else:
-        fallback_orb = Gtk.Box()
-        fallback_orb.set_size_request(AVATAR_SIZE, AVATAR_SIZE)
-        avatar_inner.add(fallback_orb)
-
-    avatar_outer.add(avatar_inner)
-    mid_row.pack_start(avatar_outer, False, False, 0)
-
-    # Right equalizer wave bars (7 bars)
-    right_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-    right_wave_box.set_valign(Gtk.Align.CENTER)
-    right_bars = []
-    for _ in range(BARS_PER_SIDE):
-        bar = Gtk.Box()
-        bar.get_style_context().add_class("wave-bar")
-        bar.set_size_request(3, 16)
-        right_wave_box.pack_start(bar, False, False, 0)
-        right_bars.append(bar)
-    mid_row.pack_start(right_wave_box, False, False, 0)
-
-    card.pack_start(mid_row, False, False, 0)
-
-    # ── 3. Pill Status Badge (● STANDBY) ──
-    pill = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    pill.set_halign(Gtk.Align.CENTER)
-    pill.get_style_context().add_class("status-pill")
-
-    dot = Gtk.Label(label="●")
-    dot.get_style_context().add_class("status-dot")
-    status_lbl = Gtk.Label(label="STANDBY")
-    status_lbl.get_style_context().add_class("status-text")
-
-    pill.pack_start(dot, False, False, 0)
-    pill.pack_start(status_lbl, False, False, 0)
-    card.pack_start(pill, False, False, 0)
-
-    # ── 4. Subtitle: 'Say "Lura" to activate' / Live transcript ──
-    sub_lbl = Gtk.Label(label='Say "Lura" to activate')
-    sub_lbl.set_halign(Gtk.Align.CENTER)
-    sub_lbl.set_max_width_chars(44)
-    sub_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-    sub_lbl.get_style_context().add_class("subtitle-text")
-    card.pack_start(sub_lbl, False, False, 0)
-
-    # ── 5. Star Sparkle Divider ──
-    div_lbl = Gtk.Label(label="──────────  ✦  ──────────")
-    div_lbl.set_halign(Gtk.Align.CENTER)
-    div_lbl.get_style_context().add_class("sparkle-divider")
-    card.pack_start(div_lbl, False, False, 0)
-
-    # ── 6. Bottom Feature Bar (Chat | Think | Create | Explore) ──
-    nav_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-    nav_box.set_halign(Gtk.Align.CENTER)
-    nav_box.get_style_context().add_class("nav-bar")
-
-    for idx, (icon, name) in enumerate([
-        ("💬", "Chat"),
-        ("💡", "Think"),
-        ("✦", "Create"),
-        ("🌐", "Explore"),
-    ]):
-        if idx > 0:
-            sep = Gtk.Label(label="│")
-            sep.get_style_context().add_class("nav-sep")
-            nav_box.pack_start(sep, False, False, 0)
-        item = Gtk.Label(label=f"{icon} {name}")
-        item.get_style_context().add_class("nav-item")
-        nav_box.pack_start(item, False, False, 0)
-
-    card.pack_start(nav_box, False, False, 0)
-
-    win.add(card)
-
+    # Completely transparent window CSS
     css_provider = Gtk.CssProvider()
+    css = b"""
+    window, window.background, .cyber-window {
+        background-color: rgba(0, 0, 0, 0);
+        background: none;
+        border: none;
+        box-shadow: none;
+    }
+    """
+    css_provider.load_from_data(css)
     Gtk.StyleContext.add_provider_for_screen(
         screen, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 
+    # Draggable image container
+    ev = Gtk.EventBox()
+    ev.set_visible_window(False)
+    ev.connect(
+        "button-press-event",
+        lambda w, e: win.begin_move_drag(e.button, int(e.x_root), int(e.y_root), e.time)
+        if e.button == 1 else None,
+    )
+
+    img = Gtk.Image()
+    ev.add(img)
+    win.add(ev)
+
+    blender = StateBlender()
     phase = [0.0]
-    prev_transcript = [""]
-    prev_state = [None]
-    all_bars = left_bars + right_bars
 
     def _tick():
-        st = shared.state
-        phase[0] += 0.08
-        p = phase[0]
-
-        # Swap vector hologram avatar on state change
-        if st != prev_state[0]:
-            prev_state[0] = st
-            if avatar_img and st in pix_cache:
-                GLib.idle_add(avatar_img.set_from_pixbuf, pix_cache[st])
-
-        # Update transcript
-        t = shared.transcript
-        if t != prev_transcript[0]:
-            prev_transcript[0] = t
-            GLib.idle_add(sub_lbl.set_text, t or 'Say "Lura" to activate')
-
-        # Update status text
-        GLib.idle_add(status_lbl.set_text, _STATE_LABEL.get(st, "STANDBY"))
-
-        # Dynamic state colors & wave bars
-        if st == State.IDLE:
-            cyan = "#00d8ff"
-            glow_c = "rgba(0, 216, 255, 0.85)"
-            outer_ring_glow = f"0 0 {int(18 + 5*math.sin(p*0.7))}px rgba(0, 216, 255, 0.85), inset 0 0 10px rgba(0, 180, 255, 0.45)"
-            bar_color = "#00d8ff"
-            envelope = [8, 14, 22, 28, 22, 14, 8]
-            for i, b in enumerate(left_bars):
-                h = int(envelope[i] + 4 * abs(math.sin(p * 0.8 + i * 0.5)))
-                b.set_size_request(3, h)
-            for i, b in enumerate(right_bars):
-                h = int(envelope[6 - i] + 4 * abs(math.sin(p * 0.8 + (6 - i) * 0.5)))
-                b.set_size_request(3, h)
-
-        elif st == State.LISTENING:
-            cyan = "#00f5ff"
-            glow_c = "rgba(0, 245, 255, 0.95)"
-            outer_ring_glow = f"0 0 {int(26 + 8*math.sin(p*2.0))}px rgba(0, 245, 255, 0.95), 0 0 42px rgba(0, 140, 255, 0.6), inset 0 0 14px rgba(0, 220, 255, 0.6)"
-            bar_color = "#00ffff"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 6.5)
-                h = int(10 + 26 * abs(math.sin(p * 2.4 + dist * 0.7)))
-                b.set_size_request(3, h)
-
-        elif st == State.SPEAKING:
-            cyan = "#00ff9d"
-            glow_c = "rgba(0, 255, 157, 0.95)"
-            outer_ring_glow = f"0 0 {int(28 + 10*math.sin(p*2.8))}px rgba(0, 255, 157, 0.95), 0 0 42px rgba(16, 185, 129, 0.6), inset 0 0 14px rgba(0, 255, 157, 0.6)"
-            bar_color = "#00ff9d"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 6.5)
-                h = int(12 + 30 * abs(math.sin(p * 3.2 + dist * 0.9)))
-                b.set_size_request(3, h)
-
-        else:  # CONNECTING
-            cyan = "#fbbf24"
-            glow_c = "rgba(251, 191, 36, 0.85)"
-            outer_ring_glow = f"0 0 {int(18 + 6*math.sin(p*2.0))}px rgba(251, 191, 36, 0.85), inset 0 0 10px rgba(251, 191, 36, 0.4)"
-            bar_color = "#fbbf24"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 6.5)
-                h = int(8 + 14 * abs(math.sin(p * 1.8 + dist * 0.6)))
-                b.set_size_request(3, h)
-
-        css = f"""
-        window, window.background, .cyber-window {{
-            background-color: rgba(0, 0, 0, 0);
-            background: none;
-            border: none;
-            box-shadow: none;
-        }}
-        .cyber-card {{
-            margin: 6px;
-            background: linear-gradient(180deg, #071228 0%, #030816 100%);
-            border: 2px solid {cyan};
-            border-radius: 24px;
-            box-shadow: 0 0 26px {glow_c},
-                        inset 0 0 22px rgba(0, 120, 255, 0.25),
-                        0 20px 45px rgba(0, 0, 0, 0.95);
-            padding: 10px 18px 8px 18px;
-        }}
-        .header-row {{
-            padding: 0 4px;
-        }}
-        .header-sparkle {{
-            color: {cyan};
-            font-size: 11px;
-            text-shadow: 0 0 8px {cyan};
-        }}
-        .header-title {{
-            color: #ffffff;
-            font-family: system-ui, -apple-system, sans-serif;
-            font-size: 11px;
-            font-weight: bold;
-            letter-spacing: 2.5px;
-        }}
-        .header-btn {{
-            color: {cyan};
-            background: rgba(0, 100, 200, 0.25);
-            border: 1px solid rgba(0, 200, 255, 0.45);
-            border-radius: 50%;
-            font-size: 11px;
-            padding: 2px 7px;
-        }}
-        .avatar-ring-outer {{
-            border-radius: 50%;
-            border: 2px solid {cyan};
-            background: radial-gradient(circle, rgba(0, 100, 200, 0.4) 0%, rgba(2, 6, 16, 0.85) 100%);
-            box-shadow: {outer_ring_glow};
-            padding: 3px;
-        }}
-        .avatar-ring-inner {{
-            border-radius: 50%;
-            border: 1px solid rgba(255, 255, 255, 0.45);
-            padding: 2px;
-        }}
-        .wave-bar {{
-            background: {bar_color};
-            border-radius: 2px;
-            box-shadow: 0 0 8px {bar_color};
-        }}
-        .status-pill {{
-            border-radius: 18px;
-            border: 1.5px solid {cyan};
-            background: rgba(4, 10, 24, 0.9);
-            box-shadow: 0 0 14px {glow_c};
-            padding: 3px 22px;
-        }}
-        .status-dot {{
-            color: #00ffcc;
-            font-size: 12px;
-            text-shadow: 0 0 10px #00ffcc;
-        }}
-        .status-text {{
-            color: #ffffff;
-            font-family: monospace, sans-serif;
-            font-size: 12px;
-            font-weight: bold;
-            letter-spacing: 3px;
-        }}
-        .subtitle-text {{
-            color: #b8d2f4;
-            font-family: system-ui, -apple-system, sans-serif;
-            font-size: 11px;
-            font-weight: 500;
-        }}
-        .sparkle-divider {{
-            color: rgba(0, 180, 255, 0.35);
-            font-size: 9px;
-            letter-spacing: 1px;
-        }}
-        .nav-bar {{
-            padding-bottom: 2px;
-        }}
-        .nav-item {{
-            color: rgba(185, 210, 245, 0.8);
-            font-family: system-ui, -apple-system, sans-serif;
-            font-size: 10px;
-        }}
-        .nav-sep {{
-            color: rgba(0, 150, 255, 0.3);
-            font-size: 9px;
-        }}
-        """
-        css_provider.load_from_data(css.encode("utf-8"))
+        blender.update(shared.state, dt=0.04)
+        phase[0] += 0.04
+        png_data = _render_frame(phase[0], blender, size=OVERLAY_SIZE)
+        loader = GdkPixbuf.PixbufLoader.new_with_type("png")
+        loader.write(png_data)
+        loader.close()
+        pix = loader.get_pixbuf()
+        if pix:
+            GLib.idle_add(img.set_from_pixbuf, pix)
         return True
 
-    GLib.timeout_add(40, _tick)  # 25 fps smooth animations
+    GLib.timeout_add(40, _tick)  # 25 FPS animation loop
     return win
 
 
-# ── public API ──────────────────────────────────────────────────────────────
+# ── Public API ──────────────────────────────────────────────────────────────
 
 def start_overlay(shared: OverlayState) -> threading.Thread | None:
-    """Start the overlay on all active monitors in a daemon thread."""
+    """Start the hologram on all active monitors in a daemon thread."""
 
     def _run():
         try:
@@ -457,7 +375,7 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
 
             display = Gdk.Display.get_default()
             if not display or display.get_n_monitors() == 0:
-                log.warning("No display or monitors found for overlay.")
+                log.warning("No display found for hologram overlay.")
                 return
 
             windows = []
@@ -467,10 +385,10 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
                 win.show_all()
                 windows.append(win)
 
-            log.info("Lura Cyber UI running on %d monitor(s) (top-center).", len(windows))
+            log.info("Lura Hologram running on %d monitor(s) (top-right corner).", len(windows))
             Gtk.main()
         except Exception:
-            log.warning("Overlay unavailable — running headless.", exc_info=True)
+            log.warning("Hologram overlay unavailable — running headless.", exc_info=True)
 
     try:
         import gi
@@ -478,7 +396,7 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
         gi.require_version("Gtk", "3.0")
         from gi.repository import Gdk, Gtk  # noqa: F401
     except Exception:
-        log.info("GTK3 not importable — overlay disabled.")
+        log.info("GTK3 not available — overlay disabled.")
         return None
 
     t = threading.Thread(target=_run, daemon=True, name="overlay")
