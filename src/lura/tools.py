@@ -49,8 +49,9 @@ def get_machine_context() -> str:
         f"- Working Directory: {cwd}\n"
         f"- User scripts in ~/.local/bin: {scripts_str}\n"
         f"- Common search paths for applications: {local_bin}, /usr/local/bin, /usr/bin\n"
-        f"You have tools to execute commands (`run_command`), launch applications (`open_application`), "
-        f"and end the session (`end_session`). Use them when asked."
+        f"You have tools: `run_command` (run shell commands), `list_applications` (list running or installed apps), "
+        f"`open_application` (launch apps), and `end_session` (dismiss/exit).\n"
+        f"IMPORTANT: Call the tool immediately when asked — never narrate or explain that you are about to run a command."
     )
 
 
@@ -142,12 +143,61 @@ def open_application(app_name: str) -> str:
     )
 
 
+def list_applications(running_only: bool = True) -> str:
+    """List running user desktop applications or all installed applications."""
+    log.info("Executing tool list_applications: running_only=%s", running_only)
+    desktop_dirs = [
+        Path.home() / ".local/share/applications",
+        Path("/usr/share/applications"),
+    ]
+    installed: dict[str, str] = {}
+    for d in desktop_dirs:
+        if d.exists():
+            for f in d.glob("*.desktop"):
+                installed[f.stem.lower()] = f.stem
+
+    if not running_only:
+        names = sorted(list(set(installed.values())))[:50]
+        return "Installed desktop applications:\n" + ", ".join(names)
+
+    # Running user processes
+    try:
+        user = getpass.getuser()
+        res = subprocess.run(
+            ["ps", "-u", user, "-o", "comm="],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        procs = set(res.stdout.splitlines())
+    except Exception as exc:
+        return f"Error checking processes: {exc}"
+
+    skip_terms = {
+        "daemon", "portal", "proxy", "service", "helper", "pam", "sh",
+        "bash", "zsh", "cat", "sort", "ps", "grep", "gsd-", "gvfs",
+        "ibus", "at-spi", "pipewire", "wireplumber", "indicator", "dconf",
+    }
+    active = []
+    for p in procs:
+        p_clean = p.strip().lower()
+        if not p_clean or any(k in p_clean for k in skip_terms):
+            continue
+        if p_clean in installed or any(p_clean in inst for inst in installed):
+            active.append(installed.get(p_clean, p.strip()))
+
+    active = sorted(list(set(active)))
+    if not active:
+        return "No graphical user applications currently detected running."
+    return "Running applications:\n" + ", ".join(active)
+
+
 GEMINI_TOOLS = [
     types.Tool(
         function_declarations=[
             types.FunctionDeclaration(
                 name="run_command",
-                description="Execute a bash shell command on the local machine and return stdout and stderr. Use for running ls, checking directories, inspecting files, searching, checking system info, etc.",
+                description="Execute a bash shell command on the local machine and return stdout and stderr. Use for running ls, inspecting files, checking system info, etc.",
                 parameters=types.Schema(
                     type=types.Type.OBJECT,
                     properties={
@@ -157,6 +207,19 @@ GEMINI_TOOLS = [
                         )
                     },
                     required=["command"],
+                ),
+            ),
+            types.FunctionDeclaration(
+                name="list_applications",
+                description="List applications on the system. Use running_only=True to list currently open/running apps, or running_only=False to list installed applications.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "running_only": types.Schema(
+                            type=types.Type.BOOLEAN,
+                            description="True for running applications, False for installed applications.",
+                        )
+                    },
                 ),
             ),
             types.FunctionDeclaration(

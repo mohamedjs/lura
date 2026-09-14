@@ -64,6 +64,8 @@ class Conversation:
         self.settings = settings
         self.client = client
         self._speaking = asyncio.Event()
+        self._tool_active = asyncio.Event()
+        self._mic_blocks: asyncio.Queue[bytes] | None = None
         self._ending = False
         self._last_voice = time.monotonic()
         self._started = time.monotonic()
@@ -124,36 +126,36 @@ class Conversation:
     # ── audio in ────────────────────────────────────────────────────────────
     async def _pump_mic(self, session, loop: asyncio.AbstractEventLoop) -> None:
         blocks: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
+        self._mic_blocks = blocks
 
         def on_audio(indata, frames, time_info, status):
             if status:
                 log.debug("input status: %s", status)
-            # ponytail: the crude fix for the echo loop — the mic is muted
-            # while the assistant talks, so it cannot hear itself, interrupt
-            # itself, and spiral. The cost is no barge-in: you cannot cut the
-            # answer off by talking over it. Set gate_mic_while_speaking=false
-            # once you are on headphones or PipeWire's module-echo-cancel, and
-            # barge-in starts working.
-            if self.settings.gate_mic_while_speaking and self._speaking.is_set():
+            if (self.settings.gate_mic_while_speaking and self._speaking.is_set()) or self._tool_active.is_set():
                 return
             try:
                 loop.call_soon_threadsafe(blocks.put_nowait, bytes(indata))
             except (asyncio.QueueFull, RuntimeError):
                 pass
 
-        with sd.RawInputStream(
-            samplerate=INPUT_RATE,
-            blocksize=IN_BLOCK,
-            device=self.settings.input_device,
-            dtype="int16",
-            channels=CHANNELS,
-            callback=on_audio,
-        ):
-            while True:
-                block = await blocks.get()
-                await session.send_realtime_input(
-                    audio=types.Blob(data=block, mime_type=f"audio/pcm;rate={INPUT_RATE}")
-                )
+        try:
+            with sd.RawInputStream(
+                samplerate=INPUT_RATE,
+                blocksize=IN_BLOCK,
+                device=self.settings.input_device,
+                dtype="int16",
+                channels=CHANNELS,
+                callback=on_audio,
+            ):
+                while True:
+                    block = await blocks.get()
+                    if self._tool_active.is_set():
+                        continue
+                    await session.send_realtime_input(
+                        audio=types.Blob(data=block, mime_type=f"audio/pcm;rate={INPUT_RATE}")
+                    )
+        finally:
+            self._mic_blocks = None
 
     # ── audio out ───────────────────────────────────────────────────────────
     async def _play(self, chunks: asyncio.Queue) -> None:
@@ -216,6 +218,17 @@ class Conversation:
                         response={"output": result},
                     )
                 )
+            elif name == "list_applications":
+                running_only = args.get("running_only", True) if isinstance(args, dict) else True
+                from .tools import list_applications
+                result = await asyncio.to_thread(list_applications, running_only)
+                responses.append(
+                    types.FunctionResponse(
+                        name=name,
+                        id=fc.id,
+                        response={"output": result},
+                    )
+                )
             elif name == "end_session":
                 self._ending = True
                 responses.append(
@@ -253,10 +266,18 @@ class Conversation:
                 server = getattr(message, "server_content", None)
 
                 if getattr(message, "data", None):
+                    self._tool_active.clear()
                     await chunks.put(message.data)
 
                 if getattr(message, "tool_call", None):
+                    self._tool_active.set()
                     self._set_overlay("thinking")
+                    if self._mic_blocks:
+                        while not self._mic_blocks.empty():
+                            try:
+                                self._mic_blocks.get_nowait()
+                            except Exception:
+                                break
                     await self._handle_tool_call(session, message.tool_call)
 
                 if server is not None:
@@ -287,6 +308,7 @@ class Conversation:
                         self._speaking.clear()
                         self._flush_model()
                     if getattr(server, "turn_complete", False):
+                        self._tool_active.clear()
                         self._flush_model()
                         await chunks.put(None)
             # Session closed — flush any remaining buffers
