@@ -1,8 +1,8 @@
-"""Dynamic Island HUD overlay — Neumorphic Glassmorphism AI Island.
+"""Dynamic Island HUD overlay — Cyberpunk HUD Card (Exact Mockup Match).
 
-Floating at the top-center of each monitor, featuring a soft-extruded glass
-capsule, transparent glowing cyber face avatar, symmetrical audio wave bars,
-neumorphic status chip, and live conversation subtitle.
+Floating top-center cyber panel with angled corner accents, centered glowing
+wireframe avatar ring, 5-band flanking equalizer wave bars, pill status badge,
+and live transcript subtitle.
 """
 
 from __future__ import annotations
@@ -68,17 +68,17 @@ class OverlayState:
 
 # ── dimensions ──────────────────────────────────────────────────────────────
 
-ISLAND_W = 340
-ISLAND_H = 118
-AVATAR_SIZE = 44
-BARS_PER_SIDE = 4
+ISLAND_W = 440
+ISLAND_H = 148
+AVATAR_SIZE = 50
+BARS_PER_SIDE = 5
 TOP_PADDING = 12
 
 
 # ── GTK Dynamic Island Window Builder ──────────────────────────────────────
 
 def _build_monitor_window(monitor, shared: OverlayState):
-    """Create a Neumorphic Glassmorphism island window for a monitor."""
+    """Create a Cyber HUD island window matching the mockup exactly."""
     import gi
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
@@ -86,7 +86,7 @@ def _build_monitor_window(monitor, shared: OverlayState):
     from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
 
     win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
-    win.set_title("Lura Dynamic Island")
+    win.set_title("Lura Cyber Island")
     win.set_decorated(False)
     win.set_resizable(False)
     win.set_keep_above(True)
@@ -110,30 +110,36 @@ def _build_monitor_window(monitor, shared: OverlayState):
     y = wa.y + TOP_PADDING
     win.move(x, y)
 
-    # Main Neumorphic Glass vertical container
-    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
-    vbox.get_style_context().add_class("dynamic-island")
+    # Gtk.Overlay allows cyber corner accent brackets
+    root_overlay = Gtk.Overlay()
 
-    # ── 1. Top Row: Left Waves | Embossed Cyber Face | Right Waves ──
-    top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+    # Main cyber card panel
+    panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+    panel.get_style_context().add_class("cyber-panel")
+    panel.set_size_request(ISLAND_W, ISLAND_H)
+
+    # ── 1. Top Row: Left Waves | Cyber Avatar Ring | Right Waves ──
+    top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
     top_row.set_halign(Gtk.Align.CENTER)
     top_row.set_valign(Gtk.Align.CENTER)
 
-    # Left audio wave bars
-    left_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    # Left audio wave bars (5 bars)
+    left_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
     left_wave_box.set_valign(Gtk.Align.CENTER)
     left_bars = []
     for _ in range(BARS_PER_SIDE):
         bar = Gtk.Box()
         bar.get_style_context().add_class("wave-bar")
-        bar.set_size_request(3, 10)
+        bar.set_size_request(3, 16)
         left_wave_box.pack_start(bar, False, False, 0)
         left_bars.append(bar)
     top_row.pack_start(left_wave_box, False, False, 0)
 
-    # Center Avatar: Circular Neumorphic Recessed Well
-    avatar_box = Gtk.Box()
-    avatar_box.get_style_context().add_class("avatar-frame")
+    # Center Avatar: Double Neon Glowing Ring
+    avatar_outer = Gtk.Box()
+    avatar_outer.get_style_context().add_class("avatar-ring-outer")
+    avatar_inner = Gtk.Box()
+    avatar_inner.get_style_context().add_class("avatar-ring-inner")
 
     pix_cache = {}
     for st_val, svg_name in [
@@ -155,51 +161,73 @@ def _build_monitor_window(monitor, shared: OverlayState):
     avatar_img = None
     if initial_pix:
         avatar_img = Gtk.Image.new_from_pixbuf(initial_pix)
-        avatar_box.add(avatar_img)
+        avatar_inner.add(avatar_img)
     else:
         fallback_orb = Gtk.Box()
         fallback_orb.set_size_request(AVATAR_SIZE, AVATAR_SIZE)
-        avatar_box.add(fallback_orb)
+        avatar_inner.add(fallback_orb)
 
-    top_row.pack_start(avatar_box, False, False, 0)
+    avatar_outer.add(avatar_inner)
+    top_row.pack_start(avatar_outer, False, False, 0)
 
-    # Right audio wave bars
-    right_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    # Right audio wave bars (5 bars)
+    right_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
     right_wave_box.set_valign(Gtk.Align.CENTER)
     right_bars = []
     for _ in range(BARS_PER_SIDE):
         bar = Gtk.Box()
         bar.get_style_context().add_class("wave-bar")
-        bar.set_size_request(3, 10)
+        bar.set_size_request(3, 16)
         right_wave_box.pack_start(bar, False, False, 0)
         right_bars.append(bar)
     top_row.pack_start(right_wave_box, False, False, 0)
 
-    vbox.pack_start(top_row, False, False, 0)
+    panel.pack_start(top_row, False, False, 4)
 
-    # ── 2. Middle Row: Neumorphic Status Chip ──
-    chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
-    chip_box.set_halign(Gtk.Align.CENTER)
-    chip_box.get_style_context().add_class("status-chip")
+    # ── 2. Middle Row: Pill Status Chip (STANDBY) ──
+    pill = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    pill.set_halign(Gtk.Align.CENTER)
+    pill.get_style_context().add_class("status-pill")
 
-    dot_lbl = Gtk.Label(label="●")
-    dot_lbl.get_style_context().add_class("chip-dot")
+    dot = Gtk.Label(label="●")
+    dot.get_style_context().add_class("status-dot")
     status_lbl = Gtk.Label(label="STANDBY")
-    status_lbl.get_style_context().add_class("chip-status")
+    status_lbl.get_style_context().add_class("status-text")
 
-    chip_box.pack_start(dot_lbl, False, False, 0)
-    chip_box.pack_start(status_lbl, False, False, 0)
-    vbox.pack_start(chip_box, False, False, 0)
+    pill.pack_start(dot, False, False, 0)
+    pill.pack_start(status_lbl, False, False, 0)
+    panel.pack_start(pill, False, False, 0)
 
-    # ── 3. Bottom Row: Soft Transcript Subtitle ──
+    # ── 3. Bottom Row: Subtitle / Live Transcript ──
     sub_lbl = Gtk.Label(label='Say "Gemini" to activate')
     sub_lbl.set_halign(Gtk.Align.CENTER)
-    sub_lbl.set_max_width_chars(34)
+    sub_lbl.set_max_width_chars(42)
     sub_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
-    sub_lbl.get_style_context().add_class("island-sub")
-    vbox.pack_start(sub_lbl, False, False, 0)
+    sub_lbl.get_style_context().add_class("subtitle-text")
+    panel.pack_start(sub_lbl, False, False, 0)
 
-    win.add(vbox)
+    root_overlay.add(panel)
+
+    # ── Cyber Corner Accents (Top-Left & Bottom-Right) ──
+    tl_accent = Gtk.Box()
+    tl_accent.get_style_context().add_class("corner-accent-tl")
+    tl_accent.set_size_request(28, 4)
+    tl_accent.set_halign(Gtk.Align.START)
+    tl_accent.set_valign(Gtk.Align.START)
+    tl_accent.set_margin_start(16)
+    tl_accent.set_margin_top(3)
+    root_overlay.add_overlay(tl_accent)
+
+    br_accent = Gtk.Box()
+    br_accent.get_style_context().add_class("corner-accent-br")
+    br_accent.set_size_request(28, 4)
+    br_accent.set_halign(Gtk.Align.END)
+    br_accent.set_valign(Gtk.Align.END)
+    br_accent.set_margin_end(16)
+    br_accent.set_margin_bottom(3)
+    root_overlay.add_overlay(br_accent)
+
+    win.add(root_overlay)
 
     css_provider = Gtk.CssProvider()
     Gtk.StyleContext.add_provider_for_screen(
@@ -216,7 +244,7 @@ def _build_monitor_window(monitor, shared: OverlayState):
         phase[0] += 0.08
         p = phase[0]
 
-        # Swap SVG dynamically without background
+        # Swap SVG vector head dynamically on state change
         if st != prev_state[0]:
             prev_state[0] = st
             if avatar_img and st in pix_cache:
@@ -231,105 +259,121 @@ def _build_monitor_window(monitor, shared: OverlayState):
         # Update status text
         GLib.idle_add(status_lbl.set_text, _STATE_LABEL.get(st, "STANDBY"))
 
-        # Compute Neumorphic + Glassmorphic dynamic colors
+        # Animate visualizer and colors matching state
         if st == State.IDLE:
-            accent = "#00d2ff"
-            accent_glow = "rgba(0, 210, 255, 0.45)"
-            bar_grad = "linear-gradient(180deg, #00d2ff 0%, #0066cc 100%)"
-            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.8), inset -1px -1px 2px rgba(255,255,255,0.08), 0 0 {int(8 + 3*math.sin(p*0.7))}px rgba(0, 210, 255, 0.45)"
-            border_light = "rgba(0, 210, 255, 0.3)"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 3.5)
-                h = int(5 + 5 * abs(math.sin(p * 0.8 + dist * 0.5)))
+            cyan = "#00d8ff"
+            glow_c = "rgba(0, 216, 255, 0.85)"
+            outer_ring_glow = f"0 0 {int(16 + 4*math.sin(p*0.7))}px rgba(0, 216, 255, 0.8), inset 0 0 10px rgba(0, 180, 255, 0.4)"
+            bar_color = "#00d8ff"
+            # Symmetric curve: short on outside, taller near face
+            wave_profile = [10, 16, 24, 18, 12]
+            for idx, b in enumerate(left_bars):
+                base_h = wave_profile[idx]
+                h = int(base_h + 4 * abs(math.sin(p * 0.8 + idx * 0.6)))
+                b.set_size_request(3, h)
+            for idx, b in enumerate(right_bars):
+                base_h = wave_profile[4 - idx]
+                h = int(base_h + 4 * abs(math.sin(p * 0.8 + (4 - idx) * 0.6)))
                 b.set_size_request(3, h)
 
         elif st == State.LISTENING:
-            accent = "#00f5ff"
-            accent_glow = "rgba(0, 245, 255, 0.85)"
-            bar_grad = "linear-gradient(180deg, #00ffff 0%, #0284c7 100%)"
-            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.9), inset -1px -1px 2px rgba(255,255,255,0.12), 0 0 {int(14 + 6*math.sin(p*2.0))}px rgba(0, 245, 255, 0.85)"
-            border_light = "rgba(0, 245, 255, 0.65)"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 3.5)
-                h = int(7 + 20 * abs(math.sin(p * 2.2 + dist * 0.8)))
+            cyan = "#00f5ff"
+            glow_c = "rgba(0, 245, 255, 0.95)"
+            outer_ring_glow = f"0 0 {int(24 + 8*math.sin(p*2.0))}px rgba(0, 245, 255, 0.95), 0 0 40px rgba(0, 140, 255, 0.6), inset 0 0 14px rgba(0, 220, 255, 0.6)"
+            bar_color = "#00ffff"
+            for idx, b in enumerate(all_bars):
+                dist = abs(idx - 4.5)
+                h = int(10 + 26 * abs(math.sin(p * 2.4 + dist * 0.8)))
                 b.set_size_request(3, h)
 
         elif st == State.SPEAKING:
-            accent = "#34d399"
-            accent_glow = "rgba(52, 211, 153, 0.85)"
-            bar_grad = "linear-gradient(180deg, #34d399 0%, #059669 100%)"
-            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.9), inset -1px -1px 2px rgba(255,255,255,0.12), 0 0 {int(16 + 8*math.sin(p*2.6))}px rgba(52, 211, 153, 0.85)"
-            border_light = "rgba(52, 211, 153, 0.65)"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 3.5)
-                h = int(8 + 24 * abs(math.sin(p * 3.0 + dist * 1.0)))
+            cyan = "#00ff9d"
+            glow_c = "rgba(0, 255, 157, 0.95)"
+            outer_ring_glow = f"0 0 {int(26 + 10*math.sin(p*2.8))}px rgba(0, 255, 157, 0.95), 0 0 40px rgba(16, 185, 129, 0.6), inset 0 0 14px rgba(0, 255, 157, 0.6)"
+            bar_color = "#00ff9d"
+            for idx, b in enumerate(all_bars):
+                dist = abs(idx - 4.5)
+                h = int(12 + 30 * abs(math.sin(p * 3.2 + dist * 1.0)))
                 b.set_size_request(3, h)
 
         else:  # CONNECTING
-            accent = "#fbbf24"
-            accent_glow = "rgba(251, 191, 36, 0.75)"
-            bar_grad = "linear-gradient(180deg, #fbbf24 0%, #d97706 100%)"
-            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.8), inset -1px -1px 2px rgba(255,255,255,0.08), 0 0 {int(10 + 5*math.sin(p*2.0))}px rgba(251, 191, 36, 0.75)"
-            border_light = "rgba(251, 191, 36, 0.5)"
-            for i, b in enumerate(all_bars):
-                dist = abs(i - 3.5)
-                h = int(5 + 10 * abs(math.sin(p * 1.8 + dist * 0.7)))
+            cyan = "#fbbf24"
+            glow_c = "rgba(251, 191, 36, 0.85)"
+            outer_ring_glow = f"0 0 {int(18 + 6*math.sin(p*2.0))}px rgba(251, 191, 36, 0.85), inset 0 0 10px rgba(251, 191, 36, 0.4)"
+            bar_color = "#fbbf24"
+            for idx, b in enumerate(all_bars):
+                dist = abs(idx - 4.5)
+                h = int(8 + 14 * abs(math.sin(p * 1.8 + dist * 0.7)))
                 b.set_size_request(3, h)
 
         css = f"""
         window {{ background-color: transparent; }}
-        .dynamic-island {{
-            background: linear-gradient(135deg, rgba(22, 28, 44, 0.84) 0%, rgba(10, 14, 24, 0.92) 100%);
-            border-radius: 26px;
-            border: 1px solid rgba(255, 255, 255, 0.14);
-            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65),
-                        0 0 0 1px rgba(255, 255, 255, 0.08),
-                        inset 0 1px 1px rgba(255, 255, 255, 0.22),
-                        inset 0 -2px 4px rgba(0, 0, 0, 0.5);
-            padding: 8px 16px 6px 16px;
+        .cyber-panel {{
+            background: linear-gradient(180deg, #071022 0%, #030814 100%);
+            border: 2px solid {cyan};
+            border-radius: 20px;
+            box-shadow: 0 0 24px {glow_c},
+                        inset 0 0 20px rgba(0, 100, 255, 0.2),
+                        0 20px 40px rgba(0, 0, 0, 0.9);
+            padding: 14px 20px 10px 20px;
         }}
-        .avatar-frame {{
+        .corner-accent-tl {{
+            background: {cyan};
+            border-radius: 3px;
+            box-shadow: 0 0 10px {cyan};
+        }}
+        .corner-accent-br {{
+            background: {cyan};
+            border-radius: 3px;
+            box-shadow: 0 0 10px {cyan};
+        }}
+        .avatar-ring-outer {{
             border-radius: 50%;
-            background: radial-gradient(circle, rgba(14, 18, 30, 0.85) 0%, rgba(8, 10, 18, 0.95) 100%);
-            box-shadow: {avatar_shadow};
-            border: 1.5px solid {border_light};
+            border: 2px solid {cyan};
+            background: radial-gradient(circle, rgba(0, 90, 180, 0.35) 0%, rgba(2, 6, 16, 0.8) 100%);
+            box-shadow: {outer_ring_glow};
+            padding: 4px;
+        }}
+        .avatar-ring-inner {{
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.4);
             padding: 2px;
         }}
         .wave-bar {{
-            background: {bar_grad};
+            background: {bar_color};
             border-radius: 2px;
-            box-shadow: 0 0 6px {accent_glow};
+            box-shadow: 0 0 10px {bar_color};
         }}
-        .status-chip {{
-            background: rgba(4, 6, 12, 0.55);
-            border-radius: 12px;
-            box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.6),
-                        inset -1px -1px 1px rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            padding: 2px 10px;
+        .status-pill {{
+            border-radius: 18px;
+            border: 1.5px solid {cyan};
+            background: rgba(4, 10, 24, 0.9);
+            box-shadow: 0 0 14px {glow_c};
+            padding: 4px 22px;
         }}
-        .chip-dot {{
-            color: {accent};
-            font-size: 8px;
+        .status-dot {{
+            color: {cyan};
+            font-size: 11px;
+            text-shadow: 0 0 10px {cyan};
         }}
-        .chip-status {{
-            color: rgba(230, 240, 255, 0.92);
-            font-family: monospace;
-            font-size: 10px;
+        .status-text {{
+            color: #ffffff;
+            font-family: monospace, sans-serif;
+            font-size: 13px;
             font-weight: bold;
-            letter-spacing: 1.5px;
+            letter-spacing: 3px;
         }}
-        .island-sub {{
-            color: rgba(200, 220, 250, 0.82);
+        .subtitle-text {{
+            color: #b8d2f4;
             font-family: system-ui, -apple-system, sans-serif;
-            font-size: 10px;
-            padding-top: 1px;
+            font-size: 11px;
+            padding-top: 2px;
         }}
         """
         css_provider.load_from_data(css.encode("utf-8"))
         return True
 
-    GLib.timeout_add(40, _tick)  # 25 fps
+    GLib.timeout_add(40, _tick)  # 25 fps smooth animations
     return win
 
 
@@ -357,7 +401,7 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
                 win.show_all()
                 windows.append(win)
 
-            log.info("Dynamic Island running on %d monitor(s) (top-center).", len(windows))
+            log.info("Cyber HUD running on %d monitor(s) (top-center).", len(windows))
             Gtk.main()
         except Exception:
             log.warning("Overlay unavailable — running headless.", exc_info=True)
