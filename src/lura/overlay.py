@@ -1,8 +1,8 @@
-"""Dynamic Island HUD overlay — Dual-Monitor Centered AI Island.
+"""Dynamic Island HUD overlay — Neumorphic Glassmorphism AI Island.
 
-Floating at the top-center of each connected monitor (laptop and external),
-featuring the centered glowing cyber face avatar flanked by audio wave visualizers,
-high-tech status badge, and live conversation subtitle.
+Floating at the top-center of each monitor, featuring a soft-extruded glass
+capsule, transparent glowing cyber face avatar, symmetrical audio wave bars,
+neumorphic status chip, and live conversation subtitle.
 """
 
 from __future__ import annotations
@@ -16,8 +16,6 @@ import threading
 log = logging.getLogger(__name__)
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-AVATAR_PATH = ASSETS_DIR / "ai_face_square.png"
-FALLBACK_AVATAR = ASSETS_DIR / "ai_face.png"
 
 
 # ── shared state ────────────────────────────────────────────────────────────
@@ -70,9 +68,9 @@ class OverlayState:
 
 # ── dimensions ──────────────────────────────────────────────────────────────
 
-ISLAND_W = 380
-ISLAND_H = 126
-AVATAR_SIZE = 48
+ISLAND_W = 340
+ISLAND_H = 118
+AVATAR_SIZE = 44
 BARS_PER_SIDE = 4
 TOP_PADDING = 12
 
@@ -80,7 +78,7 @@ TOP_PADDING = 12
 # ── GTK Dynamic Island Window Builder ──────────────────────────────────────
 
 def _build_monitor_window(monitor, shared: OverlayState):
-    """Create a Dynamic Island window positioned on a specific monitor."""
+    """Create a Neumorphic Glassmorphism island window for a monitor."""
     import gi
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
@@ -105,19 +103,19 @@ def _build_monitor_window(monitor, shared: OverlayState):
         win.set_visual(visual)
     win.set_app_paintable(True)
 
-    # Position at top-center of this monitor's workarea with comfortable margin
+    # Position horizontally dead-center with clean top margin from workarea
     wa = monitor.get_workarea()
     scale = monitor.get_scale_factor()
     x = wa.x + ((wa.width // scale) - ISLAND_W) // 2
     y = wa.y + TOP_PADDING
     win.move(x, y)
 
-    # Main vertical capsule container
+    # Main Neumorphic Glass vertical container
     vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
     vbox.get_style_context().add_class("dynamic-island")
 
-    # ── 1. Top Row: Left Waves | Centered Cyber Face | Right Waves ──
-    top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    # ── 1. Top Row: Left Waves | Embossed Cyber Face | Right Waves ──
+    top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
     top_row.set_halign(Gtk.Align.CENTER)
     top_row.set_valign(Gtk.Align.CENTER)
 
@@ -133,10 +131,10 @@ def _build_monitor_window(monitor, shared: OverlayState):
         left_bars.append(bar)
     top_row.pack_start(left_wave_box, False, False, 0)
 
-    # Center Avatar: Cyber Face (dynamic SVG state switching)
+    # Center Avatar: Circular Neumorphic Recessed Well
     avatar_box = Gtk.Box()
     avatar_box.get_style_context().add_class("avatar-frame")
-    avatar_img = None
+
     pix_cache = {}
     for st_val, svg_name in [
         (State.IDLE, "head_loading.svg"),
@@ -154,22 +152,13 @@ def _build_monitor_window(monitor, shared: OverlayState):
                 pass
 
     initial_pix = pix_cache.get(State.IDLE)
-    if not initial_pix and (AVATAR_PATH.exists() or FALLBACK_AVATAR.exists()):
-        fallback_p = AVATAR_PATH if AVATAR_PATH.exists() else FALLBACK_AVATAR
-        try:
-            initial_pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                str(fallback_p), AVATAR_SIZE, AVATAR_SIZE, True
-            )
-        except Exception:
-            pass
-
+    avatar_img = None
     if initial_pix:
         avatar_img = Gtk.Image.new_from_pixbuf(initial_pix)
         avatar_box.add(avatar_img)
     else:
         fallback_orb = Gtk.Box()
         fallback_orb.set_size_request(AVATAR_SIZE, AVATAR_SIZE)
-        fallback_orb.get_style_context().add_class("avatar-orb")
         avatar_box.add(fallback_orb)
 
     top_row.pack_start(avatar_box, False, False, 0)
@@ -188,26 +177,24 @@ def _build_monitor_window(monitor, shared: OverlayState):
 
     vbox.pack_start(top_row, False, False, 0)
 
-    # ── 2. Middle Row: Centered Status Badge ──
-    status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    status_row.set_halign(Gtk.Align.CENTER)
+    # ── 2. Middle Row: Neumorphic Status Chip ──
+    chip_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+    chip_box.set_halign(Gtk.Align.CENTER)
+    chip_box.get_style_context().add_class("status-chip")
 
-    title_lbl = Gtk.Label(label="LURA")
-    title_lbl.get_style_context().add_class("island-title")
-    dot_lbl = Gtk.Label(label="•")
-    dot_lbl.get_style_context().add_class("island-dot")
+    dot_lbl = Gtk.Label(label="●")
+    dot_lbl.get_style_context().add_class("chip-dot")
     status_lbl = Gtk.Label(label="STANDBY")
-    status_lbl.get_style_context().add_class("island-status")
+    status_lbl.get_style_context().add_class("chip-status")
 
-    status_row.pack_start(title_lbl, False, False, 0)
-    status_row.pack_start(dot_lbl, False, False, 0)
-    status_row.pack_start(status_lbl, False, False, 0)
-    vbox.pack_start(status_row, False, False, 0)
+    chip_box.pack_start(dot_lbl, False, False, 0)
+    chip_box.pack_start(status_lbl, False, False, 0)
+    vbox.pack_start(chip_box, False, False, 0)
 
-    # ── 3. Bottom Row: Centered Live Subtitle ──
+    # ── 3. Bottom Row: Soft Transcript Subtitle ──
     sub_lbl = Gtk.Label(label='Say "Gemini" to activate')
     sub_lbl.set_halign(Gtk.Align.CENTER)
-    sub_lbl.set_max_width_chars(38)
+    sub_lbl.set_max_width_chars(34)
     sub_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
     sub_lbl.get_style_context().add_class("island-sub")
     vbox.pack_start(sub_lbl, False, False, 0)
@@ -229,7 +216,7 @@ def _build_monitor_window(monitor, shared: OverlayState):
         phase[0] += 0.08
         p = phase[0]
 
-        # Update dynamic SVG avatar on state transition
+        # Swap SVG dynamically without background
         if st != prev_state[0]:
             prev_state[0] = st
             if avatar_img and st in pix_cache:
@@ -244,99 +231,99 @@ def _build_monitor_window(monitor, shared: OverlayState):
         # Update status text
         GLib.idle_add(status_lbl.set_text, _STATE_LABEL.get(st, "STANDBY"))
 
-        # Animate symmetric equalizer wave bars around the face
+        # Compute Neumorphic + Glassmorphic dynamic colors
         if st == State.IDLE:
-            bar_color = "rgba(0, 190, 240, 0.45)"
-            avatar_glow = int(8 + 4 * math.sin(p * 0.7))
-            avatar_shadow = f"0 0 {avatar_glow}px rgba(0, 180, 255, 0.55)"
-            status_color = "rgba(160, 180, 210, 0.85)"
-            border_glow = "rgba(0, 180, 240, 0.35)"
+            accent = "#00d2ff"
+            accent_glow = "rgba(0, 210, 255, 0.45)"
+            bar_grad = "linear-gradient(180deg, #00d2ff 0%, #0066cc 100%)"
+            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.8), inset -1px -1px 2px rgba(255,255,255,0.08), 0 0 {int(8 + 3*math.sin(p*0.7))}px rgba(0, 210, 255, 0.45)"
+            border_light = "rgba(0, 210, 255, 0.3)"
             for i, b in enumerate(all_bars):
-                # symmetric pulse outwards from center
                 dist = abs(i - 3.5)
-                h = int(6 + 6 * abs(math.sin(p * 0.8 + dist * 0.5)))
+                h = int(5 + 5 * abs(math.sin(p * 0.8 + dist * 0.5)))
                 b.set_size_request(3, h)
 
         elif st == State.LISTENING:
-            bar_color = "rgba(0, 230, 255, 0.95)"
-            avatar_glow = int(14 + 8 * math.sin(p * 2.0))
-            avatar_shadow = f"0 0 {avatar_glow}px rgba(0, 230, 255, 0.95), 0 0 {avatar_glow*2}px rgba(0, 130, 255, 0.5)"
-            status_color = "rgba(0, 235, 255, 1.0)"
-            border_glow = "rgba(0, 220, 255, 0.75)"
+            accent = "#00f5ff"
+            accent_glow = "rgba(0, 245, 255, 0.85)"
+            bar_grad = "linear-gradient(180deg, #00ffff 0%, #0284c7 100%)"
+            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.9), inset -1px -1px 2px rgba(255,255,255,0.12), 0 0 {int(14 + 6*math.sin(p*2.0))}px rgba(0, 245, 255, 0.85)"
+            border_light = "rgba(0, 245, 255, 0.65)"
             for i, b in enumerate(all_bars):
                 dist = abs(i - 3.5)
-                h = int(8 + 22 * abs(math.sin(p * 2.2 + dist * 0.8)))
+                h = int(7 + 20 * abs(math.sin(p * 2.2 + dist * 0.8)))
                 b.set_size_request(3, h)
 
         elif st == State.SPEAKING:
-            bar_color = "rgba(52, 211, 153, 0.95)"
-            avatar_glow = int(16 + 10 * math.sin(p * 2.6))
-            avatar_shadow = f"0 0 {avatar_glow}px rgba(52, 211, 153, 0.95), 0 0 {avatar_glow*2}px rgba(16, 185, 129, 0.5)"
-            status_color = "rgba(52, 211, 153, 1.0)"
-            border_glow = "rgba(52, 211, 153, 0.8)"
+            accent = "#34d399"
+            accent_glow = "rgba(52, 211, 153, 0.85)"
+            bar_grad = "linear-gradient(180deg, #34d399 0%, #059669 100%)"
+            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.9), inset -1px -1px 2px rgba(255,255,255,0.12), 0 0 {int(16 + 8*math.sin(p*2.6))}px rgba(52, 211, 153, 0.85)"
+            border_light = "rgba(52, 211, 153, 0.65)"
             for i, b in enumerate(all_bars):
                 dist = abs(i - 3.5)
-                h = int(10 + 26 * abs(math.sin(p * 3.0 + dist * 1.0)))
+                h = int(8 + 24 * abs(math.sin(p * 3.0 + dist * 1.0)))
                 b.set_size_request(3, h)
 
         else:  # CONNECTING
-            bar_color = "rgba(245, 158, 11, 0.9)"
-            avatar_glow = int(12 + 6 * math.sin(p * 2.0))
-            avatar_shadow = f"0 0 {avatar_glow}px rgba(245, 158, 11, 0.85)"
-            status_color = "rgba(245, 175, 40, 1.0)"
-            border_glow = "rgba(245, 158, 11, 0.6)"
+            accent = "#fbbf24"
+            accent_glow = "rgba(251, 191, 36, 0.75)"
+            bar_grad = "linear-gradient(180deg, #fbbf24 0%, #d97706 100%)"
+            avatar_shadow = f"inset 1.5px 1.5px 3px rgba(0,0,0,0.8), inset -1px -1px 2px rgba(255,255,255,0.08), 0 0 {int(10 + 5*math.sin(p*2.0))}px rgba(251, 191, 36, 0.75)"
+            border_light = "rgba(251, 191, 36, 0.5)"
             for i, b in enumerate(all_bars):
                 dist = abs(i - 3.5)
-                h = int(6 + 12 * abs(math.sin(p * 1.8 + dist * 0.7)))
+                h = int(5 + 10 * abs(math.sin(p * 1.8 + dist * 0.7)))
                 b.set_size_request(3, h)
 
         css = f"""
         window {{ background-color: transparent; }}
         .dynamic-island {{
-            background: rgba(8, 10, 16, 0.94);
+            background: linear-gradient(135deg, rgba(22, 28, 44, 0.84) 0%, rgba(10, 14, 24, 0.92) 100%);
             border-radius: 26px;
-            border: 1.5px solid {border_glow};
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75), 0 0 16px {border_glow};
-            padding: 10px 18px 10px 18px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65),
+                        0 0 0 1px rgba(255, 255, 255, 0.08),
+                        inset 0 1px 1px rgba(255, 255, 255, 0.22),
+                        inset 0 -2px 4px rgba(0, 0, 0, 0.5);
+            padding: 8px 16px 6px 16px;
         }}
         .avatar-frame {{
             border-radius: 50%;
-            border: 2px solid {bar_color};
+            background: radial-gradient(circle, rgba(14, 18, 30, 0.85) 0%, rgba(8, 10, 18, 0.95) 100%);
             box-shadow: {avatar_shadow};
-            background-color: #030610;
-        }}
-        .avatar-orb {{
-            border-radius: 50%;
-            background: radial-gradient(circle, {bar_color} 0%, rgba(3,6,16,0.3) 100%);
+            border: 1.5px solid {border_light};
+            padding: 2px;
         }}
         .wave-bar {{
-            background: {bar_color};
+            background: {bar_grad};
             border-radius: 2px;
-            box-shadow: 0 0 6px {bar_color};
+            box-shadow: 0 0 6px {accent_glow};
         }}
-        .island-title {{
-            color: rgba(220, 230, 255, 0.95);
-            font-family: monospace;
-            font-size: 11px;
-            font-weight: bold;
-            letter-spacing: 3px;
+        .status-chip {{
+            background: rgba(4, 6, 12, 0.55);
+            border-radius: 12px;
+            box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.6),
+                        inset -1px -1px 1px rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 2px 10px;
         }}
-        .island-dot {{
-            color: rgba(120, 140, 180, 0.6);
-            font-size: 9px;
+        .chip-dot {{
+            color: {accent};
+            font-size: 8px;
         }}
-        .island-status {{
-            color: {status_color};
+        .chip-status {{
+            color: rgba(230, 240, 255, 0.92);
             font-family: monospace;
             font-size: 10px;
             font-weight: bold;
             letter-spacing: 1.5px;
         }}
         .island-sub {{
-            color: rgba(185, 205, 235, 0.85);
-            font-family: monospace;
+            color: rgba(200, 220, 250, 0.82);
+            font-family: system-ui, -apple-system, sans-serif;
             font-size: 10px;
-            padding-top: 2px;
+            padding-top: 1px;
         }}
         """
         css_provider.load_from_data(css.encode("utf-8"))
