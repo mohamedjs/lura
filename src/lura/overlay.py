@@ -133,22 +133,40 @@ def _build_monitor_window(monitor, shared: OverlayState):
         left_bars.append(bar)
     top_row.pack_start(left_wave_box, False, False, 0)
 
-    # Center Avatar: Cyber Face
+    # Center Avatar: Cyber Face (dynamic SVG state switching)
     avatar_box = Gtk.Box()
     avatar_box.get_style_context().add_class("avatar-frame")
     avatar_img = None
-    target_path = AVATAR_PATH if AVATAR_PATH.exists() else FALLBACK_AVATAR
-    if target_path.exists():
-        try:
-            pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                str(target_path), AVATAR_SIZE, AVATAR_SIZE, True
-            )
-            avatar_img = Gtk.Image.new_from_pixbuf(pix)
-            avatar_box.add(avatar_img)
-        except Exception as exc:
-            log.warning("Could not load avatar pixbuf: %s", exc)
+    pix_cache = {}
+    for st_val, svg_name in [
+        (State.IDLE, "head_loading.svg"),
+        (State.LISTENING, "head_listening.svg"),
+        (State.SPEAKING, "head_speaking.svg"),
+        (State.CONNECTING, "head_loading.svg"),
+    ]:
+        p = ASSETS_DIR / svg_name
+        if p.exists():
+            try:
+                pix_cache[st_val] = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                    str(p), AVATAR_SIZE, AVATAR_SIZE, True
+                )
+            except Exception:
+                pass
 
-    if not avatar_img:
+    initial_pix = pix_cache.get(State.IDLE)
+    if not initial_pix and (AVATAR_PATH.exists() or FALLBACK_AVATAR.exists()):
+        fallback_p = AVATAR_PATH if AVATAR_PATH.exists() else FALLBACK_AVATAR
+        try:
+            initial_pix = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(fallback_p), AVATAR_SIZE, AVATAR_SIZE, True
+            )
+        except Exception:
+            pass
+
+    if initial_pix:
+        avatar_img = Gtk.Image.new_from_pixbuf(initial_pix)
+        avatar_box.add(avatar_img)
+    else:
         fallback_orb = Gtk.Box()
         fallback_orb.set_size_request(AVATAR_SIZE, AVATAR_SIZE)
         fallback_orb.get_style_context().add_class("avatar-orb")
@@ -203,12 +221,19 @@ def _build_monitor_window(monitor, shared: OverlayState):
 
     phase = [0.0]
     prev_transcript = [""]
+    prev_state = [None]
     all_bars = left_bars + right_bars
 
     def _tick():
         st = shared.state
         phase[0] += 0.08
         p = phase[0]
+
+        # Update dynamic SVG avatar on state transition
+        if st != prev_state[0]:
+            prev_state[0] = st
+            if avatar_img and st in pix_cache:
+                GLib.idle_add(avatar_img.set_from_pixbuf, pix_cache[st])
 
         # Update transcript
         t = shared.transcript
