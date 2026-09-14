@@ -82,10 +82,13 @@ class WakeListener:
         self.settings = settings
         self._model = Model(str(model_dir))
         self._word = settings.wake_word.lower().strip()
+        # Map "lura" to phonetic "laura" in the English Vosk vocabulary
+        vocab_word = "laura" if self._word in ("lura", "laura") else self._word
+        self._accepted = {"laura", "lura"} if self._word in ("lura", "laura") else {self._word}
 
         # The grammar: the wake word, or "not it". Anything else the recogniser
         # might have guessed at is collapsed into [unk].
-        grammar = json.dumps([self._word, "[unk]"])
+        grammar = json.dumps([vocab_word, "[unk]"])
         self._recognizer = KaldiRecognizer(self._model, INPUT_RATE, grammar)
 
     def _heard_wake(self, payload: str) -> bool:
@@ -93,7 +96,8 @@ class WakeListener:
             text = json.loads(payload).get("text", "")
         except json.JSONDecodeError:
             return False
-        return self._word in text.lower().split()
+        words = set(text.lower().split())
+        return bool(words & self._accepted)
 
     def listen(self, stop) -> bool:
         """Wait for the wake word. Returns False if `stop` is set first."""

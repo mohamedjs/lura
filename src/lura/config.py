@@ -75,7 +75,7 @@ class Settings:
     )
 
     # ── wake word (always local, always Vosk, whichever provider answers) ────
-    wake_word: str = "gemini"
+    wake_word: str = "lura"
     wake_cooldown: float = 1.5
 
     # ── end-of-turn detection, OpenRouter path only ─────────────────────────
