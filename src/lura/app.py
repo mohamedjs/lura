@@ -45,14 +45,23 @@ def _gemini_client():
     return genai.Client(api_key=load_key("gemini"))
 
 
+_active_conv = None
+
+
 def _converse(settings: Settings, overlay_state=None, mcp_manager=None) -> None:
     """One exchange, on whichever provider is configured."""
+    global _active_conv
     if settings.provider == "gemini":
         from .live import Conversation
 
-        asyncio.run(Conversation(settings, _gemini_client(),
-                                 overlay_state=overlay_state,
-                                 mcp_manager=mcp_manager).run())
+        conv = Conversation(settings, _gemini_client(),
+                            overlay_state=overlay_state,
+                            mcp_manager=mcp_manager)
+        _active_conv = conv
+        try:
+            asyncio.run(conv.run())
+        finally:
+            _active_conv = None
     else:
         from .openrouter import Conversation as ORConversation
 
@@ -63,18 +72,13 @@ def _converse(settings: Settings, overlay_state=None, mcp_manager=None) -> None:
 def cmd_login(args) -> int:
     """Store one provider's API key."""
     provider = args.provider or Settings.load().provider
-
     if provider == "gemini":
-        print("Gemini Live needs an API key — a Google account sign-in on its")
-        print("own cannot reach it. Asked once, then never again.\n")
-        print(f"  1. Open {WHERE_TO_GET['gemini']}")
-        print("  2. Sign in with your Google account")
-        print("  3. Create a NEW key. Keys made before September 2026 are the")
-        print("     old 'standard' type and are now rejected.\n")
+        print(f"Gemini Live needs an API key — sign-in alone cannot reach it.\n\n"
+              f"  1. Open {WHERE_TO_GET['gemini']}\n"
+              f"  2. Sign in with your Google account\n"
+              f"  3. Create a NEW key (keys before Sep 2026 are rejected).\n")
     else:
-        print("OpenRouter key.\n")
-        print(f"  1. Open {WHERE_TO_GET['openrouter']}")
-        print("  2. Create a key (it starts with sk-or-)\n")
+        print(f"OpenRouter key.\n\n  1. Open {WHERE_TO_GET['openrouter']}\n  2. Create a key (sk-or-…)\n")
 
     key = getpass.getpass(f"Paste your {provider} key (hidden), then Enter: ").strip()
     if not key:
@@ -82,18 +86,14 @@ def cmd_login(args) -> int:
         return 1
 
     save_key(provider, key)
-    print(f"\nSaved to {KEYS_FILE} (readable only by you).")
-    print(f"Check it with:  lura selftest")
+    print(f"\nSaved to {KEYS_FILE} (readable only by you).\nCheck it with:  lura selftest")
     return 0
 
 
 def cmd_logout(args) -> int:
     """Forget one provider's key."""
-    provider = args.provider or Settings.load().provider
-    if forget_key(provider):
-        print(f"Removed the stored {provider} key.")
-    else:
-        print(f"No {provider} key was stored.")
+    p = args.provider or Settings.load().provider
+    print(f"Removed stored {p} key." if forget_key(p) else f"No {p} key was stored.")
     return 0
 
 
@@ -325,6 +325,8 @@ def cmd_run(args) -> int:
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)
         stop.set()
+        if _active_conv:
+            _active_conv.stop()
 
     signal.signal(signal.SIGTERM, on_signal)
     signal.signal(signal.SIGINT, on_signal)

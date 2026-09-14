@@ -312,17 +312,13 @@ class Conversation:
                 log.info("Session hit its time cap.")
                 return
 
+    def stop(self) -> None:
+        """Signal the conversation to stop immediately."""
+        self._ending = True
+
     async def run(self) -> None:
         chunks: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
-
-        # Catch SIGTERM inside the asyncio loop so the reconnect cycle
-        # breaks immediately instead of hanging until systemd sends SIGKILL.
-        import signal
-        try:
-            loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
-        except (NotImplementedError, OSError):
-            pass  # Windows or restricted environment
 
         watchdog = asyncio.create_task(self._watchdog(), name="watchdog")
         play_task = asyncio.create_task(self._play(chunks), name="play")
@@ -391,11 +387,6 @@ class Conversation:
             watchdog.cancel()
             play_task.cancel()
             await asyncio.gather(watchdog, play_task, return_exceptions=True)
-
-    def _on_sigterm(self) -> None:
-        """SIGTERM handler — break the reconnect loop gracefully."""
-        log.info("SIGTERM received in conversation — ending.")
-        self._ending = True
 
 
 async def probe(settings: Settings, client: genai.Client) -> str:
