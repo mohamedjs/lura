@@ -1,8 +1,8 @@
-"""Dynamic Island HUD overlay — Cybernetic AI Island with audio visualizer.
+"""Dynamic Island HUD overlay — Dual-Monitor Centered AI Island.
 
-Floating top-center pill (Dynamic Island) positioned under the camera notch,
-featuring the glowing cyber face avatar, real-time audio waveform visualizer,
-status badge, and live conversation subtitle.
+Floating at the top-center of each connected monitor (laptop and external),
+featuring the centered glowing cyber face avatar flanked by audio wave visualizers,
+high-tech status badge, and live conversation subtitle.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ _STATE_LABEL = {
 
 
 class OverlayState:
-    """Thread-safe state + transcript, read by the overlay."""
+    """Thread-safe state + transcript, read by all overlay windows."""
 
     def __init__(self):
         self._state = State.IDLE
@@ -70,16 +70,17 @@ class OverlayState:
 
 # ── dimensions ──────────────────────────────────────────────────────────────
 
-ISLAND_W = 430
-ISLAND_H = 64
-TOP_MARGIN = 8
-AVATAR_SIZE = 46
-NUM_BARS = 7
+ISLAND_W = 380
+ISLAND_H = 126
+AVATAR_SIZE = 48
+BARS_PER_SIDE = 4
+TOP_PADDING = 12
 
 
-# ── GTK Dynamic Island Builder ─────────────────────────────────────────────
+# ── GTK Dynamic Island Window Builder ──────────────────────────────────────
 
-def _build_window(shared: OverlayState):
+def _build_monitor_window(monitor, shared: OverlayState):
+    """Create a Dynamic Island window positioned on a specific monitor."""
     import gi
     gi.require_version("Gdk", "3.0")
     gi.require_version("Gtk", "3.0")
@@ -104,24 +105,35 @@ def _build_window(shared: OverlayState):
         win.set_visual(visual)
     win.set_app_paintable(True)
 
-    # Center horizontally at top of primary monitor (camera notch position)
-    display = Gdk.Display.get_default()
-    if display:
-        monitor = display.get_primary_monitor()
-        if not monitor and display.get_n_monitors() > 0:
-            monitor = display.get_monitor(0)
-        if monitor:
-            geo = monitor.get_geometry()
-            scale = monitor.get_scale_factor()
-            x = geo.x + ((geo.width // scale) - ISLAND_W) // 2
-            y = geo.y + TOP_MARGIN
-            win.move(x, y)
+    # Position at top-center of this monitor's workarea with comfortable margin
+    wa = monitor.get_workarea()
+    scale = monitor.get_scale_factor()
+    x = wa.x + ((wa.width // scale) - ISLAND_W) // 2
+    y = wa.y + TOP_PADDING
+    win.move(x, y)
 
-    # Main horizontal capsule container
-    island = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-    island.get_style_context().add_class("dynamic-island")
+    # Main vertical capsule container
+    vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+    vbox.get_style_context().add_class("dynamic-island")
 
-    # 1. Cybernetic Face Avatar
+    # ── 1. Top Row: Left Waves | Centered Cyber Face | Right Waves ──
+    top_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+    top_row.set_halign(Gtk.Align.CENTER)
+    top_row.set_valign(Gtk.Align.CENTER)
+
+    # Left audio wave bars
+    left_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    left_wave_box.set_valign(Gtk.Align.CENTER)
+    left_bars = []
+    for _ in range(BARS_PER_SIDE):
+        bar = Gtk.Box()
+        bar.get_style_context().add_class("wave-bar")
+        bar.set_size_request(3, 10)
+        left_wave_box.pack_start(bar, False, False, 0)
+        left_bars.append(bar)
+    top_row.pack_start(left_wave_box, False, False, 0)
+
+    # Center Avatar: Cyber Face
     avatar_box = Gtk.Box()
     avatar_box.get_style_context().add_class("avatar-frame")
     avatar_img = None
@@ -142,27 +154,26 @@ def _build_window(shared: OverlayState):
         fallback_orb.get_style_context().add_class("avatar-orb")
         avatar_box.add(fallback_orb)
 
-    island.pack_start(avatar_box, False, False, 0)
+    top_row.pack_start(avatar_box, False, False, 0)
 
-    # 2. Audio Wave Equalizer Bars
-    wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
-    wave_box.set_valign(Gtk.Align.CENTER)
-    wave_box.get_style_context().add_class("wave-container")
-    bars = []
-    for _ in range(NUM_BARS):
+    # Right audio wave bars
+    right_wave_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=3)
+    right_wave_box.set_valign(Gtk.Align.CENTER)
+    right_bars = []
+    for _ in range(BARS_PER_SIDE):
         bar = Gtk.Box()
         bar.get_style_context().add_class("wave-bar")
         bar.set_size_request(3, 10)
-        wave_box.pack_start(bar, False, False, 0)
-        bars.append(bar)
+        right_wave_box.pack_start(bar, False, False, 0)
+        right_bars.append(bar)
+    top_row.pack_start(right_wave_box, False, False, 0)
 
-    island.pack_start(wave_box, False, False, 0)
+    vbox.pack_start(top_row, False, False, 0)
 
-    # 3. Telemetry & Subtitle Information
-    info_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-    info_box.set_valign(Gtk.Align.CENTER)
+    # ── 2. Middle Row: Centered Status Badge ──
+    status_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+    status_row.set_halign(Gtk.Align.CENTER)
 
-    header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
     title_lbl = Gtk.Label(label="LURA")
     title_lbl.get_style_context().add_class("island-title")
     dot_lbl = Gtk.Label(label="•")
@@ -170,21 +181,20 @@ def _build_window(shared: OverlayState):
     status_lbl = Gtk.Label(label="STANDBY")
     status_lbl.get_style_context().add_class("island-status")
 
-    header_box.pack_start(title_lbl, False, False, 0)
-    header_box.pack_start(dot_lbl, False, False, 0)
-    header_box.pack_start(status_lbl, False, False, 0)
+    status_row.pack_start(title_lbl, False, False, 0)
+    status_row.pack_start(dot_lbl, False, False, 0)
+    status_row.pack_start(status_lbl, False, False, 0)
+    vbox.pack_start(status_row, False, False, 0)
 
+    # ── 3. Bottom Row: Centered Live Subtitle ──
     sub_lbl = Gtk.Label(label='Say "Gemini" to activate')
-    sub_lbl.set_halign(Gtk.Align.START)
-    sub_lbl.set_max_width_chars(28)
+    sub_lbl.set_halign(Gtk.Align.CENTER)
+    sub_lbl.set_max_width_chars(38)
     sub_lbl.set_ellipsize(3)  # PANGO_ELLIPSIZE_END
     sub_lbl.get_style_context().add_class("island-sub")
+    vbox.pack_start(sub_lbl, False, False, 0)
 
-    info_box.pack_start(header_box, False, False, 0)
-    info_box.pack_start(sub_lbl, False, False, 0)
-    island.pack_start(info_box, True, True, 0)
-
-    win.add(island)
+    win.add(vbox)
 
     css_provider = Gtk.CssProvider()
     Gtk.StyleContext.add_provider_for_screen(
@@ -193,6 +203,7 @@ def _build_window(shared: OverlayState):
 
     phase = [0.0]
     prev_transcript = [""]
+    all_bars = left_bars + right_bars
 
     def _tick():
         st = shared.state
@@ -208,15 +219,17 @@ def _build_window(shared: OverlayState):
         # Update status text
         GLib.idle_add(status_lbl.set_text, _STATE_LABEL.get(st, "STANDBY"))
 
-        # Animate equalizer wave bars & compute theme colors
+        # Animate symmetric equalizer wave bars around the face
         if st == State.IDLE:
-            bar_color = "rgba(0, 190, 240, 0.4)"
+            bar_color = "rgba(0, 190, 240, 0.45)"
             avatar_glow = int(8 + 4 * math.sin(p * 0.7))
-            avatar_shadow = f"0 0 {avatar_glow}px rgba(0, 180, 255, 0.5)"
+            avatar_shadow = f"0 0 {avatar_glow}px rgba(0, 180, 255, 0.55)"
             status_color = "rgba(160, 180, 210, 0.85)"
             border_glow = "rgba(0, 180, 240, 0.35)"
-            for i, b in enumerate(bars):
-                h = int(6 + 6 * abs(math.sin(p * 0.8 + i * 0.6)))
+            for i, b in enumerate(all_bars):
+                # symmetric pulse outwards from center
+                dist = abs(i - 3.5)
+                h = int(6 + 6 * abs(math.sin(p * 0.8 + dist * 0.5)))
                 b.set_size_request(3, h)
 
         elif st == State.LISTENING:
@@ -225,8 +238,9 @@ def _build_window(shared: OverlayState):
             avatar_shadow = f"0 0 {avatar_glow}px rgba(0, 230, 255, 0.95), 0 0 {avatar_glow*2}px rgba(0, 130, 255, 0.5)"
             status_color = "rgba(0, 235, 255, 1.0)"
             border_glow = "rgba(0, 220, 255, 0.75)"
-            for i, b in enumerate(bars):
-                h = int(8 + 22 * abs(math.sin(p * 2.2 + i * 0.9)))
+            for i, b in enumerate(all_bars):
+                dist = abs(i - 3.5)
+                h = int(8 + 22 * abs(math.sin(p * 2.2 + dist * 0.8)))
                 b.set_size_request(3, h)
 
         elif st == State.SPEAKING:
@@ -235,8 +249,9 @@ def _build_window(shared: OverlayState):
             avatar_shadow = f"0 0 {avatar_glow}px rgba(52, 211, 153, 0.95), 0 0 {avatar_glow*2}px rgba(16, 185, 129, 0.5)"
             status_color = "rgba(52, 211, 153, 1.0)"
             border_glow = "rgba(52, 211, 153, 0.8)"
-            for i, b in enumerate(bars):
-                h = int(10 + 26 * abs(math.sin(p * 3.0 + i * 1.2)))
+            for i, b in enumerate(all_bars):
+                dist = abs(i - 3.5)
+                h = int(10 + 26 * abs(math.sin(p * 3.0 + dist * 1.0)))
                 b.set_size_request(3, h)
 
         else:  # CONNECTING
@@ -245,18 +260,19 @@ def _build_window(shared: OverlayState):
             avatar_shadow = f"0 0 {avatar_glow}px rgba(245, 158, 11, 0.85)"
             status_color = "rgba(245, 175, 40, 1.0)"
             border_glow = "rgba(245, 158, 11, 0.6)"
-            for i, b in enumerate(bars):
-                h = int(6 + 12 * abs(math.sin(p * 1.8 + i * 0.7)))
+            for i, b in enumerate(all_bars):
+                dist = abs(i - 3.5)
+                h = int(6 + 12 * abs(math.sin(p * 1.8 + dist * 0.7)))
                 b.set_size_request(3, h)
 
         css = f"""
         window {{ background-color: transparent; }}
         .dynamic-island {{
-            background: rgba(8, 10, 16, 0.93);
-            border-radius: 32px;
+            background: rgba(8, 10, 16, 0.94);
+            border-radius: 26px;
             border: 1.5px solid {border_glow};
-            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.75), 0 0 16px {border_glow};
-            padding: 8px 16px 8px 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.75), 0 0 16px {border_glow};
+            padding: 10px 18px 10px 18px;
         }}
         .avatar-frame {{
             border-radius: 50%;
@@ -267,9 +283,6 @@ def _build_window(shared: OverlayState):
         .avatar-orb {{
             border-radius: 50%;
             background: radial-gradient(circle, {bar_color} 0%, rgba(3,6,16,0.3) 100%);
-        }}
-        .wave-container {{
-            padding: 0 4px;
         }}
         .wave-bar {{
             background: {bar_color};
@@ -295,33 +308,44 @@ def _build_window(shared: OverlayState):
             letter-spacing: 1.5px;
         }}
         .island-sub {{
-            color: rgba(180, 200, 235, 0.75);
+            color: rgba(185, 205, 235, 0.85);
             font-family: monospace;
             font-size: 10px;
+            padding-top: 2px;
         }}
         """
         css_provider.load_from_data(css.encode("utf-8"))
         return True
 
-    GLib.timeout_add(40, _tick)  # 25 fps smooth animations
+    GLib.timeout_add(40, _tick)  # 25 fps
     return win
 
 
 # ── public API ──────────────────────────────────────────────────────────────
 
 def start_overlay(shared: OverlayState) -> threading.Thread | None:
-    """Start the overlay in a daemon thread. Returns the thread, or None."""
+    """Start the overlay on all active monitors in a daemon thread."""
 
     def _run():
         try:
             import gi
             gi.require_version("Gdk", "3.0")
             gi.require_version("Gtk", "3.0")
-            from gi.repository import Gtk
+            from gi.repository import Gdk, Gtk
 
-            win = _build_window(shared)
-            win.show_all()
-            log.info("Dynamic Island HUD running (top-center).")
+            display = Gdk.Display.get_default()
+            if not display or display.get_n_monitors() == 0:
+                log.warning("No display or monitors found for overlay.")
+                return
+
+            windows = []
+            for i in range(display.get_n_monitors()):
+                monitor = display.get_monitor(i)
+                win = _build_monitor_window(monitor, shared)
+                win.show_all()
+                windows.append(win)
+
+            log.info("Dynamic Island running on %d monitor(s) (top-center).", len(windows))
             Gtk.main()
         except Exception:
             log.warning("Overlay unavailable — running headless.", exc_info=True)
