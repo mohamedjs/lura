@@ -18,10 +18,12 @@ IN_BLOCK = 800    # 50ms at 16kHz — small enough that barge-in stays responsiv
 OUT_BLOCK = 1200  # 50ms at 24kHz
 
 
-def build_config(settings: Settings) -> types.LiveConnectConfig:
+def build_config(settings: Settings, context_hint: str = "") -> types.LiveConnectConfig:
     from .tools import GEMINI_TOOLS, get_machine_context
 
     system_instruction = f"{settings.system_instruction}\n{get_machine_context()}"
+    if context_hint:
+        system_instruction += context_hint
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         speech_config=types.SpeechConfig(
@@ -83,23 +85,25 @@ class Conversation:
                 self._transcript.append(f"Assistant: {text}")
             self._model_buf.clear()
 
-    async def _replay_history(self, session) -> None:
-        """Send prior conversation turns to restore context in a new session."""
+    def _get_context_hint(self) -> str:
+        """Return a brief conversation summary for the system instruction.
+
+        The native audio model rejects text turns sent via send_client_content
+        (1007 CONTENT_TYPE_AUDIO). A short summary in the system instruction
+        is safe — the base instruction already contains text.
+        """
         if not self._transcript:
-            return
-        turns = []
-        for entry in self._transcript[-20:]:  # cap at last 20 turns
-            if entry.startswith("User: "):
-                turns.append(types.Content(
-                    role="user", parts=[types.Part(text=entry[6:])]
-                ))
-            elif entry.startswith("Assistant: "):
-                turns.append(types.Content(
-                    role="model", parts=[types.Part(text=entry[11:])]
-                ))
-        if turns:
-            log.info("Replaying %d history turns…", len(turns))
-            await session.send_client_content(turns=turns, turn_complete=False)
+            return ""
+        # Keep only the last few exchanges, truncated
+        recent = self._transcript[-6:]
+        summary = " | ".join(recent)
+        if len(summary) > 400:
+            summary = summary[-400:]
+        return (
+            "\n\n[You are resuming a conversation. Recent context: "
+            + summary
+            + "]\nContinue naturally. Do not repeat greetings."
+        )
 
     # ── audio in ────────────────────────────────────────────────────────────
     async def _pump_mic(self, session, loop: asyncio.AbstractEventLoop) -> None:
@@ -285,19 +289,28 @@ class Conversation:
         chunks: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
+        # Catch SIGTERM inside the asyncio loop so the reconnect cycle
+        # breaks immediately instead of hanging until systemd sends SIGKILL.
+        import signal
+        try:
+            loop.add_signal_handler(signal.SIGTERM, self._on_sigterm)
+        except (NotImplementedError, OSError):
+            pass  # Windows or restricted environment
+
         watchdog = asyncio.create_task(self._watchdog(), name="watchdog")
         play_task = asyncio.create_task(self._play(chunks), name="play")
 
         try:
             while not self._ending and not watchdog.done():
-                config = build_config(self.settings)
+                config = build_config(
+                    self.settings, context_hint=self._get_context_hint()
+                )
                 log.info("Opening Gemini Live session… (history: %d turns)",
                          len(self._transcript))
                 try:
                     async with self.client.aio.live.connect(
                         model=self.settings.model, config=config
                     ) as session:
-                        await self._replay_history(session)
                         self._set_overlay("listening")
 
                         mic = asyncio.create_task(
@@ -345,6 +358,11 @@ class Conversation:
             watchdog.cancel()
             play_task.cancel()
             await asyncio.gather(watchdog, play_task, return_exceptions=True)
+
+    def _on_sigterm(self) -> None:
+        """SIGTERM handler — break the reconnect loop gracefully."""
+        log.info("SIGTERM received in conversation — ending.")
+        self._ending = True
 
 
 async def probe(settings: Settings, client: genai.Client) -> str:
