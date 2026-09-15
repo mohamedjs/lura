@@ -1,64 +1,80 @@
 """Lura Hologram Overlay — 3D Cyberpunk AI Wireframe Face.
 
 Floating in the top-right corner with zero chrome, border, or background.
-Supports three smoothly transitioned visual states:
-- Listening: Stable, gentle idle pulse/glow.
-- Thinking: Rotational 3D motion + data-processing glow animation through vertices.
-- Speaking: Audio-reactive wave/pulse animation across wireframe nodes.
+
+Look: hollow low-poly head of electric cyan (#00F0FF) lines with white-hot
+vertex cores and a turquoise bloom. Lines burn bright along the facial ridges
+(jawline, cheekbones, brow, nose bridge, lips) and fall away to a dim lattice
+across the flat cheeks and forehead. Below the chin the mesh dissolves into
+drifting particles and broken line fragments.
+
+Seamless looping animation:
+1. Entire mesh breathes slowly (±2% pulse over 4 seconds).
+2. Bright cyan light wave travels from chin to skull every 3 seconds.
+3. Loose particles below neck drift slowly upward and fade out, continuously respawning.
+4. Random individual vertex dots flicker brighter (data activity).
+5. Head rotates gently left/right by 4 degrees in a slow figure-eight.
+- Speaking: mouth aperture tracks live audio amplitude, glow +40%.
+- Idle: glow dims to 60%, motion slows.
+- Smooth 30fps loop on transparent background.
 """
 
 from __future__ import annotations
 
 import enum
-import io
 import logging
 import math
-from pathlib import Path
 import threading
+import time
+
+from .face_mesh import EDGES, LANDMARK_INDICES, VERTICES_3D
 
 log = logging.getLogger(__name__)
 
-# ── 3D Wireframe Face Model ──────────────────────────────────────────────────
-# 67 anatomical facial vertices centered at (0, 0, 0)
-VERTICES_3D: list[tuple[float, float, float]] = [
-    (0.0, -170.0, 3.8), (-35.0, -160.0, -4.8), (35.0, -160.0, -4.8), (-65.0, -136.0, -20.0),
-    (65.0, -136.0, -20.0), (0.0, -133.0, 24.4), (-40.0, -118.0, 22.1), (40.0, -118.0, 22.1),
-    (-88.0, -100.0, -20.0), (88.0, -100.0, -20.0), (0.0, -93.0, 41.1), (-25.0, -88.0, 40.0),
-    (25.0, -88.0, 40.0), (-55.0, -83.0, 30.1), (55.0, -83.0, 30.1), (-25.0, -66.0, 46.5),
-    (25.0, -66.0, 46.5), (0.0, -63.0, 49.7), (-55.0, -60.0, 37.6), (55.0, -60.0, 37.6),
-    (-100.0, -58.0, -20.0), (100.0, -58.0, -20.0), (-35.0, -52.0, 47.3), (35.0, -52.0, 47.3),
-    (-80.0, -48.0, 22.9), (80.0, -48.0, 22.9), (-18.0, -46.0, 45.9), (0.0, -46.0, 75.1),
-    (18.0, -46.0, 45.9), (-55.0, -43.0, 41.5), (55.0, -43.0, 41.5), (-35.0, -38.0, 49.8),
-    (35.0, -38.0, 49.8), (0.0, -18.0, 78.4), (-80.0, -13.0, 29.3), (80.0, -13.0, 29.3),
-    (-48.0, -8.0, 48.3), (48.0, -8.0, 48.3), (-16.0, 0.0, 56.1), (16.0, 0.0, 56.1),
-    (0.0, 4.0, 87.0), (0.0, 12.0, 86.7), (-35.0, 17.0, 52.0), (35.0, 17.0, 52.0),
-    (-70.0, 27.0, 35.5), (70.0, 27.0, 35.5), (0.0, 34.0, 70.9), (-20.0, 37.0, 69.0),
-    (20.0, 37.0, 69.0), (-35.0, 44.0, 48.8), (35.0, 44.0, 48.8), (-20.0, 48.0, 67.3),
-    (20.0, 48.0, 67.3), (0.0, 50.0, 68.4), (0.0, 64.0, 65.5), (-62.0, 67.0, 31.5),
-    (62.0, 67.0, 31.5), (-45.0, 102.0, 27.5), (45.0, 102.0, 27.5), (-18.0, 127.0, 39.4),
-    (18.0, 127.0, 39.4), (0.0, 132.0, 38.9), (-35.0, 137.0, 13.8), (35.0, 137.0, 13.8),
-    (-50.0, 167.0, -20.0), (50.0, 167.0, -20.0), (0.0, 170.0, 17.8),
-]
+# Key landmark vertex indices for selective highlights
+HIGHLIGHT_NODES: set[int] = set(
+    LANDMARK_INDICES.get("eyes_left", [])
+    + LANDMARK_INDICES.get("eyes_right", [])
+    + LANDMARK_INDICES.get("nose", [])
+    + LANDMARK_INDICES.get("mouth_upper", [])
+    + LANDMARK_INDICES.get("mouth_lower", [])
+    + LANDMARK_INDICES.get("chin", [])
+    + LANDMARK_INDICES.get("brow", [])
+)
+# Prompt spec: lines brightest along facial ridges (jawline, cheekbones, brow,
+# nose bridge, lips), dim across the flat cheeks/forehead. Precomputed at import.
+FEATURE_NODES: set[int] = set(
+    LANDMARK_INDICES.get("jawline", [])
+    + LANDMARK_INDICES.get("cheekbones", [])
+    + LANDMARK_INDICES.get("brow", [])
+    + LANDMARK_INDICES.get("nose", [])
+    + LANDMARK_INDICES.get("mouth_upper", [])
+    + LANDMARK_INDICES.get("mouth_lower", [])
+    + LANDMARK_INDICES.get("chin", [])
+    + LANDMARK_INDICES.get("eyes_left", [])
+    + LANDMARK_INDICES.get("eyes_right", [])
+)
+FEATURE_WEIGHT: tuple[float, ...] = tuple(
+    1.0 if i in FEATURE_NODES else 0.42 for i in range(len(VERTICES_3D))
+)
+EYE_NODES: set[int] = set(
+    LANDMARK_INDICES.get("eyes_left", []) + LANDMARK_INDICES.get("eyes_right", [])
+)
 
-# 138 connecting mesh edges
-EDGES: list[tuple[int, int]] = [
-    (0, 1), (0, 2), (1, 3), (2, 4), (3, 8), (4, 9), (8, 20), (9, 21), (20, 24), (21, 25),
-    (0, 5), (1, 6), (2, 7), (3, 6), (4, 7), (8, 13), (9, 14), (5, 1), (5, 2), (5, 6),
-    (5, 7), (5, 10), (6, 10), (7, 10), (6, 13), (7, 14), (13, 11), (14, 12), (10, 11),
-    (10, 12), (10, 17), (11, 17), (12, 17), (11, 15), (12, 16), (13, 18), (14, 19),
-    (17, 15), (17, 16), (15, 18), (16, 19), (18, 24), (19, 25), (15, 22), (18, 22),
-    (18, 29), (29, 22), (22, 26), (26, 31), (31, 29), (22, 31), (16, 23), (19, 23),
-    (19, 30), (30, 23), (23, 28), (28, 32), (32, 30), (23, 32), (17, 27), (15, 27),
-    (16, 27), (27, 26), (27, 28), (27, 33), (33, 40), (33, 38), (33, 39), (26, 38),
-    (28, 39), (38, 40), (39, 40), (40, 41), (38, 41), (39, 41), (31, 36), (32, 37),
-    (29, 34), (30, 35), (24, 34), (25, 35), (34, 36), (35, 37), (34, 44), (35, 45),
-    (36, 42), (37, 43), (38, 36), (39, 37), (38, 42), (39, 43), (42, 44), (43, 45),
-    (41, 46), (38, 47), (39, 48), (46, 47), (46, 48), (47, 49), (48, 50), (42, 49),
-    (43, 50), (49, 51), (50, 52), (53, 51), (53, 52), (46, 53), (47, 51), (48, 52),
-    (53, 54), (51, 54), (52, 54), (44, 55), (45, 56), (55, 49), (56, 50), (55, 57),
-    (56, 58), (57, 54), (58, 54), (57, 59), (58, 60), (59, 54), (60, 54), (59, 61),
-    (60, 61), (59, 62), (60, 63), (61, 62), (61, 63), (57, 64), (58, 65), (62, 64),
-    (63, 65), (62, 66), (63, 66), (64, 66), (65, 66),
+MOUTH_UPPER: set[int] = set(LANDMARK_INDICES.get("mouth_upper", []))
+MOUTH_LOWER: set[int] = set(LANDMARK_INDICES.get("mouth_lower", []))
+CHIN_NODES: set[int] = set(LANDMARK_INDICES.get("chin", []))
+
+# Procedural floating data particles below neck: (x_spread, z_depth, speed, phase)
+PARTICLES: list[tuple[float, float, float, float]] = [
+    (-48.0, 16.0, 26.0, 0.2), (-32.0, 22.0, 30.0, 0.7), (-16.0, 28.0, 34.0, 1.4),
+    (0.0, 32.0, 28.0, 2.1), (16.0, 28.0, 32.0, 0.9), (32.0, 22.0, 27.0, 1.8),
+    (48.0, 16.0, 29.0, 2.5), (-56.0, 10.0, 24.0, 0.5), (-40.0, 15.0, 35.0, 1.1),
+    (-24.0, 22.0, 27.0, 1.9), (-8.0, 28.0, 33.0, 0.3), (8.0, 28.0, 31.0, 2.7),
+    (24.0, 22.0, 25.0, 1.3), (40.0, 15.0, 36.0, 0.8), (56.0, 10.0, 23.0, 2.2),
+    (-28.0, 20.0, 29.0, 1.6), (-12.0, 26.0, 28.0, 2.4), (12.0, 26.0, 32.0, 0.4),
+    (28.0, 20.0, 33.0, 1.7), (0.0, 24.0, 30.0, 1.2), (-20.0, 18.0, 31.0, 0.6),
+    (20.0, 18.0, 28.0, 2.3), (-36.0, 12.0, 25.0, 1.5), (36.0, 12.0, 33.0, 0.1),
 ]
 
 
@@ -79,6 +95,8 @@ class OverlayState:
     def __init__(self):
         self._state = State.LISTENING
         self._transcript = ""
+        self._amp = 0.0
+        self._amp_ts = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -92,6 +110,25 @@ class OverlayState:
             val = State(val)
         with self._lock:
             self._state = val
+
+    @property
+    def amplitude(self) -> float:
+        """Voice loudness 0..1, decaying to silence between audio chunks.
+
+        Chunks arrive far slower than the 60fps render loop, so the value is
+        decayed against wall-clock time rather than per read.
+        """
+        with self._lock:
+            if self._amp <= 0.0:
+                return 0.0
+            age = time.monotonic() - self._amp_ts
+            return self._amp * max(0.0, 1.0 - age / 0.22)
+
+    @amplitude.setter
+    def amplitude(self, val: float):
+        with self._lock:
+            self._amp = max(0.0, min(1.0, val))
+            self._amp_ts = time.monotonic()
 
     @property
     def transcript(self) -> str:
@@ -108,12 +145,11 @@ class StateBlender:
     """Smooth continuous interpolation between visual states."""
 
     def __init__(self):
-        self.wl = 1.0  # listening weight
+        self.wl = 1.0  # listening / idle weight
         self.wt = 0.0  # thinking weight
         self.ws = 0.0  # speaking weight
 
     def update(self, target_st: State, dt: float = 0.04):
-        # Normalize alias states
         if target_st in (State.IDLE, State.LISTENING):
             tl, tt, ts = 1.0, 0.0, 0.0
         elif target_st in (State.CONNECTING, State.THINKING):
@@ -121,7 +157,6 @@ class StateBlender:
         else:  # SPEAKING
             tl, tt, ts = 0.0, 0.0, 1.0
 
-        # Smooth exponential lerp (~300ms transition)
         k = min(1.0, dt * 5.0)
         self.wl += (tl - self.wl) * k
         self.wt += (tt - self.wt) * k
@@ -136,15 +171,35 @@ class StateBlender:
 
 # ── Dimensions & Placement ──────────────────────────────────────────────────
 
-OVERLAY_SIZE = 170
+OVERLAY_SIZE = 220
 MARGIN_RIGHT = 24
 MARGIN_TOP = 20
 
 
 # ── Cairo Procedural 3D Head Renderer ───────────────────────────────────────
 
-def _render_frame(t: float, blender: StateBlender, size: int = OVERLAY_SIZE) -> bytes:
-    """Render the 3D wireframe head frame to PNG bytes."""
+# Prompt palette: electric cyan #00F0FF lines, pure white hot vertex cores.
+CYAN = (0.0, 240 / 255.0, 1.0)
+
+
+def _render_frame(
+    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
+) -> bytes:
+    """Render one frame to PNG bytes (self-check / offline use)."""
+    import io
+
+    bio = io.BytesIO()
+    _render_surface(t, blender, size, amp).write_to_png(bio)
+    return bio.getvalue()
+
+
+def _render_surface(
+    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
+):
+    """Render the 3D wireframe head frame to a cairo surface.
+
+    ``amp`` is voice loudness 0..1; it drives the mouth aperture while speaking.
+    """
     import cairo
 
     wl, wt, ws = blender.wl, blender.wt, blender.ws
@@ -155,128 +210,197 @@ def _render_frame(t: float, blender: StateBlender, size: int = OVERLAY_SIZE) -> 
     cr.set_operator(cairo.OPERATOR_OVER)
 
     cx, cy = size / 2.0, size / 2.0
-    dist = 310.0
+    dist = 380.0
 
-    # 1. State-specific orientations & parameters
-    # Listening: stable, gentle idle pulse
-    theta_y_l = 0.04 * math.sin(t * 0.8)
-    theta_x_l = 0.02 * math.cos(t * 0.6)
-    scale_l = 1.0 + 0.03 * math.sin(t * 2.0)
-    pulse_l = 0.7 + 0.3 * math.sin(t * 2.0)
+    # Glow modulation: dims to 60% when idle, baseline thinking 100%, expands +40% speaking
+    glow_mult = wl * 0.60 + wt * 1.00 + ws * 1.40
 
-    # Thinking: continuous 3D rotational motion + vertical data-scan sweep
-    theta_y_t = 0.72 * math.sin(t * 1.5)
-    theta_x_t = 0.12 * math.cos(t * 1.1)
-    scan_y = -170.0 + 340.0 * ((t * 0.75) % 1.0)
+    # Motion (1): Mesh breathes slowly — vertices pulse ±2% over 4 seconds
+    breath_scale = 0.02 * math.sin(2.0 * math.pi * t / 4.0)
 
-    # Speaking: organic head tilts + audio-reactive ripple wave
-    theta_y_s = 0.07 * math.sin(t * 2.4)
-    theta_x_s = 0.04 * math.sin(t * 3.0)
+    # Motion (2): Upward light wave from bottom of chin (120) to skull (-165) every 3 seconds
+    wave_y = 120.0 - 285.0 * ((t / 3.0) % 1.0)
 
-    # Blended rotation & base scale
-    rot_y = wl * theta_y_l + wt * theta_y_t + ws * theta_y_s
-    rot_x = wl * theta_x_l + wt * theta_x_t + ws * theta_x_s
-    base_scale = 0.37 * (wl * scale_l + wt * 1.0 + ws * 1.0)
+    # Motion (5): Figure-eight gentle head rotation (4 degrees = ~0.07 rad)
+    theta_y_idle = 0.07 * math.sin(t * 0.8)
+    theta_x_idle = 0.035 * math.sin(t * 1.6)
+
+    # State orientation blend
+    theta_y_t = 0.45 * math.sin(t * 1.3)
+    theta_x_t = 0.10 * math.cos(t * 0.9)
+    theta_y_s = 0.08 * math.sin(t * 2.2)
+    theta_x_s = 0.04 * math.sin(t * 2.8)
+
+    rot_y = wl * theta_y_idle + wt * theta_y_t + ws * theta_y_s
+    # Prompt: head held slightly tilted up 5 degrees (~0.087 rad).
+    rot_x = 0.087 + wl * theta_x_idle + wt * theta_x_t + ws * theta_x_s
+    base_scale = 0.49 * (1.0 + breath_scale)
 
     cos_y, sin_y = math.cos(rot_y), math.sin(rot_y)
     cos_x, sin_x = math.cos(rot_x), math.sin(rot_x)
 
-    # Ambient center bloom
-    if wl > 0.05 or ws > 0.05:
-        pat = cairo.RadialGradient(cx, cy, 5, cx, cy, 70)
-        alpha_b = (0.07 * pulse_l * wl) + (0.10 * ws)
-        pat.add_color_stop_rgba(0.0, 0.0, 0.85, 1.0, alpha_b)
-        pat.add_color_stop_rgba(1.0, 0.0, 0.2, 0.8, 0.0)
-        cr.set_source(pat)
-        cr.arc(cx, cy, 70, 0, 6.283)
-        cr.fill()
+    # Ambient contrast backing + cyan bloom (ensures contrast over bright windows)
+    dark_pat = cairo.RadialGradient(cx, cy, 10, cx, cy, 90)
+    dark_pat.add_color_stop_rgba(0.0, 0.01, 0.03, 0.08, 0.50 * glow_mult)
+    dark_pat.add_color_stop_rgba(0.65, 0.01, 0.03, 0.08, 0.30 * glow_mult)
+    dark_pat.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0)
+    cr.set_source(dark_pat)
+    cr.arc(cx, cy, 90, 0, 6.283)
+    cr.fill()
 
-    # 2. Transform 3D Vertices
+    bloom_pat = cairo.RadialGradient(cx, cy, 10, cx, cy, 95)
+    bloom_alpha = 0.11 * glow_mult
+    bloom_pat.add_color_stop_rgba(0.0, 0.0, 0.85, 1.0, bloom_alpha)
+    bloom_pat.add_color_stop_rgba(0.5, 0.0, 0.45, 0.95, bloom_alpha * 0.5)
+    bloom_pat.add_color_stop_rgba(1.0, 0.0, 0.10, 0.50, 0.0)
+    cr.set_source(bloom_pat)
+    cr.arc(cx, cy, 95, 0, 6.283)
+    cr.fill()
+
+    # Transform 3D Vertices
     proj: list[tuple[float, float, float]] = []
     node_glow: list[float] = []
     node_radii: list[float] = []
 
-    for x, y, z in VERTICES_3D:
-        # Speaking: wave ripples outward from mouth center (0, 48, 68)
-        dist_m = math.sqrt(x * x + (y - 48.0) ** 2 + (z - 68.0) ** 2)
-        wave = math.sin(dist_m * 0.07 - t * 9.0)
+    for idx, (x, y, z) in enumerate(VERTICES_3D):
+        cy_off = y + 16.0
+        cz_off = z - 28.0
 
-        # Displacements
-        dx = ws * (2.8 * wave * (x / 100.0))
-        dy = ws * (3.2 * wave * ((y - 48.0) / 100.0))
-        dz = ws * (4.0 * wave)
+        # Motion (1): radial breathing pulse on individual vertices
+        dx = breath_scale * (x / 50.0)
+        dy = breath_scale * (cy_off / 70.0)
+        dz = breath_scale * 3.0
 
-        # Mouth opening cadence during speech
-        if abs(x) < 25 and 30 < y < 70:
-            dy += ws * (2.5 * abs(math.sin(t * 7.5)))
+        # Motion (2): Upward light wave proximity
+        d_wave = abs(y - wave_y)
+        upward_glow = max(0.0, 1.0 - d_wave / 20.0)
 
-        vx, vy, vz = x + dx, y + dy, z + dz
+        # Motion (4): Random vertex dots flicker for fraction of second (data activity)
+        flicker = 0.75 if ((idx * 37 + int(t * 8.0) * 59) % 19 == 0) else 0.0
 
-        # Rotate around Y then X
+        # Speaking dynamics: mouth area triangles expand/contract with voice amplitude
+        if ws > 0.04:
+            dist_m = math.sqrt(x * x + (y - 42.0) ** 2 + (z - 65.0) ** 2)
+            ripple = math.sin(dist_m * 0.07 - t * 8.5)
+            dx += ws * (2.2 * ripple * (x / 70.0))
+            dy += ws * (2.0 * ripple * ((y - 42.0) / 70.0))
+            dz += ws * (4.2 * ripple * max(0.0, 1.0 - dist_m / 150.0))
+
+            # Mouth aperture tracks live audio amplitude; a faint idle tremor
+            # keeps it alive if no amplitude is being fed in.
+            open_amt = max(amp, 0.12 * abs(math.sin(t * 8.0)))
+            if idx in MOUTH_UPPER:
+                dy -= ws * 5.0 * open_amt
+            elif idx in MOUTH_LOWER or idx in CHIN_NODES:
+                dy += ws * 9.0 * open_amt
+
+        vx, vy, vz = x + dx, cy_off + dy, cz_off + dz
+
         rx = vx * cos_y + vz * sin_y
         rz = -vx * sin_y + vz * cos_y
         ry = vy * cos_x - rz * sin_x
         rz = vy * sin_x + rz * cos_x
 
-        # Perspective projection
         factor = dist / (dist - rz)
         px = cx + rx * factor * base_scale
         py = cy + ry * factor * base_scale
         proj.append((px, py, rz))
 
-        # Thinking data scan glow
-        d_scan = abs(y - scan_y)
-        scan_glow = wt * max(0.0, 1.0 - d_scan / 38.0)
-        node_glow.append(scan_glow)
+        glow = max(upward_glow, flicker)
+        node_glow.append(glow)
 
-        # Node radius modulation
-        r_base = 1.7
-        r_pulse = ws * (1.8 * max(0.0, wave)) + wt * (2.0 * scan_glow) + wl * (0.4 * math.sin(t * 2.0))
-        node_radii.append(max(1.2, r_base + r_pulse))
+        is_hl = idx in HIGHLIGHT_NODES
+        r_base = 1.3 if is_hl else 0.9
+        r_pulse = glow * 1.1 + (0.25 if is_hl else 0.0)
+        node_radii.append(max(0.7, r_base + r_pulse))
 
-    # 3. Draw Wireframe Edges
-    cr.set_line_width(1.2 + 0.3 * ws)
+    # Draw Wireframe Edges (delicate thin lines)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    cr.set_line_width(1.05 * (0.95 if wl > 0.5 else 1.25))
     for i1, i2 in EDGES:
         p1, p2 = proj[i1], proj[i2]
         avg_z = (p1[2] + p2[2]) / 2.0
-        base_alpha = max(0.16, min(0.92, 0.48 + avg_z / 150.0))
+        depth_alpha = max(0.20, min(0.92, 0.52 + avg_z / 80.0)) * glow_mult
         e_glow = max(node_glow[i1], node_glow[i2])
 
-        # State color blending
-        r = wl * 0.0 + wt * (0.2 + 0.8 * e_glow) + ws * 0.0
-        g = wl * 0.85 + wt * (0.75 + 0.25 * e_glow) + ws * 1.0
-        b = wl * 1.0 + wt * 1.0 + ws * 0.8
-        alpha = min(1.0, base_alpha + e_glow * 0.5)
+        # Feature ridges (jaw, cheekbones, brow, nose, lips) burn bright; the
+        # flat cheeks and forehead fall away to a dim lattice.
+        feat = 0.5 * (FEATURE_WEIGHT[i1] + FEATURE_WEIGHT[i2])
+
+        r = CYAN[0] + (1.0 - CYAN[0]) * e_glow
+        g = CYAN[1] + (1.0 - CYAN[1]) * e_glow
+        b = CYAN[2]
+        alpha = min(0.98, (depth_alpha + e_glow * 0.45) * (0.30 + 0.70 * feat))
 
         cr.set_source_rgba(r, g, b, alpha)
         cr.move_to(p1[0], p1[1])
         cr.line_to(p2[0], p2[1])
         cr.stroke()
 
-    # 4. Draw Wireframe Nodes (Vertices)
+    # Draw Wireframe Nodes (pinpoint glowing dots)
     for i, (px, py, rz) in enumerate(proj):
         nr = node_radii[i]
         glow = node_glow[i]
-        depth_alpha = max(0.25, min(1.0, 0.60 + rz / 130.0))
+        feat = FEATURE_WEIGHT[i]
+        depth_alpha = max(0.25, min(1.0, 0.60 + rz / 80.0)) * glow_mult
+        depth_alpha *= 0.35 + 0.65 * feat
+        is_hl = i in HIGHLIGHT_NODES
+        is_eye = i in EYE_NODES
 
-        # Glowing Aura
-        if glow > 0.08 or ws > 0.3:
-            aura_alpha = (glow * 0.6 * wt) + (0.35 * ws)
-            cr.set_source_rgba(0.0, 0.95, 1.0, aura_alpha)
-            cr.arc(px, py, nr * 2.2, 0, 6.283)
+        # Cyan halo + white-hot core (same two-pass as the drift particles).
+        if glow > 0.12 or is_eye or (is_hl and ws > 0.2):
+            halo_alpha = min(0.75, (glow * 0.5) + (0.25 * ws) + (0.09 if is_eye else 0.0))
+            halo_alpha *= glow_mult * (0.4 + 0.6 * feat)
+            cr.set_source_rgba(CYAN[0], 0.90, CYAN[2], halo_alpha)
+            cr.arc(px, py, nr * (1.8 if is_eye else 2.1), 0, 6.283)
             cr.fill()
 
-        # Core node
-        cr_r = wl * 0.85 + wt * (0.85 + 0.15 * glow) + ws * 0.70
-        cr_g = wl * 0.95 + wt * 0.95 + ws * 1.00
-        cr_b = wl * 1.00 + wt * 1.00 + ws * 0.90
-        cr.set_source_rgba(cr_r, cr_g, cr_b, depth_alpha)
+        cr.set_source_rgba(1.0, 1.0, 1.0, min(1.0, depth_alpha * (1.25 if is_eye else 1.0)))
         cr.arc(px, py, nr, 0, 6.283)
         cr.fill()
 
-    bio = io.BytesIO()
-    surface.write_to_png(bio)
-    return bio.getvalue()
+    # Motion (3): Loose particles drifting upward below neck
+    for p_i, (px_off, pz_off, speed, phase) in enumerate(PARTICLES):
+        y_drift = 142.0 - ((t * speed + phase * 40.0) % 70.0)
+        progress = (142.0 - y_drift) / 70.0
+        p_alpha = math.sin(progress * math.pi) * 0.65 * glow_mult
+
+        if p_alpha > 0.03:
+            x_wobble = px_off + 6.0 * math.sin(t * 1.5 + phase * 6.0)
+            vx, vy, vz = x_wobble, y_drift + 16.0, pz_off - 28.0
+
+            rx = vx * cos_y + vz * sin_y
+            rz = -vx * sin_y + vz * cos_y
+            ry = vy * cos_x - rz * sin_x
+            rz = vy * sin_x + rz * cos_x
+
+            factor = dist / (dist - rz)
+            ppx = cx + rx * factor * base_scale
+            ppy = cy + ry * factor * base_scale
+
+            # Every third one is a broken line fragment rather than a dot —
+            # the mesh shearing apart as it dissolves.
+            if p_i % 3 == 0:
+                ang = phase * 2.4 + t * 0.6
+                fl = 3.5 + 2.5 * math.sin(phase * 5.0)
+                ex, ey = fl * math.cos(ang), fl * math.sin(ang)
+                cr.set_line_width(1.0)
+                cr.set_source_rgba(CYAN[0], CYAN[1], CYAN[2], p_alpha * 0.85)
+                cr.move_to(ppx - ex, ppy - ey)
+                cr.line_to(ppx + ex, ppy + ey)
+                cr.stroke()
+                continue
+
+            cr.set_source_rgba(CYAN[0], 0.85, CYAN[2], p_alpha * 0.40)
+            cr.arc(ppx, ppy, 2.2, 0, 6.283)
+            cr.fill()
+
+            cr.set_source_rgba(1.0, 1.0, 1.0, p_alpha)
+            cr.arc(ppx, ppy, 0.95, 0, 6.283)
+            cr.fill()
+
+    return surface
 
 
 # ── GTK Window Builder ──────────────────────────────────────────────────────
@@ -314,7 +438,6 @@ def _build_monitor_window(monitor, shared: OverlayState):
     y = wa.y + MARGIN_TOP
     win.move(x, y)
 
-    # Completely transparent window CSS
     css_provider = Gtk.CssProvider()
     css = b"""
     window, window.background, .cyber-window {
@@ -329,7 +452,6 @@ def _build_monitor_window(monitor, shared: OverlayState):
         screen, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 
-    # Draggable image container
     ev = Gtk.EventBox()
     ev.set_visible_window(False)
     ev.connect(
@@ -345,19 +467,36 @@ def _build_monitor_window(monitor, shared: OverlayState):
     blender = StateBlender()
     phase = [0.0]
 
+    # ponytail: frames go out through a PNG encode/decode (~11ms/frame, still
+    # inside the 16ms budget for one monitor). Painting the cairo surface
+    # straight into a Gtk.DrawingArea is ~4ms, but needs the python3-gi-cairo
+    # foreign-struct converter, which isn't installed here. Switch if the
+    # multi-monitor frame rate ever matters.
     def _tick():
-        blender.update(shared.state, dt=0.04)
-        phase[0] += 0.04
-        png_data = _render_frame(phase[0], blender, size=OVERLAY_SIZE)
+        blender.update(shared.state, dt=0.033)
+        # Idle motion slows to 60%; scale the increment so the phase stays
+        # monotonic and the breath/wave never jump across a state blend.
+        phase[0] += 0.033 * (0.60 * blender.wl + blender.wt + blender.ws)
+        png_data = _render_frame(
+            phase[0], blender, size=OVERLAY_SIZE, amp=shared.amplitude
+        )
         loader = GdkPixbuf.PixbufLoader.new_with_type("png")
         loader.write(png_data)
         loader.close()
         pix = loader.get_pixbuf()
         if pix:
+            # GLib.idle_add, not a direct call: Gtk.main() runs in a daemon
+            # thread here, and setting the pixbuf inline leaves the overlay
+            # blank on screen.
             GLib.idle_add(img.set_from_pixbuf, pix)
         return True
 
-    GLib.timeout_add(40, _tick)  # 25 FPS animation loop
+    # ponytail: 30fps, not 60. A frame costs ~11ms to render and PNG-encode,
+    # and one timeout runs per monitor — at 16ms the main loop saturates and
+    # GTK never gets to repaint, so the overlay shows up blank. 33ms leaves
+    # slack for the redraw. For a true 60fps, install python3-gi-cairo and
+    # paint the cairo surface straight into a Gtk.DrawingArea (~4ms/frame).
+    GLib.timeout_add(33, _tick)
     return win
 
 
@@ -402,3 +541,36 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
     t = threading.Thread(target=_run, daemon=True, name="overlay")
     t.start()
     return t
+
+
+# ── Self-check ──────────────────────────────────────────────────────────────
+
+def _selfcheck() -> None:
+    """Catch bad indices / render crashes, which the GTK loop swallows silently."""
+    n = len(VERTICES_3D)
+    for name, idxs in LANDMARK_INDICES.items():
+        for i in idxs:
+            assert 0 <= i < n, f"{name}: vertex {i} out of range ({n} verts)"
+    for i1, i2 in EDGES:
+        assert 0 <= i1 < n and 0 <= i2 < n, f"edge ({i1},{i2}) out of range"
+    assert len(FEATURE_WEIGHT) == n
+    assert FEATURE_NODES, "no feature ridges — every line would render dim"
+
+    st = OverlayState()
+    assert st.amplitude == 0.0
+    st.amplitude = 2.0
+    assert 0.9 < st.amplitude <= 1.0, "amplitude must clamp to 1.0"
+
+    for target in (State.LISTENING, State.THINKING, State.SPEAKING):
+        b = StateBlender()
+        for _ in range(60):
+            b.update(target, dt=0.016)
+        for amp in (0.0, 1.0):
+            png = _render_frame(1.7, b, size=OVERLAY_SIZE, amp=amp)
+            assert png.startswith(b"\x89PNG"), f"{target} amp={amp}: not a PNG"
+            assert len(png) > 1000, f"{target} amp={amp}: frame looks empty"
+    print("overlay self-check OK")
+
+
+if __name__ == "__main__":
+    _selfcheck()

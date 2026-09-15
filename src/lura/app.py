@@ -67,7 +67,15 @@ def _converse(settings: Settings, overlay_state=None, mcp_manager=None,
     else:
         from .openrouter import Conversation as ORConversation
 
-        ORConversation(settings, load_key("openrouter")).run()
+        conv = ORConversation(settings, load_key("openrouter"),
+                              overlay_state=overlay_state,
+                              mcp_manager=mcp_manager,
+                              initial_prompt=initial_prompt)
+        _active_conv = conv
+        try:
+            conv.run()
+        finally:
+            _active_conv = None
 
 
 # ── commands ────────────────────────────────────────────────────────────────
@@ -242,17 +250,20 @@ def cmd_selftest(args) -> int:
 
         print("\n── chat round-trip ──")
         try:
-            reply = chat(settings, key, [{"role": "user", "content": "Reply with exactly: hello"}])
-            print(f"OK: model replied {reply[:80]!r}")
+            message = chat(settings, key, [{"role": "user", "content": "Reply with exactly: hello"}])
+            print(f"OK: model replied {(message.get('content') or '')[:80]!r}")
         except Exception as exc:
             print(f"FAIL: {type(exc).__name__}: {exc}")
             failures += 1
 
         print(f"\n── speech ({settings.openrouter_tts_model}) ──")
         try:
-            from .openrouter import speak
+            from .openrouter import mp3_to_pcm, speak
             audio = speak(settings, key, "Test.")
-            print(f"OK: {len(audio)} bytes of audio")
+            pcm = mp3_to_pcm(audio)
+            print(f"OK: {len(audio)} bytes of speech, {len(pcm)} bytes decoded")
+            if not pcm:
+                raise RuntimeError("ffmpeg could not decode it — is ffmpeg installed?")
         except Exception as exc:
             print(f"FAIL: {type(exc).__name__}: {exc}\n  lura config openrouter_tts_model <id>")
             failures += 1

@@ -5,9 +5,11 @@ Two providers, two very different shapes:
 * ``gemini``     — the Live API. Full-duplex native audio: your voice streams
                    up, speech streams back, the server decides when you have
                    stopped talking.
-* ``openrouter`` — turn-based. Record an utterance, transcribe it, send the
-                   text to any of OpenRouter's models, speak the reply. Slower,
-                   but it works with every model on the service.
+* ``openrouter`` — turn-based, and the default. Record an utterance, hand the
+                   audio itself to a model that reads it, run whatever tools it
+                   asks for, speak the reply. Slower and not interruptible, but
+                   it works with every model on the service and costs a
+                   fraction of a cent an exchange.
 
 Keys live in a 0600 JSON file rather than the login keyring on purpose:
 libsecret needs an *unlocked* keyring, and this service starts with the
@@ -54,24 +56,39 @@ class Settings:
 
     #: Which service answers you. Explicit, not guessed from which key exists —
     #: having both keys stored is normal.
-    provider: str = "gemini"
+    provider: str = "openrouter"
 
     # ── models, kept per provider so switching back does not lose the other ──
     # Preview ids churn. If one is retired the error reads "model not found".
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    openrouter_model: str = "google/gemini-2.5-flash"
-    #: Transcription for the OpenRouter path. Not local Vosk: that model is
-    #: en-US only and would quietly mistranscribe every other language.
-    openrouter_stt_model: str = "openai/whisper-1"
-    openrouter_tts_model: str = "openai/gpt-4o-mini-tts"
-    openrouter_tts_voice: str = "alloy"
+    #: Reads audio natively *and* calls tools, so one request covers hearing,
+    #: thinking and deciding — no separate transcription step, and no local
+    #: Vosk (that model is en-US only and would mistranscribe Arabic).
+    #: `gemini-2.5-flash-lite` is cheaper still and was the first choice, but
+    #: on an Arabic "what is my CPU temperature" it skipped the tool and
+    #: answered in English on one run in three. This one got it right every
+    #: time, for a tenth of a cent more per exchange.
+    openrouter_model: str = "google/gemini-3.1-flash-lite"
+    #: Free, and verified to speak Arabic and English — checked by making it
+    #: read an Arabic sentence and transcribing the result back.
+    openrouter_tts_model: str = "fish-audio/s2.1-pro-free:free"
+    #: Used when the free tier is rate limited or the provider is down. Same
+    #: family, same voice quality, fractions of a cent per reply.
+    openrouter_tts_fallback_model: str = "fish-audio/s1"
+    #: Voice names are provider-specific and the default models pick their own.
+    #: Set one only if you switch to a model that demands it.
+    openrouter_tts_voice: str = ""
 
     # ── voice ───────────────────────────────────────────────────────────────
     voice: str = "Puck"          # Gemini Live voice
     language: str = "en-US"
     system_instruction: str = (
-        "You are a spoken assistant. Keep answers short and conversational, "
-        "as if talking out loud. Do not use markdown or lists."
+        "You are Lura, a spoken assistant. Keep answers short and "
+        "conversational, as if talking out loud. Do not use markdown or lists. "
+        # The language rule is repeated at the end of the machine context too:
+        # buried in the middle of a long system message it gets ignored, and
+        # an Arabic question comes back answered in English.
+        "Always reply in the same language the user spoke to you in."
     )
 
     # ── wake word (always local, always Vosk, whichever provider answers) ────

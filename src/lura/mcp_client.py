@@ -185,6 +185,30 @@ class MCPManager:
                     log.warning("Failed converting tool %s: %s", raw, exc)
         return decls
 
+    def get_openai_tools(self) -> list[dict]:
+        """The same tools in OpenAI shape, for the OpenRouter path.
+
+        No schema conversion here: MCP already speaks JSON Schema, which is
+        exactly what the OpenAI tools field wants.
+        """
+        out: list[dict] = []
+        for s in self.servers.values():
+            for t in s.tools:
+                if not (raw := t.get("name", "")):
+                    continue
+                schema = t.get("inputSchema")
+                if not isinstance(schema, dict):
+                    schema = {"type": "object", "properties": {}}
+                out.append({
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp_{s.name}_{raw}",
+                        "description": f"[{s.name}] {t.get('description', '')}".strip(),
+                        "parameters": schema,
+                    },
+                })
+        return out
+
     def call_tool(self, gemini_tool_name: str, arguments: dict | None = None) -> str:
         if gemini_tool_name in self._tool_map:
             server, raw_name = self._tool_map[gemini_tool_name]

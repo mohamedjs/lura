@@ -35,3 +35,7 @@ MANIFEST
 *.env
 *.key
 credentials.json
+
+# API keys — never commit these
+env-d.txt
+keys.json
