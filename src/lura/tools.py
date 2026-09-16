@@ -17,9 +17,14 @@ from google.genai import types
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(maxsize=1)
-def get_machine_context() -> str:
+@functools.lru_cache(maxsize=4)
+def get_machine_context(reply_language: str = "") -> str:
     """Return concise system context so the model understands the host.
+
+    ``reply_language`` forces every answer into one language. Empty means
+    mirror whoever is speaking — right for Gemini Live, wrong when the voice
+    on the other end only speaks English: the model would happily reply in
+    Arabic and the synthesiser would read it as gibberish.
 
     Cached for the life of the process for two reasons: it shells out and walks
     a directory, and it is the head of every request's prompt. Google caches a
@@ -47,6 +52,13 @@ def get_machine_context() -> str:
             pass
 
     scripts_str = ", ".join(sorted(local_scripts)) if local_scripts else "none"
+
+    language_rule = (
+        f"Always answer in {reply_language}, even when the user speaks another "
+        f"language to you. Never answer in any other language."
+        if reply_language else
+        "Reply in the SAME LANGUAGE the user spoke. Egyptian Arabic in, Egyptian Arabic out."
+    )
 
     # Which GitHub account this machine pushes as. Without it the model guesses
     # a username from the user's name and searches for a person who is not them.
@@ -84,7 +96,7 @@ def get_machine_context() -> str:
         f"(millidegrees). `sensors` is NOT installed on this machine.\n"
         f"- Deleting or overwriting data is blocked in code. Inspect freely; do not attempt removals.\n"
         f"IMPORTANT: Call the tool immediately when asked — never narrate or explain that you are about to run a command.\n"
-        f"IMPORTANT: Reply in the SAME LANGUAGE the user spoke. Egyptian Arabic in, Egyptian Arabic out."
+        f"IMPORTANT: {language_rule}"
     )
 
 
@@ -124,7 +136,11 @@ def check_command(command: str) -> str | None:
     # Command substitution hides a whole command inside a word. Rather than
     # parse it, refuse: the assistant has no reason to need it.
     if "$(" in command or "`" in command or "${" in command:
-        return _REFUSAL.format(cmd="commands that build themselves from other commands")
+        # Refused rather than parsed, because a command can hide inside one.
+        # The wording matters: the model is reading this and should retry with
+        # something simpler, not tell the user the machine is broken.
+        return ("I cannot run commands containing $( ), ${ } or backticks. "
+                "Run a simpler command without them, or use get_system_briefing.")
 
     try:
         # punctuation_chars makes the lexer emit ; && || | & as their own

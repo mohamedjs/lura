@@ -168,17 +168,17 @@ def speak(settings: Settings, key: str, text: str) -> bytes:
     the request was wrong, and retrying it elsewhere just spends money to fail
     the same way.
     """
-    def _try(model: str) -> bytes:
+    def _try(model: str, voice: str) -> bytes:
         payload = {"model": model, "input": text, "response_format": "mp3"}
-        if settings.openrouter_tts_voice:
-            payload["voice"] = settings.openrouter_tts_voice
+        if voice:
+            payload["voice"] = voice
         started = time.monotonic()
         audio = _request("/audio/speech", key, payload, raw=True, timeout=TTS_TIMEOUT)
         log.info("tts: %s said %d chars in %.1fs", model, len(text), time.monotonic() - started)
         return audio
 
     try:
-        return _try(settings.openrouter_tts_model)
+        return _try(settings.openrouter_tts_model, settings.openrouter_tts_voice)
     except OpenRouterError as exc:
         status = _status_of(exc)
         fallback = settings.openrouter_tts_fallback_model
@@ -188,7 +188,9 @@ def speak(settings: Settings, key: str, text: str) -> bytes:
             raise
         log.warning("TTS %s failed (%s); falling back to %s",
                     settings.openrouter_tts_model, status, fallback)
-        return _try(fallback)
+        # Its own voice name: voices are vendor-specific, and handing deepgram
+        # a fish-audio voice is a 400 the fallback is not allowed to retry.
+        return _try(fallback, settings.openrouter_tts_fallback_voice)
 
 
 def mp3_to_pcm(data: bytes, rate: int = OUTPUT_RATE) -> bytes:
@@ -258,13 +260,16 @@ def chat(settings: Settings, key: str, history: list[dict], tools: list[dict] | 
         "messages": [
             # The system message and the tools are the cached prefix, so they
             # must be byte-identical turn to turn. Nothing time-varying here.
-            {"role": "system", "content": settings.system_instruction + get_machine_context()},
+            {"role": "system", "content":
+                settings.system_instruction + get_machine_context(settings.reply_language)},
             *history,
         ],
         "usage": {"include": True},
     }
     if tools:
         payload["tools"] = tools
+    if settings.openrouter_reasoning_effort:
+        payload["reasoning"] = {"effort": settings.openrouter_reasoning_effort}
     order = settings.openrouter_provider_order
     if order:
         # `lura config openrouter_provider_order google-vertex` arrives as a

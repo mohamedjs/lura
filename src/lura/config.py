@@ -64,20 +64,23 @@ class Settings:
     #: Reads audio natively *and* calls tools, so one request covers hearing,
     #: thinking and deciding — no separate transcription step, and no local
     #: Vosk (that model is en-US only and would mistranscribe Arabic).
-    #: `gemini-2.5-flash-lite` is cheaper still and was the first choice, but
-    #: on an Arabic "what is my CPU temperature" it skipped the tool and
-    #: answered in English on one run in three. This one got it right every
-    #: time, for a tenth of a cent more per exchange.
-    openrouter_model: str = "google/gemini-3.1-flash-lite"
-    #: Free, and verified to speak Arabic and English — checked by making it
-    #: read an Arabic sentence and transcribing the result back.
-    openrouter_tts_model: str = "fish-audio/s2.1-pro-free:free"
-    #: Used when the free tier is rate limited or the provider is down. Same
-    #: family, same voice quality, fractions of a cent per reply.
-    openrouter_tts_fallback_model: str = "fish-audio/s1"
-    #: Voice names are provider-specific and the default models pick their own.
-    #: Set one only if you switch to a model that demands it.
-    openrouter_tts_voice: str = ""
+    #: `gemini-3.1-flash-lite` is the fast, cheap option — 2.5s and $0.0005 a
+    #: turn against 6-11s and $0.0025 here — but it is the weaker instruction
+    #: follower: asked in English it still answered in Arabic. Chosen for
+    #: answer quality over speed.
+    openrouter_model: str = "google/gemini-3.8-flash"
+    #: English only, and free — but "free" on OpenRouter means 50 requests a
+    #: day without credits, and the limit is shared across every :free model
+    #: on the account. When it runs out this 429s and the fallback answers.
+    openrouter_tts_model: str = "deepgram/flux-tts:free"
+    openrouter_tts_voice: str = "flux-alexis-en"
+    #: Same vendor, paid, English: it sounds like the primary rather than like
+    #: a different assistant when the free tier is spent. fish-audio/s1 is the
+    #: one to come back to if Arabic speech is ever wanted again — deepgram
+    #: does not speak it.
+    openrouter_tts_fallback_model: str = "deepgram/aura-2"
+    #: Voice names are vendor-specific; the fallback rejects the primary's.
+    openrouter_tts_fallback_voice: str = "aura-2-thalia-en"
     #: Which upstream OpenRouter should prefer, most wanted first.
     #:
     #: Google caches a repeated prompt prefix implicitly, but only on the
@@ -87,10 +90,22 @@ class Settings:
     #: is not, and that is where this earns its keep. Fallbacks stay on, so a
     #: pinned upstream that is down costs money rather than silence.
     openrouter_provider_order: tuple[str, ...] = ("google-vertex", "google-ai-studio")
+    #: How hard the model may think before answering. The thinking models spend
+    #: it on deciding which tool to call, which for "what is my CPU
+    #: temperature" is not a decision worth 367 tokens: minimal cut a
+    #: gemini-3.8-flash turn from 9.3s and $0.0028 to 7.4s and $0.0014 with the
+    #: same answer. Harmless on models that do not think. Empty to leave it
+    #: to the model; not every endpoint lets it be switched off entirely.
+    openrouter_reasoning_effort: str = "minimal"
 
     # ── voice ───────────────────────────────────────────────────────────────
     voice: str = "Puck"          # Gemini Live voice
     language: str = "en-US"
+    #: Force every spoken answer into one language. Empty mirrors whoever is
+    #: speaking, which is right for Gemini Live. It is wrong when the voice
+    #: only speaks English: the model answers the Arabic it heard in Arabic,
+    #: and an English synthesiser reads that as noise.
+    reply_language: str = "English"
     system_instruction: str = (
         "You are Lura, a spoken assistant. Keep answers short and "
         "conversational, as if talking out loud. Do not use markdown or lists. "
