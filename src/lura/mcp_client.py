@@ -1,6 +1,8 @@
 """Model Context Protocol (MCP) client for Lura assistant."""
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 import os
@@ -208,6 +210,31 @@ class MCPManager:
                     },
                 })
         return out
+
+    def search_openai_tools(self, query: str, limit: int = 8) -> list[dict]:
+        """The MCP tools that best match a plain-language query.
+
+        Words are cut to a six-letter prefix so "repositories" finds
+        "repository", and a hit in the tool's name outweighs any number of hits
+        in its description — otherwise a common word like "list" drags in every
+        tool whose prose happens to contain it.
+        """
+        stems = {w[:6] for w in re.split(r"\W+", query.lower()) if len(w) > 2}
+        if not stems:
+            return []
+
+        scored: list[tuple[int, int, dict]] = []
+        for tool in self.get_openai_tools():
+            fn = tool["function"]
+            name = fn["name"].lower()
+            description = (fn.get("description") or "").lower()
+            in_name = sum(1 for stem in stems if stem in name)
+            in_description = sum(1 for stem in stems if stem in description)
+            if in_name or in_description:
+                scored.append((in_name, in_description, tool))
+
+        scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        return [tool for _, _, tool in scored[:limit]]
 
     def call_tool(self, gemini_tool_name: str, arguments: dict | None = None) -> str:
         if gemini_tool_name in self._tool_map:

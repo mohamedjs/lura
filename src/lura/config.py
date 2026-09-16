@@ -78,6 +78,15 @@ class Settings:
     #: Voice names are provider-specific and the default models pick their own.
     #: Set one only if you switch to a model that demands it.
     openrouter_tts_voice: str = ""
+    #: Which upstream OpenRouter should prefer, most wanted first.
+    #:
+    #: Google caches a repeated prompt prefix implicitly, but only on the
+    #: machine that saw it: left to route freely, consecutive turns land on
+    #: different upstreams and none of them hit. Ordinary turns are now small
+    #: enough not to care, but a turn where `find_tools` attaches MCP schemas
+    #: is not, and that is where this earns its keep. Fallbacks stay on, so a
+    #: pinned upstream that is down costs money rather than silence.
+    openrouter_provider_order: tuple[str, ...] = ("google-vertex", "google-ai-studio")
 
     # ── voice ───────────────────────────────────────────────────────────────
     voice: str = "Puck"          # Gemini Live voice

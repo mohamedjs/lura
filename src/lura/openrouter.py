@@ -48,6 +48,12 @@ HEADERS = {
 #: then we speak whatever it has said so far.
 MAX_TOOL_ROUNDS = 5
 
+#: Speech is on the clock in a way that chat is not: the default voice is a
+#: free tier, and a free tier under load stalls rather than refusing. Waiting
+#: the full two minutes is two minutes of dead air, so a slow synthesis is
+#: treated as a failure and handed to the paid fallback.
+TTS_TIMEOUT = 20
+
 #: Synthesis takes about as long as the text is long: the boot briefing is ~450
 #: characters and took twelve seconds to come back as one blob, twelve seconds
 #: of silence after login before Lura says anything. Sentences are sent
@@ -86,7 +92,8 @@ class OpenRouterError(RuntimeError):
     """An API error worth showing the user verbatim."""
 
 
-def _request(path: str, key: str, payload: dict | None = None, raw: bool = False):
+def _request(path: str, key: str, payload: dict | None = None, raw: bool = False,
+             timeout: int = TIMEOUT):
     url = f"{BASE}{path}"
     headers = {"Authorization": f"Bearer {key}", **HEADERS}
 
@@ -97,7 +104,7 @@ def _request(path: str, key: str, payload: dict | None = None, raw: bool = False
 
     request = urllib.request.Request(url, data=data, headers=headers)
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             body = response.read()
             return body if raw else json.loads(body)
     except urllib.error.HTTPError as exc:
@@ -105,7 +112,13 @@ def _request(path: str, key: str, payload: dict | None = None, raw: bool = False
         # Verbatim: "model not found" and "out of credit" need different fixes,
         # and only the server knows which one this is.
         raise OpenRouterError(f"HTTP {exc.code} from {path}: {detail}", exc.code) from None
+    except TimeoutError:
+        # Surfaced as a status so the speech fallback treats a stall like a 429.
+        raise OpenRouterError(f"{path} timed out after {timeout}s", 408) from None
     except urllib.error.URLError as exc:
+        # A socket timeout arrives wrapped in URLError on some Python builds.
+        if isinstance(exc.reason, TimeoutError):
+            raise OpenRouterError(f"{path} timed out after {timeout}s", 408) from None
         raise OpenRouterError(f"Cannot reach OpenRouter: {exc.reason}") from None
 
 
@@ -159,7 +172,10 @@ def speak(settings: Settings, key: str, text: str) -> bytes:
         payload = {"model": model, "input": text, "response_format": "mp3"}
         if settings.openrouter_tts_voice:
             payload["voice"] = settings.openrouter_tts_voice
-        return _request("/audio/speech", key, payload, raw=True)
+        started = time.monotonic()
+        audio = _request("/audio/speech", key, payload, raw=True, timeout=TTS_TIMEOUT)
+        log.info("tts: %s said %d chars in %.1fs", model, len(text), time.monotonic() - started)
+        return audio
 
     try:
         return _try(settings.openrouter_tts_model)
@@ -240,18 +256,46 @@ def chat(settings: Settings, key: str, history: list[dict], tools: list[dict] | 
     payload: dict[str, Any] = {
         "model": settings.openrouter_model,
         "messages": [
+            # The system message and the tools are the cached prefix, so they
+            # must be byte-identical turn to turn. Nothing time-varying here.
             {"role": "system", "content": settings.system_instruction + get_machine_context()},
             *history,
         ],
+        "usage": {"include": True},
     }
     if tools:
         payload["tools"] = tools
+    order = settings.openrouter_provider_order
+    if order:
+        # `lura config openrouter_provider_order google-vertex` arrives as a
+        # string, and list("google-vertex") is thirteen one-letter providers.
+        if isinstance(order, str):
+            order = [p.strip() for p in order.split(",") if p.strip()]
+        payload["provider"] = {"order": list(order), "allow_fallbacks": True}
 
     result = _request("/chat/completions", key, payload)
     choices = result.get("choices") or []
     if not choices:
         raise OpenRouterError(f"No reply in response: {json.dumps(result)[:300]}")
+
+    _log_usage(result)
     return choices[0].get("message") or {}
+
+
+def _log_usage(result: dict) -> None:
+    """One line per call saying what it cost and how much of it was cached.
+
+    Worth the log line: with tool schemas in the prompt, the difference between
+    a cache hit and a miss is most of the bill, and it is otherwise invisible.
+    """
+    usage = result.get("usage") or {}
+    if not usage:
+        return
+    cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+    prompt = usage.get("prompt_tokens", 0)
+    log.info("openrouter: %s prompt tokens (%s cached), %s out, $%.5f via %s",
+             prompt, cached, usage.get("completion_tokens", 0),
+             usage.get("cost", 0.0), result.get("provider", "?"))
 
 
 class Conversation:
@@ -267,6 +311,8 @@ class Conversation:
         self._initial_prompt = initial_prompt
         self._ending = False
         self._stopped = False
+        #: MCP tools the model asked for through find_tools, this session.
+        self._found_tools: list[dict] = []
 
     def stop(self) -> None:
         """Called from the signal handler on SIGTERM/SIGINT. Must be safe to
@@ -286,19 +332,20 @@ class Conversation:
 
     # ── tools ───────────────────────────────────────────────────────────────
     def _tools(self) -> list[dict]:
+        """The five local tools, plus whatever find_tools has pulled in.
+
+        Not every MCP tool: a hundred schemas is ~12k tokens on every request,
+        and that measured 2.7 seconds of latency per turn even with the prompt
+        cached. They come in only once the model says it needs them, which for
+        "what is my CPU temperature" is never.
+        """
         from .tools import OPENAI_TOOLS
 
-        tools = list(OPENAI_TOOLS)
-        if self._mcp is not None:
-            try:
-                tools.extend(self._mcp.get_openai_tools())
-            except Exception as exc:
-                log.warning("Could not list MCP tools: %s", exc)
-        return tools
+        return list(OPENAI_TOOLS) + self._found_tools
 
     def _run_tool_calls(self, calls: list[dict]) -> None:
         """Answer every tool call the model made, in order."""
-        from .tools import END_SESSION, dispatch
+        from .tools import END_SESSION, FIND_TOOLS, dispatch
 
         for call in calls:
             fn = call.get("function") or {}
@@ -312,6 +359,12 @@ class Conversation:
             result = dispatch(name, args, self._mcp)
             if name == END_SESSION:
                 self._ending = True
+            elif name == FIND_TOOLS and self._mcp is not None:
+                # Attach what it found, so the next round can actually call it.
+                found = self._mcp.search_openai_tools(str(args.get("query", "")))
+                known = {t["function"]["name"] for t in self._found_tools}
+                self._found_tools.extend(t for t in found
+                                         if t["function"]["name"] not in known)
 
             # tool_call_id must come back exactly, or the next call is a 400.
             self.history.append({
@@ -323,16 +376,28 @@ class Conversation:
     # ── one turn ────────────────────────────────────────────────────────────
     def _answer(self) -> str:
         """Call the model, run any tools it asks for, return what to say."""
-        self._state("thinking")
-        tools = self._tools()
+        from .tools import FIND_TOOLS
 
-        for _ in range(MAX_TOOL_ROUNDS):
-            message = chat(self.settings, self.key, self.history, tools)
+        self._state("thinking")
+
+        rounds = 0
+        while rounds < MAX_TOOL_ROUNDS:
+            # Rebuilt every round, not once: find_tools adds to the list
+            # mid-turn, and a stale copy means the model is told about tools it
+            # is then not allowed to call — it starts guessing at shell
+            # commands with the tool's name in them instead.
+            message = chat(self.settings, self.key, self.history, self._tools())
             self.history.append(message)
 
             calls = message.get("tool_calls") or []
             if not calls:
                 return (message.get("content") or "").strip()
+
+            # find_tools changes nothing outside this process — it only hands
+            # the model a longer menu. Charging it against the budget lets two
+            # bad searches use up the turn and leave the user with silence.
+            if any(c.get("function", {}).get("name") != FIND_TOOLS for c in calls):
+                rounds += 1
 
             self._run_tool_calls(calls)
             if self._ending:
@@ -346,10 +411,16 @@ class Conversation:
                 self.history.append(message)
                 return (message.get("content") or "").strip()
 
-        # No canned sentence here: it would be spoken in English to whoever
-        # asked, in whatever language they asked in. The closing chime says it.
-        log.warning("Model kept asking for tools; giving up on this turn.")
-        return ""
+        # Out of rounds. One more call with no tools at all, so it has to
+        # answer in words — ending a turn in total silence is worse than
+        # anything it might say, and a canned English apology to an Arabic
+        # speaker was the thing this replaced.
+        log.warning("Model used all %d tool rounds; asking it to answer now.", MAX_TOOL_ROUNDS)
+        self.history.append({"role": "user", "content":
+            "Stop using tools and answer me now in one sentence, in my language."})
+        message = chat(self.settings, self.key, self.history, None)
+        self.history.append(message)
+        return (message.get("content") or "").strip()
 
     def _synth(self, text: str) -> bytes:
         try:

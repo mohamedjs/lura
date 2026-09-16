@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import getpass
 import logging
 import os
@@ -16,8 +17,15 @@ from google.genai import types
 log = logging.getLogger(__name__)
 
 
+@functools.lru_cache(maxsize=1)
 def get_machine_context() -> str:
-    """Return concise system context so the model understands the host."""
+    """Return concise system context so the model understands the host.
+
+    Cached for the life of the process for two reasons: it shells out and walks
+    a directory, and it is the head of every request's prompt. Google caches a
+    repeated prefix implicitly, so a string that varies between turns quietly
+    costs seven times as much as one that does not.
+    """
     user = getpass.getuser()
     host = platform.node()
     os_info = f"{platform.system()} {platform.release()}"
@@ -40,6 +48,22 @@ def get_machine_context() -> str:
 
     scripts_str = ", ".join(sorted(local_scripts)) if local_scripts else "none"
 
+    # Which GitHub account this machine pushes as. Without it the model guesses
+    # a username from the user's name and searches for a person who is not them.
+    # Asked of the package's own checkout, not the working directory: the
+    # systemd service runs from $HOME, where there is no git remote and the
+    # answer would silently be blank — frozen that way by the cache above.
+    repo = Path(__file__).resolve().parents[2]
+    github = ""
+    try:
+        remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=repo,
+                                capture_output=True, text=True, timeout=5)
+        if remote.returncode == 0 and (url := remote.stdout.strip()):
+            owner = url.rstrip("/").removesuffix(".git").replace(":", "/").split("/")[-2]
+            github = f"- GitHub account: {owner}\n"
+    except Exception:
+        pass
+
     return (
         f"\n[Host Machine Context]\n"
         f"- OS: {os_info} (Desktop: {desktop})\n"
@@ -49,6 +73,7 @@ def get_machine_context() -> str:
         f"- Home Directory: {home}\n"
         f"- Working Directory: {cwd}\n"
         f"- User scripts in ~/.local/bin: {scripts_str}\n"
+        f"{github}"
         f"- Common search paths for applications: {local_bin}, /usr/local/bin, /usr/bin\n"
         f"You have tools: `run_command` (run shell commands), `get_system_briefing` (weather, CPU "
         f"temperature, RAM, load, internet, latest commit), `list_applications` (list running or "
@@ -427,6 +452,16 @@ OPENAI_TOOLS: list[dict] = [
         {"app_name": {"type": "string", "description": "Application or binary name, e.g. 'chrome', 'obs'."}},
     ),
     _openai_tool(
+        "find_tools",
+        "Search for an extra tool when none of your own can do the job — GitHub, "
+        "the browser, the database, and anything else connected to this machine. "
+        "Call it with a plain description of what you need, and the matching tools "
+        "become available for you to call on your next step.",
+        {"query": {"type": "string",
+                   "description": "What you need to do, e.g. 'list my github pull requests'."}},
+        ["query"],
+    ),
+    _openai_tool(
         "end_session",
         "End the conversation. Call this when the user says goodbye, bye, stop, exit, or is done talking.",
         {},
@@ -435,6 +470,12 @@ OPENAI_TOOLS: list[dict] = [
 
 #: Name of the tool that ends a conversation, so callers do not hardcode it.
 END_SESSION = "end_session"
+
+#: Name of the tool that pulls MCP tools in on demand. They are not declared
+#: up front: a hundred of them is ~12k tokens of schema on every request, which
+#: measured 2.7 seconds of added latency per turn whether or not the prompt was
+#: cached. Caching makes them cheap; it does not make them fast.
+FIND_TOOLS = "find_tools"
 
 
 def dispatch(name: str, args: dict | None, mcp_manager=None) -> str:
@@ -455,6 +496,18 @@ def dispatch(name: str, args: dict | None, mcp_manager=None) -> str:
             return open_application(str(args.get("app_name", "")))
         if name == END_SESSION:
             return "Session ending now. Say a brief friendly goodbye."
+        if name == FIND_TOOLS:
+            # The caller attaches the matches; this only reports them.
+            if mcp_manager is None:
+                return "No extra tools are connected right now."
+            found = mcp_manager.search_openai_tools(str(args.get("query", "")))
+            if not found:
+                return "No extra tool matches that. Try run_command instead."
+            listing = "\n".join(
+                f"- {t['function']['name']}: {t['function'].get('description', '')[:120]}"
+                for t in found
+            )
+            return f"These tools are now available to call:\n{listing}"
         if mcp_manager is not None:
             return mcp_manager.call_tool(name, args)
         return f"Error: unknown tool {name}."
