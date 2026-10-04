@@ -35,3 +35,7 @@ MANIFEST
 *.env
 *.key
 credentials.json
+
+# Promo video
+video/node_modules/
+video/out/
