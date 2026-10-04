@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One command: Google TTS narration → motion graphics → out/lura.mp4
+# One command: narration → motion graphics → out/lura.mp4
+#   TTS_GRADIO_URL=https://xxxx.gradio.live ./make.sh   # voice from your Colab TTS (MSA)
 #   ./make.sh                                   # voice from your Lura Gemini key
 #   ./make.sh ~/Downloads/"studio lura 2.mp4"   # + your screen recording in scene 4
 #   FOOTAGE_START=5 ./make.sh clip.mp4          # start the clip 5s in
@@ -14,7 +15,14 @@ if [ ! -d node_modules/playwright ]; then
   npx playwright install chromium
 fi
 
-python3 voice.py ${TTS_ENGINE:+--engine "$TTS_ENGINE"}
+PY=python3
+if [ -n "${TTS_GRADIO_URL:-}" ]; then
+  # own venv: system pip refuses installs on recent Debian/Ubuntu
+  [ -x .venv/bin/python ] || python3 -m venv .venv
+  .venv/bin/python -c "import gradio_client" 2>/dev/null || .venv/bin/pip install -q gradio_client
+  PY=.venv/bin/python
+fi
+"$PY" voice.py ${TTS_ENGINE:+--engine "$TTS_ENGINE"} ${TTS_ARGS:-}
 
 args=(--out out/lura.mp4)
 if [ $# -ge 1 ]; then

@@ -7,6 +7,9 @@ Everything is generated from code here. There's no editor project and no stock f
 cd video
 ./make.sh                                    # → out/lura.mp4
 ./make.sh ~/Downloads/"studio lura 2.mp4"    # put your screen recording in scene 4
+
+# voice from your own Gradio TTS app (Colab share link), Modern Standard Arabic:
+TTS_GRADIO_URL=https://xxxx.gradio.live ./make.sh ~/Downloads/"studio lura 2.mp4"
 ```
 
 ## Scenes
@@ -22,10 +25,15 @@ cd video
 Scene lengths follow the narration: `voice.py` measures each WAV and writes
 `build/timeline.json`, and the picture is timed from that file.
 
-## Voice (Google)
+## Voice
 
-`voice.py` picks the first key it finds:
+`voice.py` picks the first engine it can use:
 
+0. `TTS_GRADIO_URL` (or `--gradio URL`) → **your Gradio TTS app**. It reads the app's
+   API, finds the endpoint that takes text and returns audio, selects the MSA /
+   فصحى option in any dropdown, and leaves the other inputs at their defaults.
+   Override any input with `TTS_ARGS="--gradio-arg speed=0.9 --gradio-arg ref_audio=@me.wav"`,
+   or choose the endpoint with `--gradio-api /name`. If the link is dead, it says so.
 1. `GOOGLE_TTS_API_KEY` → **Cloud Text-to-Speech**, voice `ar-XA-Chirp3-HD-Aoede`
    (`--cloud-voice ar-XA-Wavenet-A` etc.)
 2. `GEMINI_API_KEY`, or the Gemini key already saved by `lura login` →

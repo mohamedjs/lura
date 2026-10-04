@@ -1,6 +1,7 @@
 """Narration for the Lura promo: five MSA lines → WAVs + timeline.json.
 
-Engines (both Google):
+Engines:
+  gradio  any Gradio TTS app (e.g. a Colab share link), URL in --gradio or TTS_GRADIO_URL
   cloud   Google Cloud Text-to-Speech, key in GOOGLE_TTS_API_KEY
   gemini  Gemini TTS, key in GEMINI_API_KEY or Lura's own ~/.config/lura/keys.json
 
@@ -88,6 +89,93 @@ def gemini_tts(text: str, key: str, voice: str, model: str) -> bytes:
         sys.exit(f"Gemini TTS returned no audio:\n{json.dumps(out, ensure_ascii=False)[:800]}")
 
 
+MSA_WORDS = ("msa", "فصحى", "fusha", "fus7a", "standard", "modern standard")
+
+
+def _gradio_value(raw: str):
+    """--gradio-arg value: @path → uploaded file, numbers → numbers, else text."""
+    if raw.startswith("@"):
+        from gradio_client import handle_file
+        return handle_file(os.path.expanduser(raw[1:]))
+    try:
+        return float(raw) if "." in raw else int(raw)
+    except ValueError:
+        return raw
+
+
+class GradioTTS:
+    """Talks to a Gradio TTS app by reading its API: finds the endpoint that takes
+    text and returns audio, picks the MSA option in any dropdown, and leaves the
+    other inputs at the app's own defaults."""
+
+    def __init__(self, url: str, api_name: str | None, overrides: list[str]):
+        try:
+            from gradio_client import Client
+        except ImportError:
+            sys.exit("Gradio engine needs gradio_client:  python3 -m pip install gradio_client")
+        try:
+            self.client = Client(url, verbose=False)
+            api = self.client.view_api(return_format="dict", print_info=False)["named_endpoints"]
+        except Exception as err:  # noqa: BLE001 — show the real reason
+            sys.exit(f"Could not open the Gradio app at {url}\n{type(err).__name__}: {err}\n"
+                     "(gradio.live links die after ~72h or when Colab stops — re-run the notebook.)")
+        self.api_name = api_name or self._pick(api)
+        if self.api_name not in api:
+            sys.exit(f"No endpoint {self.api_name!r}. The app has:\n{self._describe(api)}")
+        self.params = api[self.api_name]["parameters"]
+        self.fixed = {}
+        for item in overrides:
+            name, _, raw = item.partition("=")
+            self.fixed[name.strip()] = _gradio_value(raw.strip())
+        self.text_param = next((p["parameter_name"] for p in self.params
+                                if p["parameter_name"] not in self.fixed and p["component"] == "Textbox"), None)
+        if not self.text_param:
+            sys.exit(f"Endpoint {self.api_name} has no text box. The app has:\n{self._describe(api)}")
+        for p in self.params:
+            name, choices = p["parameter_name"], p["type"].get("enum") or []
+            if name in self.fixed or name == self.text_param:
+                continue
+            msa = next((c for c in choices if any(w in str(c).lower() for w in MSA_WORDS)), None)
+            if msa is not None:
+                self.fixed[name] = msa
+            elif not p["parameter_has_default"]:
+                self.fixed[name] = None          # optional uploads like a reference voice
+        shown = {k: v for k, v in self.fixed.items()}
+        print(f"[gradio] {url} {self.api_name}  text→{self.text_param}  {shown}")
+
+    @staticmethod
+    def _pick(api: dict) -> str:
+        for name, e in api.items():
+            takes_text = any(p["component"] == "Textbox" for p in e["parameters"])
+            gives_audio = any(r["component"] == "Audio" for r in e["returns"])
+            if takes_text and gives_audio:
+                return name
+        sys.exit(f"No endpoint takes text and returns audio. The app has:\n{GradioTTS._describe(api)}")
+
+    @staticmethod
+    def _describe(api: dict) -> str:
+        lines = []
+        for name, e in api.items():
+            args = ", ".join(f"{p['parameter_name']}:{p['component']}" + (f"{p['type'].get('enum')}" if p["type"].get("enum") else "")
+                             for p in e["parameters"])
+            lines.append(f"  {name}({args}) → {[r['component'] for r in e['returns']]}")
+        return "\n".join(lines)
+
+    def synth(self, text: str, out: Path) -> None:
+        try:
+            result = self.client.predict(**self.fixed, **{self.text_param: text}, api_name=self.api_name)
+        except Exception as err:  # noqa: BLE001
+            sys.exit(f"Gradio {self.api_name} failed for: {text}\n{type(err).__name__}: {err}")
+        items = result if isinstance(result, (list, tuple)) else [result]
+        audio = next((x for x in items if isinstance(x, str) and Path(x).is_file()), None)
+        if audio is None:
+            sys.exit(f"Gradio returned no audio file: {result!r}")
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", audio, "-ac", "1", "-ar", str(RATE), str(out)],
+                           capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(f"ffmpeg could not read the Gradio audio {audio}:\n{r.stderr}")
+
+
 def write_pcm_wav(path: Path, pcm: bytes) -> None:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)
@@ -121,7 +209,9 @@ def lura_gemini_key() -> str:
         return ""
 
 
-def pick_engine(requested: str) -> tuple[str, str]:
+def pick_engine(requested: str, gradio_url: str) -> tuple[str, str]:
+    if requested == "gradio" or (requested == "auto" and gradio_url):
+        return ("gradio", gradio_url) if gradio_url else sys.exit("No Gradio URL (--gradio or TTS_GRADIO_URL)")
     cloud_key = os.environ.get("GOOGLE_TTS_API_KEY", "").strip()
     gem_key = os.environ.get("GEMINI_API_KEY", "").strip() or lura_gemini_key()
     if requested == "cloud" or (requested == "auto" and cloud_key):
@@ -144,7 +234,12 @@ def build_timeline(durations: list[float], voiced: bool) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--engine", choices=["auto", "cloud", "gemini", "none"], default="auto")
+    ap.add_argument("--engine", choices=["auto", "gradio", "cloud", "gemini", "none"], default="auto")
+    ap.add_argument("--gradio", default=os.environ.get("TTS_GRADIO_URL", ""),
+                    help="Gradio TTS app URL, e.g. https://xxxx.gradio.live")
+    ap.add_argument("--gradio-api", help="endpoint name, e.g. /synthesize (default: auto)")
+    ap.add_argument("--gradio-arg", action="append", default=[], metavar="NAME=VALUE",
+                    help="fix an input, e.g. dialect=MSA, speed=0.9, ref_audio=@voice.wav")
     ap.add_argument("--cloud-voice", default="ar-XA-Chirp3-HD-Aoede",
                     help="any ar-XA voice, e.g. ar-XA-Wavenet-A")
     ap.add_argument("--gemini-voice", default="Kore")
@@ -154,7 +249,8 @@ def main() -> None:
     args = ap.parse_args()
 
     BUILD.mkdir(exist_ok=True)
-    engine, key = ("none", "") if args.engine == "none" else pick_engine(args.engine)
+    engine, key = ("none", "") if args.engine == "none" else pick_engine(args.engine, args.gradio)
+    gradio = GradioTTS(key, args.gradio_api, args.gradio_arg) if engine == "gradio" else None
     durations = list(FALLBACK_SECONDS)
     if engine != "none":
         for i, text in enumerate(LINES):
@@ -163,7 +259,9 @@ def main() -> None:
                 durations[i] = wav_seconds(path)
                 continue
             print(f"[{engine}] {i + 1}/5  {text}")
-            if engine == "cloud":
+            if gradio:
+                gradio.synth(text, path)
+            elif engine == "cloud":
                 path.write_bytes(cloud_tts(text, key, args.cloud_voice))
             else:
                 write_pcm_wav(path, gemini_tts(text, key, args.gemini_voice, args.gemini_model))
