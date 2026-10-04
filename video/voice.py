@@ -127,8 +127,10 @@ class GradioTTS:
         for item in overrides:
             name, _, raw = item.partition("=")
             self.fixed[name.strip()] = _gradio_value(raw.strip())
-        self.text_param = next((p["parameter_name"] for p in self.params
-                                if p["parameter_name"] not in self.fixed and p["component"] == "Textbox"), None)
+        known = {p["parameter_name"] for p in self.params}
+        if unknown := [k for k in self.fixed if k not in known]:
+            sys.exit(f"--gradio-arg {unknown} not inputs of {self.api_name}. It takes: {', '.join(sorted(known))}")
+        self.text_param = self._text_box(self.fixed)
         if not self.text_param:
             sys.exit(f"Endpoint {self.api_name} has no text box. The app has:\n{self._describe(api)}")
         for p in self.params:
@@ -142,6 +144,26 @@ class GradioTTS:
                 self.fixed[name] = None          # optional uploads like a reference voice
         shown = {k: v for k, v in self.fixed.items()}
         print(f"[gradio] {url} {self.api_name}  text→{self.text_param}  {shown}")
+        print(f"[gradio] inputs: {', '.join(p['parameter_name'] for p in self.params)}")
+
+    def _text_box(self, fixed: dict) -> str | None:
+        """The box for the words to speak. Voice-cloning apps (F5-TTS, Habibi…)
+        also have a *reference* transcript box — never put our line there."""
+        def score(p):
+            key = f"{p['parameter_name']} {p.get('label') or ''}".lower()
+            return (2 if any(w in key for w in ("gen", "target", "synth", "to speak", "input_text")) else 0) \
+                - (3 if "ref" in key else 0)
+        boxes = [p for p in self.params if p["component"] == "Textbox" and p["parameter_name"] not in fixed]
+        return max(boxes, key=score)["parameter_name"] if boxes else None
+
+    @staticmethod
+    def _audio_path(x):
+        """Audio outputs come back as a path, a FileData-like dict, or a gr.update."""
+        if isinstance(x, dict):
+            x = x.get("value", x.get("path"))
+            if isinstance(x, dict):
+                x = x.get("path")
+        return x if isinstance(x, str) and Path(x).is_file() else None
 
     @staticmethod
     def _pick(api: dict) -> str:
@@ -167,9 +189,15 @@ class GradioTTS:
         except Exception as err:  # noqa: BLE001
             sys.exit(f"Gradio {self.api_name} failed for: {text}\n{type(err).__name__}: {err}")
         items = result if isinstance(result, (list, tuple)) else [result]
-        audio = next((x for x in items if isinstance(x, str) and Path(x).is_file()), None)
+        audio = next((a for a in map(self._audio_path, items) if a), None)
         if audio is None:
-            sys.exit(f"Gradio returned no audio file: {result!r}")
+            refs = [p["parameter_name"] for p in self.params
+                    if "ref" in p["parameter_name"].lower() and self.fixed.get(p["parameter_name"]) is None]
+            hint = (f"\nThe app may need a reference voice. Pass one, e.g.\n"
+                    f"  TTS_ARGS='--gradio-arg {refs[0]}=@voice.wav"
+                    + (f" --gradio-arg \"{refs[1]}=<exact words spoken in voice.wav>\"" if len(refs) > 1 else "")
+                    + "'") if refs else ""
+            sys.exit(f"Gradio returned no audio: {result!r}{hint}")
         r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", audio, "-ac", "1", "-ar", str(RATE), str(out)],
                            capture_output=True, text=True)
         if r.returncode:
