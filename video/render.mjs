@@ -36,6 +36,27 @@ if (FOOTAGE) {
   console.log(`footage: ${TL.footage.count} frames from ${FOOTAGE}`);
 }
 
+// Loudness envelope per frame for each narration line → drives the mouth + waveform.
+for (const s of TL.scenes) {
+  const wav = s.wav && join(BUILD, s.wav);
+  if (!wav || !existsSync(wav)) continue;
+  const pcm = spawnSync('ffmpeg', ['-v', 'error', '-i', wav, '-f', 's16le', '-ac', '1', '-ar', '24000', '-'],
+    { maxBuffer: 1 << 28 }).stdout;
+  const per = 24000 / TL.fps, rms = [];
+  for (let o = 0; o + 2 <= pcm.length; o += per * 2) {
+    let sum = 0, n = 0;
+    for (let k = o; k < Math.min(pcm.length - 1, o + per * 2); k += 2, n++) { const x = pcm.readInt16LE(k) / 32768; sum += x * x; }
+    rms.push(Math.sqrt(sum / Math.max(1, n)));
+  }
+  const ref = [...rms].sort((a, b) => a - b)[Math.floor(rms.length * 0.95)] || 1;
+  let lvl = 0;
+  s.env = rms.map(r => {                                   // fast attack, slower release
+    const x = Math.max(0, Math.min(1, (r / ref - 0.08) / 0.92));
+    lvl = x > lvl ? lvl + (x - lvl) * 0.7 : lvl + (x - lvl) * 0.35;
+    return +lvl.toFixed(3);
+  });
+}
+
 // ── picture ────────────────────────────────────────────────────────────────
 const scale = QUICK ? 0.5 : 1;
 const browser = await chromium.launch();

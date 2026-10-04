@@ -12,6 +12,7 @@ import argparse
 import base64
 import json
 import os
+import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -71,8 +72,9 @@ def gemini_tts(text: str, key: str, voice: str, model: str) -> bytes:
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         {
             "contents": [{"parts": [{"text":
-                "Read this in calm, warm Modern Standard Arabic, like a product "
-                f"film narrator. Read only the sentence:\n{text}"}]}],
+                # Google's documented pattern: a short style cue, a colon, then the
+                # words. Longer instructions risk being read aloud.
+                f"Say in a calm, warm Modern Standard Arabic (فصحى) narrator voice: {text}"}]}],
             "generationConfig": {
                 "responseModalities": ["AUDIO"],
                 "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
@@ -92,6 +94,18 @@ def write_pcm_wav(path: Path, pcm: bytes) -> None:
         w.setsampwidth(2)
         w.setframerate(RATE)
         w.writeframes(pcm)
+
+
+def tidy(path: Path) -> None:
+    """Trim leading/trailing silence and even out loudness, in place."""
+    tmp = path.with_suffix(".tmp.wav")
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05"
+    r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(path), "-af",
+                        f"{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5",
+                        "-ar", str(RATE), "-ac", "1", str(tmp)], capture_output=True, text=True)
+    if r.returncode:
+        sys.exit(f"ffmpeg could not clean {path.name}:\n{r.stderr}")
+    tmp.replace(path)
 
 
 def wav_seconds(path: Path) -> float:
@@ -135,6 +149,8 @@ def main() -> None:
                     help="any ar-XA voice, e.g. ar-XA-Wavenet-A")
     ap.add_argument("--gemini-voice", default="Kore")
     ap.add_argument("--gemini-model", default="gemini-2.5-flash-preview-tts")
+    ap.add_argument("--only", type=int, choices=range(1, 6), metavar="N",
+                    help="regenerate just line N, keep the other WAVs")
     args = ap.parse_args()
 
     BUILD.mkdir(exist_ok=True)
@@ -143,12 +159,17 @@ def main() -> None:
     if engine != "none":
         for i, text in enumerate(LINES):
             path = BUILD / f"line{i + 1}.wav"
+            if args.only and args.only != i + 1 and path.exists():
+                durations[i] = wav_seconds(path)
+                continue
             print(f"[{engine}] {i + 1}/5  {text}")
             if engine == "cloud":
                 path.write_bytes(cloud_tts(text, key, args.cloud_voice))
             else:
                 write_pcm_wav(path, gemini_tts(text, key, args.gemini_voice, args.gemini_model))
+            tidy(path)
             durations[i] = wav_seconds(path)
+            print(f"      {durations[i]:.2f}s  → {path}")
     else:
         print("No TTS key — using placeholder timing, video will have music only.")
 
