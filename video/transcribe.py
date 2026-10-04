@@ -37,10 +37,11 @@ def openrouter_key() -> str:
 
 def to_wav(path: str, start: float | None = None, dur: float | None = None) -> bytes:
     """Any audio/video → 16 kHz mono WAV bytes (optionally a time slice)."""
-    cmd = ["ffmpeg", "-v", "error"]
+    # seek after -i (decode, don't jump by bytes): Gemini's WAVs carry a wrong byte rate
+    # in the header, and input seeking then lands at twice the requested time.
+    cmd = ["ffmpeg", "-v", "error", "-i", path]
     if start is not None:
         cmd += ["-ss", f"{start:.3f}"]
-    cmd += ["-i", path]
     if dur is not None:
         cmd += ["-t", f"{dur:.3f}"]
     r = subprocess.run(cmd + ["-vn", "-ac", "1", "-ar", "16000", "-f", "wav", "-"], capture_output=True)
