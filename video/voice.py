@@ -252,12 +252,12 @@ def write_pcm_wav(path: Path, pcm: bytes) -> None:
         w.writeframes(pcm)
 
 
-def tidy(path: Path) -> None:
-    """Trim leading/trailing silence and even out loudness, in place."""
+def tidy(path: Path, tempo: float = 1.0) -> None:
+    """Trim leading/trailing silence, even out loudness, optionally slow down (pitch kept)."""
     tmp = path.with_suffix(".tmp.wav")
     trim = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.05"
     r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(path), "-af",
-                        f"{trim},areverse,{trim},areverse,loudnorm=I=-16:TP=-1.5",
+                        f"{trim},areverse,{trim},areverse,atempo={tempo},loudnorm=I=-16:TP=-1.5",
                         "-ar", str(RATE), "-ac", "1", str(tmp)], capture_output=True, text=True)
     if r.returncode:
         sys.exit(f"ffmpeg could not clean {path.name}:\n{r.stderr}")
@@ -317,6 +317,8 @@ def main() -> None:
     ap.add_argument("--ref-text", default=os.environ.get("TTS_REF_TEXT") or None,
                     help="exact words spoken in --ref-wav")
     ap.add_argument("--record-ref", action="store_true", help="record a reference voice from the mic")
+    ap.add_argument("--tempo", type=float, default=float(os.environ.get("TTS_TEMPO", 1.0)),
+                    help="speech speed, e.g. 0.88 = calmer (pitch unchanged)")
     ap.add_argument("--only", type=int, choices=range(1, 6), metavar="N",
                     help="regenerate just line N, keep the other WAVs")
     args = ap.parse_args()
@@ -344,7 +346,7 @@ def main() -> None:
                 path.write_bytes(cloud_tts(text, key, args.cloud_voice))
             else:
                 write_pcm_wav(path, gemini_tts(text, key, args.gemini_voice, args.gemini_model))
-            tidy(path)
+            tidy(path, args.tempo)
             durations[i] = wav_seconds(path)
             print(f"      {durations[i]:.2f}s  → {path}")
     else:

@@ -35,6 +35,9 @@ Scene lengths follow the narration: `voice.py` measures each WAV and writes
    Voice-cloning apps (F5-TTS, Habibi) need a voice to copy:
    `TTS_RECORD_REF=1` records one from your mic while you read a sentence on screen,
    or `TTS_REF_WAV=clip.wav TTS_REF_TEXT='exact words in the clip'` uses a clip you have.
+   Habibi-TTS ships a reference clip with its transcript: `src/habibi_tts/assets/MSA.mp3` in
+   github.com/SWivid/Habibi-TTS, text in the app's "Example Prompts". `TTS_TEMPO=0.88`
+   slows the voice down without changing its pitch.
    Override any other input with `TTS_ARGS='--gradio-arg "seed_input=42"'`, or choose
    the endpoint with `--gradio-api /name`. If the link is dead, it says so.
 1. `GOOGLE_TTS_API_KEY` → **Cloud Text-to-Speech**, voice `ar-XA-Chirp3-HD-Aoede`
