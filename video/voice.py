@@ -108,7 +108,8 @@ class GradioTTS:
     text and returns audio, picks the MSA option in any dropdown, and leaves the
     other inputs at the app's own defaults."""
 
-    def __init__(self, url: str, api_name: str | None, overrides: list[str]):
+    def __init__(self, url: str, api_name: str | None, overrides: list[str],
+                 ref_wav: str | None = None, ref_text: str | None = None):
         try:
             from gradio_client import Client
         except ImportError:
@@ -127,6 +128,18 @@ class GradioTTS:
         for item in overrides:
             name, _, raw = item.partition("=")
             self.fixed[name.strip()] = _gradio_value(raw.strip())
+        # reference voice for cloning apps: map onto their ref audio / ref text inputs
+        def ref_param(component):
+            return next((p["parameter_name"] for p in self.params
+                         if p["component"] == component and "ref" in p["parameter_name"].lower()), None)
+        if ref_wav:
+            if not Path(ref_wav).expanduser().is_file():
+                sys.exit(f"Reference voice not found: {ref_wav}")
+            name = ref_param("Audio") or sys.exit(f"{self.api_name} has no reference-audio input")
+            self.fixed.setdefault(name, _gradio_value("@" + ref_wav))
+        if ref_text:
+            name = ref_param("Textbox") or sys.exit(f"{self.api_name} has no reference-text input")
+            self.fixed.setdefault(name, ref_text)
         known = {p["parameter_name"] for p in self.params}
         if unknown := [k for k in self.fixed if k not in known]:
             sys.exit(f"--gradio-arg {unknown} not inputs of {self.api_name}. It takes: {', '.join(sorted(known))}")
@@ -142,7 +155,7 @@ class GradioTTS:
                 self.fixed[name] = msa
             elif not p["parameter_has_default"]:
                 self.fixed[name] = None          # optional uploads like a reference voice
-        shown = {k: v for k, v in self.fixed.items()}
+        shown = {k: f"@{v.get('orig_name')}" if isinstance(v, dict) else v for k, v in self.fixed.items()}
         print(f"[gradio] {url} {self.api_name}  text→{self.text_param}  {shown}")
         print(f"[gradio] inputs: {', '.join(p['parameter_name'] for p in self.params)}")
 
@@ -193,15 +206,42 @@ class GradioTTS:
         if audio is None:
             refs = [p["parameter_name"] for p in self.params
                     if "ref" in p["parameter_name"].lower() and self.fixed.get(p["parameter_name"]) is None]
-            hint = (f"\nThe app may need a reference voice. Pass one, e.g.\n"
-                    f"  TTS_ARGS='--gradio-arg {refs[0]}=@voice.wav"
-                    + (f" --gradio-arg \"{refs[1]}=<exact words spoken in voice.wav>\"" if len(refs) > 1 else "")
-                    + "'") if refs else ""
+            hint = ("\nThe app needs a reference voice to copy. Either record one now:\n"
+                    "  TTS_RECORD_REF=1 TTS_GRADIO_URL=… ./make.sh\n"
+                    "or give a 5–10 s MSA clip and the exact words spoken in it:\n"
+                    "  TTS_REF_WAV=~/voice.wav TTS_REF_TEXT='الكلمات المنطوقة' TTS_GRADIO_URL=… ./make.sh") if refs else ""
             sys.exit(f"Gradio returned no audio: {result!r}{hint}")
         r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", audio, "-ac", "1", "-ar", str(RATE), str(out)],
                            capture_output=True, text=True)
         if r.returncode:
             sys.exit(f"ffmpeg could not read the Gradio audio {audio}:\n{r.stderr}")
+
+
+REF_SENTENCE = "مرحباً، أنا لورا، مساعدتك الصوتية على لينكس. يسعدني أن أساعدك في عملك اليوم."
+
+
+def record_ref(seconds: int = 9) -> tuple[str, str]:
+    """Record a reference voice from the default mic while the user reads REF_SENTENCE."""
+    out = BUILD / "ref.wav"
+    print("\nReference voice: read this sentence aloud, calmly, in فصحى:\n")
+    print(f"    {REF_SENTENCE}\n")
+    input("Press Enter, then start reading… ")
+    print(f"● recording {seconds}s")
+    cmds = [["ffmpeg", "-v", "error", "-y", "-f", "pulse", "-i", "default", "-t", str(seconds),
+             "-ac", "1", "-ar", str(RATE), str(out)],
+            ["arecord", "-q", "-f", "S16_LE", "-r", str(RATE), "-c", "1", "-d", str(seconds), str(out)]]
+    for cmd in cmds:
+        try:
+            if subprocess.run(cmd).returncode == 0 and out.stat().st_size > 10000:
+                break
+        except FileNotFoundError:
+            continue
+    else:
+        sys.exit("Could not record from the microphone (tried ffmpeg/pulse and arecord).")
+    tidy(out)
+    print(f"✓ saved {out} — reused next time via TTS_REF_WAV={out}")
+    (BUILD / "ref.txt").write_text(REF_SENTENCE)
+    return str(out), REF_SENTENCE
 
 
 def write_pcm_wav(path: Path, pcm: bytes) -> None:
@@ -272,13 +312,24 @@ def main() -> None:
                     help="any ar-XA voice, e.g. ar-XA-Wavenet-A")
     ap.add_argument("--gemini-voice", default="Kore")
     ap.add_argument("--gemini-model", default="gemini-2.5-flash-preview-tts")
+    ap.add_argument("--ref-wav", default=os.environ.get("TTS_REF_WAV") or None,
+                    help="reference voice clip for cloning TTS apps (5–10 s)")
+    ap.add_argument("--ref-text", default=os.environ.get("TTS_REF_TEXT") or None,
+                    help="exact words spoken in --ref-wav")
+    ap.add_argument("--record-ref", action="store_true", help="record a reference voice from the mic")
     ap.add_argument("--only", type=int, choices=range(1, 6), metavar="N",
                     help="regenerate just line N, keep the other WAVs")
     args = ap.parse_args()
 
     BUILD.mkdir(exist_ok=True)
     engine, key = ("none", "") if args.engine == "none" else pick_engine(args.engine, args.gradio)
-    gradio = GradioTTS(key, args.gradio_api, args.gradio_arg) if engine == "gradio" else None
+    BUILD.mkdir(exist_ok=True)
+    if engine == "gradio" and args.record_ref:
+        args.ref_wav, args.ref_text = record_ref()
+    elif args.ref_wav and not args.ref_text and Path(args.ref_wav).with_suffix(".txt").is_file():
+        args.ref_text = Path(args.ref_wav).with_suffix(".txt").read_text().strip()
+    gradio = GradioTTS(key, args.gradio_api, args.gradio_arg, args.ref_wav, args.ref_text) \
+        if engine == "gradio" else None
     durations = list(FALLBACK_SECONDS)
     if engine != "none":
         for i, text in enumerate(LINES):

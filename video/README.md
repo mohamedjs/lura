@@ -32,8 +32,11 @@ Scene lengths follow the narration: `voice.py` measures each WAV and writes
 0. `TTS_GRADIO_URL` (or `--gradio URL`) → **your Gradio TTS app**. It reads the app's
    API, finds the endpoint that takes text and returns audio, selects the MSA /
    فصحى option in any dropdown, and leaves the other inputs at their defaults.
-   Override any input with `TTS_ARGS="--gradio-arg speed=0.9 --gradio-arg ref_audio=@me.wav"`,
-   or choose the endpoint with `--gradio-api /name`. If the link is dead, it says so.
+   Voice-cloning apps (F5-TTS, Habibi) need a voice to copy:
+   `TTS_RECORD_REF=1` records one from your mic while you read a sentence on screen,
+   or `TTS_REF_WAV=clip.wav TTS_REF_TEXT='exact words in the clip'` uses a clip you have.
+   Override any other input with `TTS_ARGS='--gradio-arg "seed_input=42"'`, or choose
+   the endpoint with `--gradio-api /name`. If the link is dead, it says so.
 1. `GOOGLE_TTS_API_KEY` → **Cloud Text-to-Speech**, voice `ar-XA-Chirp3-HD-Aoede`
    (`--cloud-voice ar-XA-Wavenet-A` etc.)
 2. `GEMINI_API_KEY`, or the Gemini key already saved by `lura login` →

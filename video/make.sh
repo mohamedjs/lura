@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # One command: narration → motion graphics → out/lura.mp4
 #   TTS_GRADIO_URL=https://xxxx.gradio.live ./make.sh   # voice from your Colab TTS (MSA)
+#     + TTS_RECORD_REF=1                         # record the voice to copy from your mic
+#     + TTS_REF_WAV=clip.wav TTS_REF_TEXT='…'    # or copy the voice in clip.wav
 #   ./make.sh                                   # voice from your Lura Gemini key
 #   ./make.sh ~/Downloads/"studio lura 2.mp4"   # + your screen recording in scene 4
 #   FOOTAGE_START=5 ./make.sh clip.mp4          # start the clip 5s in
@@ -22,7 +24,14 @@ if [ -n "${TTS_GRADIO_URL:-}" ]; then
   .venv/bin/python -c "import gradio_client" 2>/dev/null || .venv/bin/pip install -q gradio_client
   PY=.venv/bin/python
 fi
-"$PY" voice.py ${TTS_ENGINE:+--engine "$TTS_ENGINE"} ${TTS_ARGS:-}
+vargs=()
+[ -n "${TTS_ENGINE:-}" ]     && vargs+=(--engine "$TTS_ENGINE")
+[ -n "${TTS_REF_WAV:-}" ]    && vargs+=(--ref-wav "$TTS_REF_WAV")
+[ -n "${TTS_REF_TEXT:-}" ]   && vargs+=(--ref-text "$TTS_REF_TEXT")
+[ -n "${TTS_RECORD_REF:-}" ] && vargs+=(--record-ref)
+# TTS_ARGS keeps shell quoting, e.g. TTS_ARGS='--gradio-arg "seed_input=42"'
+[ -n "${TTS_ARGS:-}" ] && eval "vargs+=($TTS_ARGS)"
+"$PY" voice.py "${vargs[@]}"
 
 args=(--out out/lura.mp4)
 if [ $# -ge 1 ]; then
