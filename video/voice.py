@@ -319,6 +319,8 @@ def main() -> None:
     ap.add_argument("--record-ref", action="store_true", help="record a reference voice from the mic")
     ap.add_argument("--tempo", type=float, default=float(os.environ.get("TTS_TEMPO", 1.0)),
                     help="speech speed, e.g. 0.88 = calmer (pitch unchanged)")
+    ap.add_argument("--verify", action="store_true",
+                    help="transcribe each new line (OpenRouter, Arabic) and flag mismatches")
     ap.add_argument("--only", type=int, choices=range(1, 6), metavar="N",
                     help="regenerate just line N, keep the other WAVs")
     args = ap.parse_args()
@@ -349,6 +351,12 @@ def main() -> None:
             tidy(path, args.tempo)
             durations[i] = wav_seconds(path)
             print(f"      {durations[i]:.2f}s  → {path}")
+            if args.verify:
+                from transcribe import openrouter_key, similarity, to_wav, transcribe
+                key_or = openrouter_key() or sys.exit("--verify needs OPENROUTER_TOKEN")
+                heard = transcribe(to_wav(str(path)), key_or)
+                score = similarity(text, heard)
+                print(f"      {'✓' if score >= 0.75 else '✗ CHECK'} heard {score:.0%}: {heard}")
     else:
         print("No TTS key — using placeholder timing, video will have music only.")
 

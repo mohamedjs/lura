@@ -95,6 +95,18 @@ API errors are printed as-is. Each line's audio is trimmed of leading and traili
 silence and normalized in loudness. To redo one line that sounds wrong, run
 `python3 voice.py --only 3` and then `node render.mjs`.
 
+## Checking the audio (Arabic speech-to-text)
+
+`transcribe.py` sends audio to OpenRouter's `/audio/transcriptions` with
+`openai/gpt-4o-mini-transcribe`, language `ar`. It reads the key from `OPENROUTER_TOKEN`,
+`OPENROUTER_API_KEY`, or `lura login`.
+
+```bash
+python3 transcribe.py build/line*.wav --expect      # does each line say what it should?
+python3 transcribe.py source.mp4 --window 4         # what's said when, for caption timing
+python3 voice.py --verify …                         # check each line right after generating it
+```
+
 ## The face
 
 `face.js` draws the head from `face_mesh.js`, MediaPipe's canonical face mesh
