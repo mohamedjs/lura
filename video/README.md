@@ -12,6 +12,23 @@ cd video
 TTS_GRADIO_URL=https://xxxx.gradio.live ./make.sh ~/Downloads/"studio lura 2.mp4"
 ```
 
+## 9:16 ad (Reels / Shorts / TikTok)
+
+`ad.html` + `ad.mjs` remake `lura_ad_9x16.mp4` (63 s, 1080×1920) with the new face:
+
+```bash
+node ad.mjs --source ~/Downloads/lura_ad_9x16.mp4          # → out/lura_ad_9x16.mp4
+node ad.mjs --source ~/Downloads/lura_ad_9x16.mp4 --footage ~/Downloads/"studio lura 2.mp4"
+```
+
+It takes the narration track and the real-desktop clip (54.9–58.7 s) from the
+source video, and keeps the original's scene timing so they still line up: intro,
+wake word, morning briefing (RAM, load, network, last GitHub commit), voice
+commands, real desktop, end card. What changed: the 3D face is lip-synced to the
+narration, captions reveal word by word, the numbers count up, and a soft music
+bed ducks under the voice. `--voice new.wav` swaps the narration, and
+`--preview` renders at half resolution.
+
 ## Scenes
 
 | # | Narration | Picture |
@@ -68,6 +85,8 @@ moves in sync with the actual audio.
   `--preview` renders at half resolution for a fast check.
 - `voice.py`: narration and timeline.
 - `face.js` + `face_mesh.js`: the holographic head.
+- `frames.mjs`: shared frame grabber + loudness envelope.
+- `ad.html` + `ad.mjs`: the 9:16 ad.
 
 Needs `ffmpeg`, `node` 18+, `python3`. `make.sh` installs Playwright's Chromium on
 first run.

@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<title>Lura ad 9:16</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;700&display=block">
+<style>
+  :root { --bg:#040b16; --cyan:#22d3ee; --green:#34d399; --text:#eafcff; --dim:#7aa3b3; --red:#fb7185; --pink:#f472b6; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { background:#000; overflow:hidden; }
+  #stage { position:absolute; left:0; top:0; width:1080px; height:1920px; overflow:hidden; background:var(--bg);
+           font-family:'Cairo',sans-serif; color:var(--text); transform-origin:0 0; }
+  #bg { position:absolute; inset:0; }
+  .scene { position:absolute; inset:0; opacity:0; }
+  .abs { position:absolute; }
+  .row { left:0; right:0; text-align:center; direction:rtl; }
+  .hl { color:var(--cyan); text-shadow:0 0 30px rgba(34,211,238,.6); }
+  .title { font-size:76px; font-weight:900; text-shadow:0 6px 40px rgba(0,0,0,.8); }
+  .badge { display:inline-flex; gap:12px; align-items:center; padding:10px 26px; border-radius:999px; direction:rtl;
+           background:rgba(34,211,238,.10); border:1.5px solid rgba(34,211,238,.45); font-size:30px; font-weight:700; color:#bdf4ff; }
+  .badge i { width:12px; height:12px; border-radius:50%; background:var(--pink); box-shadow:0 0 12px var(--pink); }
+  .card { position:absolute; padding:26px 34px; border-radius:28px; direction:rtl;
+          background:linear-gradient(160deg,rgba(34,211,238,.10),rgba(255,255,255,.03));
+          border:1.5px solid rgba(34,211,238,.25); box-shadow:0 20px 60px rgba(0,0,0,.5), inset 0 0 40px rgba(34,211,238,.05); }
+  .card h4 { font-size:30px; font-weight:700; color:var(--dim); display:flex; gap:12px; align-items:center; }
+  .card h4 b { width:34px; height:34px; border-radius:10px; background:rgba(34,211,238,.18); color:var(--cyan);
+               display:grid; place-items:center; font:700 20px 'Space Grotesk'; }
+  .num { font:700 92px 'Space Grotesk'; direction:ltr; text-align:right; margin-top:6px; }
+  .num small { font-size:34px; color:var(--dim); margin-left:10px; }
+  .bar { height:12px; border-radius:6px; background:rgba(255,255,255,.08); margin-top:16px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; border-radius:6px; background:linear-gradient(90deg,var(--cyan),var(--green)); }
+  .spark { display:flex; gap:6px; align-items:flex-end; height:70px; margin-top:14px; direction:ltr; }
+  .spark i { flex:1; border-radius:3px; background:var(--cyan); opacity:.85; }
+  .chip { display:inline-block; padding:6px 18px; border-radius:999px; font:600 26px 'JetBrains Mono'; margin-inline-start:10px;
+          background:rgba(244,114,182,.12); border:1px solid rgba(244,114,182,.45); color:#fbcfe8; }
+  .chip.g { background:rgba(52,211,153,.12); border-color:rgba(52,211,153,.5); color:#bbf7d0; font-family:'Cairo'; font-weight:700; }
+  .code { font:500 34px/1.55 'JetBrains Mono'; color:#d6f6ff; direction:ltr; text-align:left; margin-top:20px; padding:20px 24px;
+          border-radius:16px; background:rgba(0,0,0,.35); border-left:4px solid var(--pink); min-height:180px; white-space:pre-wrap; }
+  .code .k { color:var(--pink); }
+  .caret { display:inline-block; width:16px; height:36px; background:var(--cyan); vertical-align:-6px; margin-left:4px; }
+  #caption { position:absolute; left:70px; right:70px; bottom:210px; text-align:center; direction:rtl; font-size:54px;
+             font-weight:800; line-height:1.45; text-shadow:0 4px 30px rgba(0,0,0,.95); }
+  #caption span { display:inline-block; margin:0 7px; opacity:0; }
+  .wake { display:flex; align-items:center; gap:26px; padding:22px 34px; border-radius:999px; direction:rtl;
+          background:rgba(34,211,238,.08); border:2px solid rgba(34,211,238,.6); box-shadow:0 0 50px rgba(34,211,238,.25); }
+  .mic { width:76px; height:76px; border-radius:50%; background:var(--cyan); display:grid; place-items:center; box-shadow:0 0 30px var(--cyan); }
+  .mic::before { content:''; width:20px; height:34px; border-radius:10px; background:#04202a; }
+  .cmd { position:absolute; right:80px; left:80px; direction:rtl; }
+  .cmd .say { display:inline-flex; gap:16px; align-items:center; padding:14px 28px; border-radius:999px; font-size:38px; font-weight:700;
+              background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14); }
+  .cmd .say i { width:22px; height:22px; border-radius:50%; background:var(--cyan); box-shadow:0 0 14px var(--cyan); }
+  .cmd .tool { margin-top:14px; direction:ltr; font:500 32px 'JetBrains Mono'; color:#cdf3fb; }
+  .cmd .tool b { color:var(--cyan); font-weight:700; }
+  .ok { color:var(--green); font-family:'Cairo'; font-weight:700; margin-left:14px; }
+  .no { color:var(--red); font-family:'Cairo'; font-weight:800; margin-left:14px; padding:2px 14px; border:1.5px solid var(--red); border-radius:10px; }
+  .win { position:absolute; left:80px; width:920px; height:840px; top:470px; border-radius:30px; overflow:hidden;
+         border:2px solid rgba(34,211,238,.5); box-shadow:0 0 80px rgba(34,211,238,.25), 0 30px 90px rgba(0,0,0,.6); background:#000; }
+  .win img { width:100%; height:100%; object-fit:cover; }
+  .real { position:absolute; left:24px; top:24px; padding:8px 20px; border-radius:12px; background:rgba(0,0,0,.65);
+          font:700 26px 'JetBrains Mono'; color:#fff; direction:ltr; }
+  .real::before { content:'●'; color:#ef4444; margin-right:10px; }
+  .logo { font-size:200px; font-weight:900; line-height:1; text-shadow:0 0 50px rgba(34,211,238,.7), 0 0 120px rgba(34,211,238,.35); }
+  .latin { font:700 34px 'Space Grotesk'; letter-spacing:28px; color:var(--cyan); margin-top:46px; text-indent:28px; }
+  .tag { font-size:46px; font-weight:700; color:#cfeaf2; margin-top:16px; }
+  .pills { margin-top:40px; display:flex; gap:18px; justify-content:center; direction:ltr; }
+  .pills span { padding:10px 24px; border-radius:14px; font:600 28px 'JetBrains Mono'; color:#bdf4ff;
+                background:rgba(34,211,238,.08); border:1px solid rgba(34,211,238,.4); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg" width="1080" height="1920"></canvas>
+
+  <div class="scene" id="sLogo">
+    <div class="abs row" style="top:1080px"><div class="logo">لورا</div><div class="latin">LURA</div>
+      <div class="tag">مساعدك الصوتي على لينكس</div></div>
+  </div>
+
+  <div class="scene" id="sWake">
+    <div class="abs row title" style="top:250px">قولها <span class="hl">بصوتك</span> بس</div>
+    <div class="abs row" id="wake" style="top:1310px">
+      <div class="wake" style="display:inline-flex;width:700px;justify-content:space-between"><div class="mic"></div><div style="font-size:56px;font-weight:900">«لورا»</div><canvas id="wakeWave" width="260" height="70" style="width:260px;height:70px;flex:none"></canvas></div></div>
+    <div class="abs row" id="hear" style="top:1500px;font-size:44px;font-weight:700;color:#bdf4ff">بتسمعك…</div>
+    <div class="abs row" id="reply" style="top:1570px;font-size:44px;font-weight:700;color:var(--dim)">وترد عليك بصوتها</div>
+  </div>
+
+  <div class="scene" id="sBrief">
+    <div class="abs row" style="top:150px"><span class="badge"><i></i>إحاطة الصباح · Daily briefing</span></div>
+    <div class="card" id="cRam" style="right:80px;top:880px;width:440px"><h4><b>▦</b>الرامات</h4>
+      <div class="num"><span id="ramN">0.0</span><small>/ 23.2 GB</small></div><div class="bar"><i id="ramB"></i></div></div>
+    <div class="card" id="cLoad" style="left:80px;top:880px;width:440px"><h4><b>◔</b>معدل الحمل</h4>
+      <div class="num"><span id="loadN">0.00</span></div><div class="bar"><i id="loadB"></i></div></div>
+    <div class="card" id="cNet" style="left:80px;right:80px;top:1150px"><h4><b>⌁</b>الإنترنت · <span style="color:var(--green)">متصل</span></h4>
+      <div class="num"><span id="netN">0.0</span><small>ms</small></div><div class="spark" id="spark"></div></div>
+    <div class="card" id="cGit" style="left:80px;right:80px;top:880px"><h4><b>⎇</b>آخر commit على GitHub</h4>
+      <div style="margin-top:16px"><span class="chip">mohamedjs/lura</span><span class="chip">من أسبوعين</span><span class="chip g" id="newFeat">✨ ميزة جديدة</span></div>
+      <div class="code" id="commit"></div></div>
+    <div class="abs row" id="ask" style="top:1290px;font-size:88px;font-weight:900">تحب نبدأ <span class="hl">بإيه؟</span></div>
+  </div>
+
+  <div class="scene" id="sCmd">
+    <div class="abs row title" style="top:560px;font-size:80px">وبتتحكم في <span class="hl">جهازك</span> بصوتك</div>
+    <div class="cmd" id="k0" style="top:740px"><div class="say"><i></i>«افتحي كروم»</div>
+      <div class="tool"><b>open_application</b>("chrome")<span class="ok">✓ اتفتح</span></div></div>
+    <div class="cmd" id="k1" style="top:940px"><div class="say"><i></i>«حرارة المعالج كام؟»</div>
+      <div class="tool"><b>run_command</b>("sensors")<span class="ok">✓</span></div></div>
+    <div class="cmd" id="k2" style="top:1140px"><div class="say"><i></i>«هاتلي الـ pull requests بتاعتي»</div>
+      <div class="tool"><b>mcp_github</b>(list_pull_requests)<span class="ok">✓</span></div></div>
+    <div class="cmd" id="k3" style="top:1340px"><div class="say"><i></i>«امسحي كل حاجة»</div>
+      <div class="tool"><b>run_command</b>("rm -rf ~")<span class="no">✗ ممنوع</span></div></div>
+  </div>
+
+  <div class="scene" id="sReal">
+    <div class="win" id="win"><img id="foot"><div class="real">REAL · on my desktop</div></div>
+  </div>
+
+  <div class="scene" id="sEnd">
+    <div class="abs row" style="top:1080px"><div class="logo">لورا</div><div class="latin">LURA</div>
+      <div class="tag">مساعدك الصوتي على لينكس</div>
+      <div class="pills"><span>Gemini Live</span><span>OpenRouter</span><span>MCP tools</span></div>
+      <div class="pills" style="margin-top:26px"><span style="border-color:rgba(52,211,153,.5);color:#bbf7d0">github.com/mohamedjs/lura</span></div></div>
+  </div>
+
+  <div id="caption"></div>
+</div>
+
+<script src="face_mesh.js"></script>
+<script src="face.js"></script>
+<script>
+// Timeline of the original lura_ad_9x16.mp4 (measured from its frames), so its
+// narration track lines up. Everything is a pure function of t.
+const SC = { logo:[1.8,4.6], wake:[4.9,9.15], brief:[9.15,46.1], cmd:[46.1,54.9], real:[54.9,58.7], end:[58.7,63] };
+const CAPS = [
+  [9.75, 14.75, 'الرامات مستخدم منها ٥٫٦ جيجا من أصل ٢٣٫٢ جيجا'],
+  [14.75, 18.25, 'ومعدل الحمل ١٫٧٧'],
+  [18.25, 23.75, 'الإنترنت كمان متصل وممتاز.. بزمن استجابة ٤٥٫٢ ملي ثانية'],
+  [23.75, 27.75, 'آخر حاجة عملتها على GitHub كانت من أسبوعين'],
+  [27.75, 35.5, 'على مستودع لورا، وكان الـ commit بعنوان…'],
+  [35.5, 44.0, 'ده معناه إنك ضفت ميزة جديدة: جيميناي ٣٫٨ فلاش، وفرضت لغة رد واحدة'],
+  [54.9, 58.6, 'شغّالة في الخلفية من أول ما الجهاز يفتح'],
+];
+const CMD_T = [47.5, 49.0, 51.0, 52.5];
+const COMMIT = 'feat: deepgram voice, gemini-3.8-flash,\nand force one reply language';
+const COMMIT_T = [28.6, 34.0];
+
+let TL = { fps:30, total:62.9, env:null, footage:null };
+const $ = id => document.getElementById(id);
+const clamp = (x,a=0,b=1) => Math.min(b, Math.max(a, x));
+const seg = (t,a,b) => clamp((t-a)/(b-a));
+const out3 = p => 1 - Math.pow(1-p, 3);
+const back = p => { const c=1.6; return 1 + (c+1)*Math.pow(p-1,3) + c*Math.pow(p-1,2); };
+const lerp = (a,b,p) => a + (b-a)*p;
+const noise = (x,s=0) => Math.sin(x*1.7+s)*.5 + Math.sin(x*3.1+s*2.3)*.3 + Math.sin(x*7.3+s*.7)*.2;
+const ar = n => n.replace(/\d/g, d => '٠١٢٣٤٥٦٧٨٩'[d]);
+function rng(seed){ return () => (seed = (seed*16807) % 2147483647) / 2147483647; }
+const R = rng(7), PARTS = Array.from({length:140}, () => ({x:R()*1080, y:R()*1920, r:.6+R()*2.4, v:6+R()*26, a:.15+R()*.55, tx:540+(R()-.5)*420, ty:760+(R()-.5)*520}));
+const ctx = $('bg').getContext('2d');
+
+// scene opacity with 0.35s cross-fades
+function win(name, t) { const [a,b] = SC[name]; return {o: seg(t,a-.2,a+.35)*(1-seg(t,b-.3,b+.1)), u: t-a}; }
+// narrator loudness (0..1) from the real track; the mouth only moves while Lura talks
+function level(t) {
+  if (!TL.env) return Math.max(0, noise(t*8,2))*.6*(t>2&&t<44?1:0);
+  const f = t*TL.fps, i = Math.floor(f), k = f-i, e = TL.env;
+  return clamp((e[i]??0)*(1-k) + (e[i+1]??0)*k);
+}
+const talking = t => (t > 1.8 && t < 45.6) || t > 58.7;
+
+function bg(t) {
+  const W=1080, H=1920;
+  const g = ctx.createRadialGradient(540,760,40,540,900,1300);
+  g.addColorStop(0,'#0b2438'); g.addColorStop(.5,'#06121f'); g.addColorStop(1,'#02060c');
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  // floor grid
+  ctx.save(); const hz = 1500;
+  for (let i=0;i<12;i++){ const y = hz + Math.pow(((i*70 + t*50) % 840)/840, 2)*420;
+    ctx.strokeStyle = `rgba(34,211,238,${.12*clamp((y-hz)/160)})`; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  for (let i=-12;i<=12;i++){ const vg = ctx.createLinearGradient(0,hz,0,H); vg.addColorStop(0,'rgba(34,211,238,0)'); vg.addColorStop(1,'rgba(34,211,238,.13)');
+    ctx.strokeStyle = vg; ctx.beginPath(); ctx.moveTo(540+i*30,hz); ctx.lineTo(540+i*150,H); ctx.stroke(); }
+  ctx.restore();
+  // particles: gather into the head during the intro, then drift
+  const gather = out3(seg(t,0,1.9)) * (1 - seg(t,1.9,2.6));
+  for (const p of PARTS) {
+    const fy = ((p.y - t*p.v) % H + H) % H, fx = p.x + Math.sin(t*.5+p.y)*10;
+    const x = lerp(fx, p.tx, gather), y = lerp(fy, p.ty, gather);
+    ctx.fillStyle = `rgba(125,230,255,${p.a*(.55+.45*Math.sin(t*2+p.x)) * (1+gather)})`;
+    ctx.beginPath(); ctx.arc(x,y,p.r*(1+gather*.6),0,7); ctx.fill();
+  }
+}
+function rings(cx, cy, t, o, base=230, n=4) {
+  for (let i=0;i<n;i++){ const p = ((t*.45 + i/n) % 1);
+    ctx.strokeStyle = `rgba(34,211,238,${(1-p)*.5*o})`; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cx, cy, base + p*360, 0, 7); ctx.stroke(); }
+}
+function dashedRing(cx, cy, r, t, o) {
+  ctx.save(); ctx.setLineDash([6,14]); ctx.lineDashOffset = -t*30;
+  ctx.strokeStyle = `rgba(244,114,182,${.45*o})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
+  ctx.strokeStyle = `rgba(34,211,238,${.18*o})`; ctx.setLineDash([]); ctx.beginPath(); ctx.arc(cx,cy,r+18,0,7); ctx.stroke();
+  ctx.restore();
+}
+
+// where the head is, per scene (blended by scene opacity so it glides between layouts)
+function face(t) {
+  const L = [
+    ['logo', 540, 700, 250], ['wake', 540, 820, 270], ['brief', 540, 520, 220],
+    ['cmd', 540, 330, 135], ['end', 540, 700, 250],
+  ];
+  let w = 0, x = 0, y = 0, s = 0;
+  for (const [n, cx, cy, sz] of L) { const o = win(n,t).o; w += o; x += cx*o; y += cy*o; s += sz*o; }
+  const intro = seg(t, 1.2, 2.2);                       // materialise from the particles
+  if (t < 2.2) { w = Math.max(w, intro); x = 540; y = 700; s = 250; }
+  if (w < .01) return;
+  x /= Math.max(w, 1e-6); y /= Math.max(w, 1e-6); s /= Math.max(w, 1e-6);
+  const v = talking(t) ? level(t) : 0;
+  const b = win('brief', t).o; if (b > 0) dashedRing(x, y, s*1.28, t, b);
+  const k = win('wake', t); if (k.o > 0 && k.u > 1.8) rings(x, y, k.u, k.o*seg(k.u,1.8,2.2), 300);
+  drawFace(ctx, x, y, s*(.9+.1*out3(intro)), {t, mouth:v, alpha:Math.min(1,w)*(t<2.2?intro:1), glow:v, hue:'cyan'});
+}
+
+function wakeWave(t, on) {
+  const c = $('wakeWave').getContext('2d'); c.clearRect(0,0,260,70);
+  for (let i=0;i<26;i++){ const h = 6 + (on ? 52*Math.abs(noise(t*7+i*.6,i)) : 2);
+    c.fillStyle = '#22d3ee'; c.fillRect(i*10, 35-h/2, 6, h); }
+}
+
+let capIdx = -2;
+function caption(t) {
+  const el = $('caption'); const i = CAPS.findIndex(c => t >= c[0]-.15 && t < c[1]);
+  if (i !== capIdx) { capIdx = i; el.innerHTML = i < 0 ? '' : CAPS[i][2].split(' ').map(w => `<span>${w}</span>`).join(' ');
+    el.style.bottom = (i === CAPS.length-1 ? 360 : 210) + 'px'; }
+  if (i < 0) return;
+  const [a, b] = CAPS[i], sp = el.children, n = sp.length, span = (b - a) * .85;
+  for (let k=0;k<n;k++){ const p = out3(seg(t, a + span*k/n - .1, a + span*k/n + .2));
+    sp[k].style.opacity = p * (1 - seg(t, b-.25, b)); sp[k].style.transform = `translateY(${(1-p)*20}px)`; }
+}
+
+const set = (id, css) => Object.assign($(id).style, css);
+const appear = (id, t, at, d=.5) => { const p = out3(seg(t,at,at+d)); set(id, {opacity:p, transform:`translateY(${(1-p)*50}px)`}); return p; };
+
+function render(t) {
+  bg(t);
+  for (const [n, id] of [['logo','sLogo'],['wake','sWake'],['brief','sBrief'],['cmd','sCmd'],['real','sReal'],['end','sEnd']])
+    $(id).style.opacity = win(n,t).o;
+  face(t);
+
+  // logo + end card
+  for (const [n, id] of [['logo','sLogo'],['end','sEnd']]) { const u = win(n,t).u;
+    [...$(id).firstElementChild.children].forEach((el,k) => { const p = back(seg(u, .2+k*.18, .8+k*.18));
+      el.style.opacity = clamp(p); el.style.transform = `translateY(${(1-p)*40}px)`; }); }
+
+  // wake word
+  const wk = win('wake',t).u;
+  appear('wake', t, SC.wake[0]+.5); wakeWave(t, wk > 1.4 && wk < 3.2);
+  appear('hear', t, SC.wake[0]+2.2); appear('reply', t, SC.wake[0]+3.0);
+
+  // briefing cards
+  const metrics = 1 - seg(t, 23.4, 23.9);
+  const pr = appear('cRam', t, 9.6) * metrics, pl = appear('cLoad', t, 14.6) * metrics, pn = appear('cNet', t, 18.1) * metrics;
+  $('cRam').style.opacity = pr; $('cLoad').style.opacity = pl; $('cNet').style.opacity = pn;
+  $('ramN').textContent = (5.6*out3(seg(t,9.8,11.2))).toFixed(1);   $('ramB').style.width = (24*out3(seg(t,9.8,11.2)))+'%';
+  $('loadN').textContent = (1.77*out3(seg(t,14.8,16))).toFixed(2); $('loadB').style.width = (44*out3(seg(t,14.8,16)))+'%';
+  $('netN').textContent = (45.2*out3(seg(t,18.3,19.6))).toFixed(1);
+  const sp = $('spark'); if (!sp.children.length) sp.innerHTML = '<i></i>'.repeat(28);
+  [...sp.children].forEach((b,k) => b.style.height = (12 + 58*seg(t, 18.3 + k*.05, 18.6 + k*.05)*(.45+.55*Math.abs(noise(k*.9 + t*.8, 3)))) + 'px');
+  appear('cGit', t, 23.9); $('cGit').style.opacity *= 1 - seg(t, 43.6, 44.1);
+  const typed = Math.floor(COMMIT.length * seg(t, COMMIT_T[0], COMMIT_T[1]));
+  $('commit').innerHTML = (t < COMMIT_T[0]-.2 ? '' : COMMIT.slice(0,typed).replace(/^feat:/, '<span class="k">feat:</span>'))
+    + (Math.floor(t*2.5)%2 ? '<span class="caret"></span>' : '<span class="caret" style="opacity:0"></span>');
+  const nf = back(seg(t, 35.6, 36.1)); set('newFeat', {opacity:clamp(nf), transform:`scale(${.6+.4*nf})`, display:'inline-block'});
+  appear('ask', t, 44.1); $('ask').style.opacity *= 1 - seg(t, 45.7, 46.1);
+
+  // voice commands
+  CMD_T.forEach((at,k) => { const el = $('k'+k), p = out3(seg(t,at-.15,at+.3));
+    el.style.opacity = p; el.style.transform = `translateX(${(1-p)*-60}px)`;
+    const tool = el.querySelector('.tool'), q = out3(seg(t,at+.45,at+.8));
+    tool.style.opacity = q; tool.style.transform = `translateY(${(1-q)*12}px)`; });
+
+  // real footage
+  const rw = win('real',t); set('win', {transform:`scale(${.9+.1*out3(seg(rw.u,0,.6))})`});
+  caption(t);
+  set('stage', {opacity: seg(t,0,.4) * (1 - seg(t, TL.total-.4, TL.total))});
+  return footage(t);
+}
+
+function footage(t) {
+  const f = TL.footage; if (!f || win('real',t).o <= 0) return Promise.resolve();
+  const n = clamp(Math.floor((t - SC.real[0])*f.fps) + 1, 1, f.count), img = $('foot');
+  const src = `${f.dir}/f${String(n).padStart(4,'0')}.jpg`;
+  if (img.getAttribute('src') === src) return Promise.resolve();
+  img.src = src; return img.decode().catch(() => {});
+}
+
+window.setup = tl => { TL = Object.assign(TL, tl); capIdx = -2; };
+window.render = render;
+window.ready = Promise.all([
+  ...['900 80px Cairo','700 40px Cairo','500 30px "JetBrains Mono"','700 30px "Space Grotesk"'].map(f => document.fonts.load(f, 'لورا Lura')),
+  document.fonts.ready]);
+
+if (!navigator.webdriver) {          // live preview in a normal browser
+  const fit = () => $('stage').style.transform = `scale(${Math.min(innerWidth/1080, innerHeight/1920)})`;
+  addEventListener('resize', fit); fit();
+  const t0 = performance.now();
+  window.ready.then(function loop(){ render(((performance.now()-t0)/1000) % TL.total); requestAnimationFrame(loop); });
+}
+</script>
+</body>
+</html>
