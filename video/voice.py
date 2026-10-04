@@ -342,21 +342,37 @@ def main() -> None:
                 durations[i] = wav_seconds(path)
                 continue
             print(f"[{engine}] {i + 1}/5  {text}")
-            if gradio:
-                gradio.synth(text, path)
-            elif engine == "cloud":
-                path.write_bytes(cloud_tts(text, key, args.cloud_voice))
-            else:
-                write_pcm_wav(path, gemini_tts(text, key, args.gemini_voice, args.gemini_model))
-            tidy(path, args.tempo)
-            durations[i] = wav_seconds(path)
-            print(f"      {durations[i]:.2f}s  → {path}")
-            if args.verify:
-                from transcribe import openrouter_key, similarity, to_wav, transcribe
+            # --verify: listen back (OpenRouter STT) and regenerate when words are missing.
+            # F5/Habibi tends to clip the last word; retries add a throwaway tail word for it to clip.
+            tries = 3 if args.verify else 1
+            for attempt in range(tries):
+                # «…» doesn't make F5/Habibi pause (it slurs «لورا… مساعدتك» into «لوراتي»); a full stop does
+                say = text.replace("…", ".") if gradio else text
+                if gradio and attempt:      # Habibi clips the end: give it a throwaway word to clip instead
+                    say = say.rstrip(".") + "، كلها."
+                if gradio:
+                    gradio.synth(say, path)
+                elif engine == "cloud":
+                    path.write_bytes(cloud_tts(say, key, args.cloud_voice))
+                else:
+                    write_pcm_wav(path, gemini_tts(say, key, args.gemini_voice, args.gemini_model))
+                tidy(path, args.tempo)
+                durations[i] = wav_seconds(path)
+                print(f"      {durations[i]:.2f}s  → {path}")
+                if not args.verify:
+                    break
+                from transcribe import normalize, openrouter_key, similarity, to_wav, transcribe
                 key_or = openrouter_key() or sys.exit("--verify needs OPENROUTER_TOKEN")
                 heard = transcribe(to_wav(str(path)), key_or)
                 score = similarity(text, heard)
-                print(f"      {'✓' if score >= 0.75 else '✗ CHECK'} heard {score:.0%}: {heard}")
+                # short lines can drop a whole word and still score high: the last word must be there
+                words = normalize(heard).split()
+                ok = score >= 0.85 and normalize(text).split()[-1] in words and "كلها" not in words
+                print(f"      {'✓' if ok else '✗'} heard {score:.0%}: {heard}")
+                if ok:
+                    break
+                if attempt == tries - 1:
+                    print(f"      ⚠ line {i + 1} still differs after {tries} tries — listen to it")
     else:
         print("No TTS key — using placeholder timing, video will have music only.")
 

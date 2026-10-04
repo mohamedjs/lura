@@ -50,7 +50,7 @@ def to_wav(path: str, start: float | None = None, dur: float | None = None) -> b
 
 
 def transcribe(wav: bytes, key: str, model: str = MODEL, language: str = "ar") -> str:
-    payload = {"model": model, "file": base64.b64encode(wav).decode(), "filename": "speech.wav",
+    payload = {"model": model, "input_audio": {"data": base64.b64encode(wav).decode(), "format": "wav"},
                "language": language}
     req = urllib.request.Request(URL, data=json.dumps(payload).encode(), method="POST", headers={
         "Authorization": f"Bearer {key}", "Content-Type": "application/json",

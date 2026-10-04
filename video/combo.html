@@ -222,8 +222,8 @@ function level(t) {
   const f = t*TL.fps, i = Math.floor(f), k = f-i, e = TL.env;
   return clamp((e[i]??0)*(1-k) + (e[i+1]??0)*k);
 }
-// Lura talks everywhere except the wake call (that's the human + chime) and the end card
-const talking = t => t > 1.4 && !(t > 5.4 && t < 10.6) && t < 72.4;
+// Lura talks everywhere except while the human calls her and the wake chime plays (checked by transcription)
+const talking = t => t > 1.4 && !(t > HUMAN[0] - .5 && t < CHIME + .3);
 
 function bg(t) {
   const g = ctx.createRadialGradient(W/2,H*.4,40,W/2,H*.45,Math.max(W,H)*.75);

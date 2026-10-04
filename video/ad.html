@@ -164,7 +164,8 @@ function level(t) {
   const f = t*TL.fps, i = Math.floor(f), k = f-i, e = TL.env;
   return clamp((e[i]??0)*(1-k) + (e[i+1]??0)*k);
 }
-const talking = t => (t > 1.8 && t < 45.6) || t > 58.7;
+// speech only 8–48 s (checked by transcription); before that it's sound effects
+const talking = t => t > 8.2 && t < 47.8;
 
 function bg(t) {
   const W=1080, H=1920;
