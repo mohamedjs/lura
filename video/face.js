@@ -47,12 +47,14 @@
     return [x, y, z];
   }
 
-  // opts: {t, mouth 0..1, alpha, hue 'green'|'cyan', glow 0..1, yaw}
+  // opts: {t, mouth 0..1, alpha, hue 'green'|'cyan', glow 0..1, yaw, line/hot/eye [r,g,b], blend}
   window.drawFace = function (ctx, cx, cy, size, o) {
-    const t = o.t, a = o.alpha ?? 1; if (a <= 0.003) return;
+    const t = o.t, a = (o.alpha ?? 1) * (o.boost || 1); if (a <= 0.003) return;
     const yaw = Math.sin(t * 0.45) * 0.28 + (o.yaw || 0), pitch = Math.sin(t * 0.31) * 0.07 - 0.06;
     const mouth = o.mouth || 0, glow = o.glow || 0;
-    const col = o.hue === 'cyan' ? [34, 211, 238] : [52, 211, 153], hot = [210, 255, 245];
+    // colours: neon on dark (additive) by default; pass line/hot/eye + blend:'source-over' for ink on light
+    const col = o.line || (o.hue === 'cyan' ? [34, 211, 238] : [52, 211, 153]);
+    const hot = o.hot || [210, 255, 245], eye = o.eye || [34, 211, 238];
     const rgba = (al, c = col) => `rgba(${c[0]},${c[1]},${c[2]},${Math.min(1, al).toFixed(3)})`;
     const scanY = 1.25 - (((t * 0.55) % 2.0) / 2.0) * 2.7;   // band sweeping down in model space
     const P = v => { const k = 3.4 / (3.4 - v[2]); return [cx + v[0] * size * k, cy - v[1] * size * k, v[2]]; };
@@ -73,7 +75,7 @@
     });
 
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = o.blend || 'lighter';
     ctx.lineJoin = ctx.lineCap = 'round';
 
     const halo = ctx.createRadialGradient(cx, cy, size * 0.15, cx, cy, size * 1.7);
@@ -114,7 +116,7 @@
     for (const e of EYES) {
       const q = P(rot(e, yaw, pitch)), rx = size * 0.065, ry = rx * 0.55 * blink;
       const eg = ctx.createRadialGradient(q[0], q[1], 0, q[0], q[1], rx);
-      eg.addColorStop(0, rgba((0.95 + 0.1 * glow) * a, hot)); eg.addColorStop(0.3, rgba(0.6 * a, [34, 211, 238])); eg.addColorStop(1, rgba(0));
+      eg.addColorStop(0, rgba((0.95 + 0.1 * glow) * a, hot)); eg.addColorStop(0.3, rgba(0.6 * a, eye)); eg.addColorStop(1, rgba(0));
       ctx.fillStyle = eg;
       ctx.beginPath(); ctx.ellipse(q[0], q[1], rx, Math.max(0.8, ry), -yaw * 0.1, 0, 7); ctx.fill();
     }
@@ -131,7 +133,7 @@
     for (let i = 0; i < 160; i += 2) {
       const an = (i / 160) * Math.PI * 2 + t * 0.5;
       const v = rot([Math.cos(an) * 1.5, -0.05, Math.sin(an) * 1.5], yaw * 0.4, 0.22 + pitch), q = P(v);
-      ctx.fillStyle = rgba((v[2] > 0 ? 0.6 : 0.18) * a, [34, 211, 238]);
+      ctx.fillStyle = rgba((v[2] > 0 ? 0.6 : 0.18) * a, eye);
       ctx.fillRect(q[0] - 1.2, q[1] - 1.2, 2.4, 2.4);
     }
     ctx.restore();

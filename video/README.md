@@ -29,6 +29,33 @@ narration, captions reveal word by word, the numbers count up, and a soft music
 bed ducks under the voice. `--voice new.wav` swaps the narration, and
 `--preview` renders at half resolution.
 
+## Combo (9:16 + 16:9, dark + light)
+
+`combo.html` + `combo.mjs` rebuild `lura_combo_9x16.mp4` (78 s) with the new face,
+and add a **human calling «لورا»** (Habibi, Egyptian voice) at 8.1 s. The source's
+own narration is ducked under the call, its wake chime at 9.3 s follows, and Lura
+answers «أيوه معاك…» at 10.8 s. The three real screen recordings are cut from the
+source's cards and reused.
+
+```bash
+node combo.mjs --source ~/Downloads/lura_combo_9x16.mp4          # 4 files in out/
+node combo.mjs --source … --aspect h --theme light                 # just one
+```
+
+Two design systems, defined as CSS tokens at the top of `combo.html`:
+
+| | **Neon HUD** (`dark`) | **Daylight** (`light`) |
+|---|---|---|
+| Ground | deep navy, cyan floor grid | porcelain `#f5f6fb`, soft indigo/teal/pink studio lights drifting |
+| Ink | `#eafcff` on glow | `#0f172a`, no glow |
+| Accent | cyan `#22d3ee` + pink | indigo `#4f46e5` + teal, gradient logo |
+| Cards | translucent cyan glass | frosted white glass, soft long shadows |
+| Face | additive neon wireframe | indigo ink wireframe, teal highlights |
+
+The layouts live in `.v` (1080×1920) and `.h` (1920×1080) CSS blocks. In 16:9 the
+face sits on the left and the content on the right. For a live preview, open
+`combo.html?aspect=h&theme=light` in a browser.
+
 ## Scenes
 
 | # | Narration | Picture |
@@ -87,6 +114,7 @@ moves in sync with the actual audio.
 - `face.js` + `face_mesh.js`: the holographic head.
 - `frames.mjs`: shared frame grabber + loudness envelope.
 - `ad.html` + `ad.mjs`: the 9:16 ad.
+- `combo.html` + `combo.mjs`: the combo in both aspects and both themes.
 
 Needs `ffmpeg`, `node` 18+, `python3`. `make.sh` installs Playwright's Chromium on
 first run.

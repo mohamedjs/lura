@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ar">
+<head>
+<meta charset="utf-8">
+<title>Lura combo</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;700&display=block">
+<style>
+  /* ── design tokens ───────────────────────────────────────────────────── */
+  #stage {            /* Neon HUD (dark) */
+    --bg:#040b16; --text:#eafcff; --dim:#7aa3b3; --accent:#22d3ee; --accent2:#f472b6; --ok:#34d399; --bad:#fb7185;
+    --card:linear-gradient(160deg,rgba(34,211,238,.10),rgba(255,255,255,.03)); --cardLine:rgba(34,211,238,.25);
+    --cardShadow:0 20px 60px rgba(0,0,0,.5); --glow:0 0 30px rgba(34,211,238,.6); --chip:rgba(34,211,238,.10);
+    --code:rgba(0,0,0,.35); --textShadow:0 4px 30px rgba(0,0,0,.95); --winLine:rgba(34,211,238,.5);
+  }
+  #stage.light {      /* Daylight (light): porcelain, ink, indigo + teal, soft studio lighting */
+    --bg:#f5f6fb; --text:#0f172a; --dim:#64748b; --accent:#4f46e5; --accent2:#db2777; --ok:#059669; --bad:#e11d48;
+    --card:linear-gradient(160deg,rgba(255,255,255,.92),rgba(255,255,255,.66)); --cardLine:rgba(99,102,241,.18);
+    --cardShadow:0 24px 60px rgba(30,41,99,.14), 0 2px 6px rgba(30,41,99,.06); --glow:none; --chip:rgba(79,70,229,.08);
+    --code:#0f172a; --textShadow:none; --winLine:rgba(255,255,255,.9);
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  html, body { background:#000; overflow:hidden; }
+  #stage { position:absolute; left:0; top:0; overflow:hidden; background:var(--bg); color:var(--text);
+           font-family:'Cairo',sans-serif; transform-origin:0 0; }
+  #stage.v { width:1080px; height:1920px; }  #stage.h { width:1920px; height:1080px; }
+  #bg { position:absolute; inset:0; }
+  .scene { position:absolute; inset:0; opacity:0; }
+  .abs { position:absolute; }
+  .row { left:0; right:0; text-align:center; direction:rtl; }
+  .hl { color:var(--accent); text-shadow:var(--glow); }
+  .title { font-weight:900; text-shadow:var(--textShadow); }
+  .hero { font-weight:900; line-height:1.35; text-shadow:var(--textShadow); }
+  .card { position:absolute; padding:24px 32px; border-radius:28px; direction:rtl; background:var(--card);
+          border:1.5px solid var(--cardLine); box-shadow:var(--cardShadow); backdrop-filter:blur(10px); }
+  .card h4 { font-size:28px; font-weight:700; color:var(--dim); display:flex; gap:12px; align-items:center; }
+  .card h4 b { width:34px; height:34px; border-radius:10px; background:var(--chip); color:var(--accent);
+               display:grid; place-items:center; font:700 20px 'Space Grotesk'; }
+  .num { font:700 84px 'Space Grotesk'; direction:ltr; text-align:right; margin-top:4px; }
+  .num small { font-size:32px; color:var(--dim); margin-left:10px; }
+  .bar { height:12px; border-radius:6px; background:rgba(127,127,127,.15); margin-top:14px; overflow:hidden; }
+  .bar i { display:block; height:100%; width:0; border-radius:6px; background:linear-gradient(90deg,var(--accent),var(--ok)); }
+  .spark { display:flex; gap:6px; align-items:flex-end; height:64px; margin-top:12px; direction:ltr; }
+  .spark i { flex:1; border-radius:3px; background:var(--accent); opacity:.85; }
+  .chip { display:inline-block; padding:6px 18px; border-radius:999px; font:600 24px 'JetBrains Mono'; margin-inline-start:10px;
+          background:rgba(244,114,182,.12); border:1px solid rgba(244,114,182,.45); color:var(--accent2); }
+  .chip.g { background:rgba(52,211,153,.12); border-color:rgba(52,211,153,.5); color:var(--ok); font-family:'Cairo'; font-weight:700; }
+  .code { font:500 32px/1.55 'JetBrains Mono'; color:#d6f6ff; direction:ltr; text-align:left; margin-top:18px; padding:18px 22px;
+          border-radius:16px; background:var(--code); border-left:4px solid var(--accent2); min-height:160px; white-space:pre-wrap; }
+  .code .k { color:#f472b6; }
+  .caret { display:inline-block; width:15px; height:34px; background:#22d3ee; vertical-align:-6px; margin-left:4px; }
+  .badge { display:inline-flex; gap:12px; align-items:center; padding:10px 26px; border-radius:999px; direction:rtl;
+           background:var(--chip); border:1.5px solid var(--cardLine); font-size:30px; font-weight:700; color:var(--accent); }
+  .badge i { width:12px; height:12px; border-radius:50%; background:var(--accent2); }
+  #caption { position:absolute; text-align:center; direction:rtl; font-weight:800; line-height:1.45; text-shadow:var(--textShadow); }
+  .v #caption { left:70px; right:70px; bottom:200px; font-size:54px; }
+  .h #caption { left:200px; right:200px; bottom:56px; font-size:46px; }
+  #caption span { display:inline-block; margin:0 7px; opacity:0; }
+  .light #caption span { background:rgba(255,255,255,.75); padding:0 8px; border-radius:10px; margin:0 3px; }
+  .wake { display:inline-flex; align-items:center; justify-content:space-between; gap:24px; width:680px; padding:20px 30px;
+          border-radius:999px; direction:rtl; background:var(--chip); border:2px solid var(--accent); box-shadow:var(--cardShadow); }
+  .mic { width:72px; height:72px; border-radius:50%; background:var(--accent); display:grid; place-items:center; flex:none; }
+  .mic::before { content:''; width:18px; height:32px; border-radius:9px; background:var(--bg); }
+  .who { font-size:28px; font-weight:700; color:var(--dim); margin-top:14px; }
+  .win { position:absolute; border-radius:26px; overflow:hidden; background:#000; border:2px solid var(--winLine);
+         box-shadow:var(--cardShadow), 0 0 60px rgba(34,211,238,.15); }
+  .light .win { box-shadow:0 30px 80px rgba(30,41,99,.25); }
+  .win img { width:100%; height:100%; object-fit:cover; display:block; }
+  .real { position:absolute; left:20px; top:18px; padding:6px 16px; border-radius:10px; background:rgba(0,0,0,.7);
+          font:700 22px 'JetBrains Mono'; color:#fff; direction:ltr; }
+  .real::before { content:'●'; color:#ef4444; margin-right:8px; }
+  .cap { position:absolute; width:calc(50% - 12px); padding:20px 24px; border-radius:22px; direction:rtl; background:var(--card);
+         border:1.5px solid var(--cardLine); box-shadow:var(--cardShadow); }
+  .cap b { display:block; font-size:34px; font-weight:800; } .cap code { font:500 22px 'JetBrains Mono'; color:var(--accent); }
+  .say { display:inline-flex; gap:16px; align-items:center; padding:14px 28px; border-radius:999px; font-size:38px; font-weight:700;
+         background:var(--chip); border:1px solid var(--cardLine); direction:rtl; }
+  .say i { width:20px; height:20px; border-radius:50%; background:var(--accent); }
+  .tool { direction:ltr; font:500 30px 'JetBrains Mono'; color:var(--dim); } .tool b { color:var(--accent); }
+  .ok { color:var(--ok); font-family:'Cairo'; font-weight:700; margin-left:12px; }
+  .logo { font-weight:900; line-height:1; text-shadow:var(--glow); }
+  .light .logo { background:linear-gradient(120deg,#4f46e5,#0d9488); -webkit-background-clip:text; color:transparent; }
+  .latin { font:700 34px 'Space Grotesk'; letter-spacing:28px; text-indent:28px; color:var(--accent); margin-top:40px; }
+  .tag { font-size:44px; font-weight:700; color:var(--dim); margin-top:14px; }
+  .pills { margin-top:34px; display:flex; gap:16px; justify-content:center; direction:ltr; }
+  .pills span { padding:10px 22px; border-radius:14px; font:600 26px 'JetBrains Mono'; color:var(--accent);
+                background:var(--chip); border:1px solid var(--cardLine); }
+
+  /* ── 9:16 layout ─────────────────────────────────────────────────────── */
+  .v .hero { font-size:76px; top:1180px; padding:0 60px; }
+  .v #wTitle { top:150px; font-size:72px; } .v #chipRow { top:270px; }
+  .v #recA { left:62px; width:956px; top:560px; height:462px; }
+  .v #recB { left:62px; width:956px; top:150px; height:462px; }
+  .v #caps { left:62px; width:956px; top:700px; height:360px; }
+  .v #mTitle { top:1150px; font-size:78px; padding:0 70px; }
+  .v #badge { top:150px; }
+  .v #cRam { right:70px; top:860px; width:450px; } .v #cLoad { left:70px; top:860px; width:450px; }
+  .v #cNet { left:70px; right:70px; top:1130px; } .v #cGit { left:70px; right:70px; top:860px; }
+  .v #aTitle { top:150px; font-size:76px; } .v #aSay { top:280px; } .v #aTool { top:380px; }
+  .v #recC { left:62px; width:956px; top:480px; height:462px; }
+  .v #endBox { top:1060px; } .v .logo { font-size:200px; }
+
+  /* ── 16:9 layout: face on the left, content on the right ────────────── */
+  .h .hero { font-size:70px; top:760px; padding:0 200px; }
+  .h #wTitle { top:90px; font-size:64px; left:880px; right:60px; } .h #chipRow { top:190px; left:880px; right:60px; }
+  .h #recA { left:930px; width:860px; top:330px; height:416px; }
+  .h #recB { left:80px; width:960px; top:120px; height:465px; }
+  .h #caps { left:1100px; width:740px; top:150px; height:380px; }
+  .h #mTitle { top:720px; font-size:66px; padding:0 120px; }
+  .h #badge { top:60px; left:880px; right:60px; }
+  .h #cRam { left:1440px; top:190px; width:400px; } .h #cLoad { left:1000px; top:190px; width:400px; }
+  .h #cNet { left:1000px; width:840px; top:450px; } .h #cGit { left:1000px; width:840px; top:190px; }
+  .h #aTitle { top:70px; font-size:64px; } .h #aSay { top:560px; left:60px; right:auto; width:760px; } .h #aTool { top:660px; left:60px; right:auto; width:760px; }
+  .h #recC { left:860px; width:980px; top:200px; height:474px; }
+  .h #endBox { top:470px; } .h .logo { font-size:170px; }
+</style>
+</head>
+<body>
+<div id="stage" class="v">
+  <canvas id="bg"></canvas>
+
+  <div class="scene" id="sIntro"><div class="abs row hero" id="introTxt">تخيّل إن جهازك <span class="hl">بيسمعك…</span> ويرد عليك</div></div>
+
+  <div class="scene" id="sWake">
+    <div class="abs row title" id="wTitle">قول <span class="hl">اسمها</span> بس</div>
+    <div class="abs row" id="chipRow"><div class="wake"><div class="mic"></div><div style="font-size:54px;font-weight:900">«لورا»</div>
+      <canvas id="wakeWave" width="250" height="66" style="width:250px;height:66px;flex:none"></canvas></div>
+      <div class="who" id="who">🎙️ إنت بتنادي…</div></div>
+    <div class="win" id="recA"><img id="imgA"><div class="real">REAL · screen recording</div></div>
+  </div>
+
+  <div class="scene" id="sSelf">
+    <div class="win" id="recB"><img id="imgB"><div class="real">REAL · screen recording</div></div>
+    <div class="abs" id="caps">
+      <div class="cap" id="cap0" style="right:0;top:0"><b>تنفّذ أوامر</b><code>run_command</code></div>
+      <div class="cap" id="cap1" style="left:0;top:0"><b>تدير التطبيقات</b><code>open_application</code></div>
+      <div class="cap" id="cap2" style="right:0;top:190px"><b>GitHub</b><code>mcp · github</code></div>
+      <div class="cap" id="cap3" style="left:0;top:190px"><b>Supabase</b><code>mcp · supabase</code></div>
+    </div>
+  </div>
+
+  <div class="scene" id="sMorning"><div class="abs row hero" id="mTitle">وكل يوم الصبح، <span class="hl">بتطمّنك</span> على جهازك… وعلى شغلك</div></div>
+
+  <div class="scene" id="sBrief">
+    <div class="abs row" id="badge"><span class="badge"><i></i>إحاطة الصباح · Daily briefing</span></div>
+    <div class="card" id="cRam"><h4><b>▦</b>الرامات</h4><div class="num"><span id="ramN">0.0</span><small>/ 23.2 GB</small></div><div class="bar"><i id="ramB"></i></div></div>
+    <div class="card" id="cLoad"><h4><b>◔</b>معدل الحمل</h4><div class="num"><span id="loadN">0.00</span></div><div class="bar"><i id="loadB"></i></div></div>
+    <div class="card" id="cNet"><h4><b>⌁</b>الإنترنت · <span style="color:var(--ok)">متصل</span></h4><div class="num"><span id="netN">0.0</span><small>ms</small></div><div class="spark" id="spark"></div></div>
+    <div class="card" id="cGit"><h4><b>⎇</b>آخر commit على GitHub</h4>
+      <div style="margin-top:14px"><span class="chip">mohamedjs/lura</span><span class="chip">من أسبوعين</span><span class="chip g" id="newFeat">✨ ميزة جديدة</span></div>
+      <div class="code" id="commit"></div></div>
+  </div>
+
+  <div class="scene" id="sApps">
+    <div class="abs row title" id="aTitle">وتفتحلك <span class="hl">برامجك</span> بصوتك</div>
+    <div class="abs row" id="aSay"><span class="say"><i></i>«افتحي كروم»</span></div>
+    <div class="abs row tool" id="aTool"><b>open_application</b>("chrome")<span class="ok">✓ اتفتح</span></div>
+    <div class="win" id="recC"><img id="imgC"><div class="real">REAL · Lura opened Chrome</div></div>
+  </div>
+
+  <div class="scene" id="sEnd">
+    <div class="abs row" id="endBox"><div class="logo">لورا</div><div class="latin">LURA</div><div class="tag">مساعدك الصوتي على لينكس</div>
+      <div class="pills"><span>Gemini Live</span><span>OpenRouter</span><span>MCP tools</span></div>
+      <div class="pills" style="margin-top:22px"><span>github.com/mohamedjs/lura</span></div></div>
+  </div>
+
+  <div id="caption"></div>
+</div>
+
+<script src="face_mesh.js"></script>
+<script src="face.js"></script>
+<script>
+// Timeline of lura_combo_9x16.mp4 (measured from its frames) so its narration lines up.
+const SC = { intro:[0,5.6], wake:[5.6,13.4], self:[13.4,25.4], morning:[25.4,30.9], brief:[30.9,60.7],
+             apps:[60.7,69.8], ask:[69.8,72.4], end:[72.4,78.4] };
+const CAPS = [
+  [10.75,13.3,'أيوه معاك، إزاي أقدر أساعدك النهارده؟'],
+  [13.4,16.9,'أنا لورا، مساعدة صوتية على جهازك'],
+  [16.9,19.9,'أقدر أنفّذ أوامر، وأدير التطبيقات'],
+  [19.9,22.9,'وأوصل لخدمات زي GitHub و Supabase'],
+  [22.9,25.3,'عشان أساعدك في مهامك'],
+  [31.0,36.0,'الرامات مستخدم منها ٥٫٦ جيجا من أصل ٢٣٫٢ جيجا'],
+  [36.0,39.5,'ومعدل الحمل ١٫٧٧'],
+  [39.5,45.0,'الإنترنت كمان متصل وممتاز.. بزمن استجابة ٤٥٫٢ ملي ثانية'],
+  [45.0,49.0,'آخر حاجة عملتها على GitHub كانت من أسبوعين'],
+  [49.0,56.75,'على مستودع لورا، وكان الـ commit بعنوان…'],
+  [56.75,60.5,'ده معناه إنك ضفت ميزة جديدة'],
+  [66.0,68.8,'لقد قمت بفتح متصفح كروم'],
+  [69.9,72.3,'تحب نركز على حاجة معينة؟'],
+];
+const HUMAN = [8.1, 8.6];          // the person saying «لورا» (inserted by combo.mjs)
+const CHIME = 9.3;                 // wake word detected
+const COMMIT = 'feat: deepgram voice, gemini-3.8-flash,\nand force one reply language', COMMIT_T = [49.85, 55.25];
+
+// face placement per scene: [x, y, size] for each aspect
+const FACE = {
+  v: { intro:[540,760,250], wake:[540,1390,150], morning:[540,720,250], brief:[540,500,210], apps:[540,1330,130], ask:[540,780,250], end:[540,700,240] },
+  h: { intro:[960,400,200], wake:[440,560,230], morning:[960,380,190], brief:[470,560,240], apps:[440,330,150], ask:[960,450,220], end:[960,280,150] },
+};
+const THEMES = {
+  dark:  { bg:['#0b2438','#06121f','#02060c'], grid:'34,211,238', dots:'125,230,255', ring:'34,211,238', ring2:'244,114,182',
+           face:{ hue:'cyan' } },
+  light: { bg:['#ffffff','#f3f5fb','#e7ebf5'], grid:'79,70,229', dots:'99,102,241', ring:'79,70,229', ring2:'219,39,119',
+           face:{ line:[55,48,163], hot:[13,148,136], eye:[8,145,178], blend:'source-over', boost:1.6 },
+           blobs:[['99,102,241',.20],['20,184,166',.16],['244,114,182',.12]] },
+};
+
+let TL = { fps:30, total:78.4, aspect:'v', theme:'dark', env:null, clips:{} };
+let W = 1080, H = 1920, TH = THEMES.dark;
+const $ = id => document.getElementById(id);
+const clamp = (x,a=0,b=1) => Math.min(b, Math.max(a, x));
+const seg = (t,a,b) => clamp((t-a)/(b-a));
+const out3 = p => 1 - Math.pow(1-p, 3);
+const back = p => { const c=1.6; return 1 + (c+1)*Math.pow(p-1,3) + c*Math.pow(p-1,2); };
+const lerp = (a,b,p) => a + (b-a)*p;
+const noise = (x,s=0) => Math.sin(x*1.7+s)*.5 + Math.sin(x*3.1+s*2.3)*.3 + Math.sin(x*7.3+s*.7)*.2;
+function rng(seed){ return () => (seed = (seed*16807) % 2147483647) / 2147483647; }
+let PARTS = [];
+const ctx = $('bg').getContext('2d');
+
+function win(name, t) { const [a,b] = SC[name]; return {o: seg(t,a-.2,a+.35)*(1-seg(t,b-.3,b+.1)), u: t-a}; }
+function level(t) {
+  if (!TL.env) return Math.max(0, noise(t*8,2))*.6;
+  const f = t*TL.fps, i = Math.floor(f), k = f-i, e = TL.env;
+  return clamp((e[i]??0)*(1-k) + (e[i+1]??0)*k);
+}
+// Lura talks everywhere except the wake call (that's the human + chime) and the end card
+const talking = t => t > 1.4 && !(t > 5.4 && t < 10.6) && t < 72.4;
+
+function bg(t) {
+  const g = ctx.createRadialGradient(W/2,H*.4,40,W/2,H*.45,Math.max(W,H)*.75);
+  g.addColorStop(0,TH.bg[0]); g.addColorStop(.5,TH.bg[1]); g.addColorStop(1,TH.bg[2]);
+  ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+  if (TH.blobs) TH.blobs.forEach(([c,a],k) => {          // daylight: slow coloured studio lights
+    const x = W*(.5 + .38*Math.sin(t*.13 + k*2.1)), y = H*(.35 + .3*Math.cos(t*.11 + k*1.7)), r = Math.max(W,H)*.45;
+    const b = ctx.createRadialGradient(x,y,0,x,y,r); b.addColorStop(0,`rgba(${c},${a})`); b.addColorStop(1,`rgba(${c},0)`);
+    ctx.fillStyle = b; ctx.fillRect(0,0,W,H); });
+  ctx.save(); const hz = H*.78;
+  for (let i=0;i<12;i++){ const y = hz + Math.pow(((i*70 + t*50) % 840)/840, 2)*(H-hz);
+    ctx.strokeStyle = `rgba(${TH.grid},${.12*clamp((y-hz)/160)})`; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+  for (let i=-14;i<=14;i++){ const vg = ctx.createLinearGradient(0,hz,0,H); vg.addColorStop(0,`rgba(${TH.grid},0)`); vg.addColorStop(1,`rgba(${TH.grid},.13)`);
+    ctx.strokeStyle = vg; ctx.beginPath(); ctx.moveTo(W/2+i*30,hz); ctx.lineTo(W/2+i*160,H); ctx.stroke(); }
+  ctx.restore();
+  const [fx0, fy0] = FACE[TL.aspect].intro;
+  const gather = out3(seg(t,0,1.9)) * (1 - seg(t,1.9,2.6));
+  for (const p of PARTS) {
+    const fy = ((p.y - t*p.v) % H + H) % H, fx = p.x + Math.sin(t*.5+p.y)*10;
+    const x = lerp(fx, fx0 + p.dx, gather), y = lerp(fy, fy0 + p.dy, gather);
+    ctx.fillStyle = `rgba(${TH.dots},${p.a*(.55+.45*Math.sin(t*2+p.x))*(1+gather)*(TL.theme==='light'?.6:1)})`;
+    ctx.beginPath(); ctx.arc(x,y,p.r*(1+gather*.6),0,7); ctx.fill();
+  }
+}
+function rings(cx, cy, u, o, base) {
+  for (let i=0;i<4;i++){ const p = ((u*.45 + i/4) % 1);
+    ctx.strokeStyle = `rgba(${TH.ring},${(1-p)*.5*o})`; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(cx, cy, base + p*320, 0, 7); ctx.stroke(); }
+}
+function dashedRing(cx, cy, r, t, o) {
+  ctx.save(); ctx.setLineDash([6,14]); ctx.lineDashOffset = -t*30;
+  ctx.strokeStyle = `rgba(${TH.ring2},${.45*o})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(cx,cy,r,0,7); ctx.stroke();
+  ctx.setLineDash([]); ctx.strokeStyle = `rgba(${TH.ring},${.18*o})`; ctx.beginPath(); ctx.arc(cx,cy,r+18,0,7); ctx.stroke(); ctx.restore();
+}
+function face(t) {
+  let w = 0, x = 0, y = 0, s = 0;
+  for (const [n, [cx, cy, sz]] of Object.entries(FACE[TL.aspect])) { const o = win(n,t).o; w += o; x += cx*o; y += cy*o; s += sz*o; }
+  const intro = seg(t, 1.2, 2.2);
+  if (w < .01) return;
+  x /= w; y /= w; s /= w;
+  const v = talking(t) ? level(t) : 0;
+  if (win('brief',t).o > 0 || win('ask',t).o > 0) dashedRing(x, y, s*1.28, t, Math.max(win('brief',t).o, win('ask',t).o));
+  if (t > CHIME - .1 && t < 12.5) rings(x, y, t - CHIME, win('wake',t).o * (1 - seg(t, 11.5, 12.5)), s*1.1);
+  const a = Math.min(1,w) * (t < 2.2 ? intro : 1);
+  drawFace(ctx, x, y, s*(.9+.1*out3(intro)), {t, mouth:v, alpha:a, glow:v + (t > CHIME && t < 10.5 ? .8 : 0), ...TH.face});
+}
+function wakeWave(t) {
+  const c = $('wakeWave').getContext('2d'); c.clearRect(0,0,250,66);
+  const on = t > HUMAN[0]-.05 && t < HUMAN[1]+.1 ? 1 : 0;
+  for (let i=0;i<25;i++){ const h = 6 + 50*on*Math.abs(noise(t*9+i*.6,i));
+    c.fillStyle = getComputedStyle($('stage')).getPropertyValue('--accent'); c.fillRect(i*10, 33-h/2, 6, h); }
+}
+let capIdx = -2;
+function caption(t) {
+  const el = $('caption'); const i = CAPS.findIndex(c => t >= c[0]-.15 && t < c[1]);
+  if (i !== capIdx) { capIdx = i; el.innerHTML = i < 0 ? '' : CAPS[i][2].split(' ').map(w => `<span>${w}</span>`).join(' '); }
+  if (i < 0) return;
+  const [a, b] = CAPS[i], sp = el.children, n = sp.length, span = (b - a) * .85;
+  for (let k=0;k<n;k++){ const p = out3(seg(t, a + span*k/n - .1, a + span*k/n + .2));
+    sp[k].style.opacity = p * (1 - seg(t, b-.25, b)); sp[k].style.transform = `translateY(${(1-p)*20}px)`; }
+}
+const set = (id, css) => Object.assign($(id).style, css);
+const appear = (id, t, at, d=.5, dy=50) => { const p = out3(seg(t,at,at+d)); set(id, {opacity:p, transform:`translateY(${(1-p)*dy}px)`}); return p; };
+function clip(id, name, t) {           // show the right frame of a real recording
+  const c = TL.clips[name]; if (!c) return Promise.resolve();
+  const n = clamp(Math.floor((t - c.start)*TL.fps) + 1, 1, c.count), img = $(id);
+  const src = `${c.dir}/f${String(n).padStart(4,'0')}.jpg`;
+  if (img.getAttribute('src') === src) return Promise.resolve();
+  img.src = src; return img.decode().catch(() => {});
+}
+
+function render(t) {
+  bg(t);
+  for (const n of Object.keys(SC)) { const el = $('s' + n[0].toUpperCase() + n.slice(1)); if (el) el.style.opacity = win(n,t).o; }
+  face(t);
+  // intro + morning heroes
+  appear('introTxt', t, .7, .7); appear('mTitle', t, SC.morning[0]+.3, .7);
+  // wake: title, chip, the human call, the recording
+  appear('wTitle', t, 5.9); appear('chipRow', t, 6.9);
+  $('who').textContent = t < CHIME ? '🎙️ إنت بتنادي…' : '✓ سمعتك';
+  $('who').style.color = t < CHIME ? '' : 'var(--ok)';
+  wakeWave(t);
+  const ra = appear('recA', t, 7.0, .6, 40);
+  // self: big recording + capability cards
+  appear('recB', t, 13.3, .6, 40);
+  [17.1, 18.4, 20.1, 21.1].forEach((at,k) => appear('cap'+k, t, at, .5, 30));
+  // briefing
+  const metrics = 1 - seg(t, 44.6, 45.1);
+  $('cRam').style.opacity = appear('cRam', t, 30.9) * metrics;
+  $('cLoad').style.opacity = appear('cLoad', t, 35.9) * metrics;
+  $('cNet').style.opacity = appear('cNet', t, 39.4) * metrics;
+  $('ramN').textContent = (5.6*out3(seg(t,31.1,32.5))).toFixed(1);   $('ramB').style.width = (24*out3(seg(t,31.1,32.5)))+'%';
+  $('loadN').textContent = (1.77*out3(seg(t,36.1,37.3))).toFixed(2); $('loadB').style.width = (44*out3(seg(t,36.1,37.3)))+'%';
+  $('netN').textContent = (45.2*out3(seg(t,39.6,40.9))).toFixed(1);
+  const sp = $('spark'); if (!sp.children.length) sp.innerHTML = '<i></i>'.repeat(28);
+  [...sp.children].forEach((b,k) => b.style.height = (10 + 54*seg(t, 39.6 + k*.05, 39.9 + k*.05)*(.45+.55*Math.abs(noise(k*.9 + t*.8, 3)))) + 'px');
+  appear('cGit', t, 45.1);
+  const typed = Math.floor(COMMIT.length * seg(t, COMMIT_T[0], COMMIT_T[1]));
+  $('commit').innerHTML = (t < COMMIT_T[0]-.2 ? '' : COMMIT.slice(0,typed).replace(/^feat:/, '<span class="k">feat:</span>'))
+    + `<span class="caret" style="opacity:${Math.floor(t*2.5)%2}"></span>`;
+  const nf = back(seg(t, 56.85, 57.35)); set('newFeat', {opacity:clamp(nf), transform:`scale(${.6+.4*nf})`, display:'inline-block'});
+  // apps
+  appear('aTitle', t, 61.0); appear('aSay', t, 61.9, .4, 20); appear('aTool', t, 65.9, .4, 12); appear('recC', t, 62.9, .6, 40);
+  // end card
+  [...$('endBox').children].forEach((el,k) => { const p = back(seg(win('end',t).u, .2+k*.18, .8+k*.18));
+    el.style.opacity = clamp(p); el.style.transform = `translateY(${(1-p)*40}px)`; });
+  caption(t);
+  set('stage', {opacity: seg(t,0,.4) * (1 - seg(t, TL.total-.4, TL.total))});
+  // recordings: A = wake (from 7.0), B = self (from 13.3), C = chrome (from 62.9)
+  return Promise.all([ra > 0 ? clip('imgA','A',t) : 0, win('self',t).o > 0 ? clip('imgB','B',t) : 0,
+                      win('apps',t).o > 0 ? clip('imgC','C',t) : 0]);
+}
+
+window.setup = tl => {
+  TL = Object.assign(TL, tl); capIdx = -2; TH = THEMES[TL.theme];
+  const st = $('stage'); st.className = TL.aspect + (TL.theme === 'light' ? ' light' : '');
+  [W, H] = TL.aspect === 'v' ? [1080, 1920] : [1920, 1080];
+  $('bg').width = W; $('bg').height = H;
+  const R = rng(7); PARTS = Array.from({length:150}, () => ({x:R()*W, y:R()*H, r:.6+R()*2.4, v:6+R()*26, a:.15+R()*.55, dx:(R()-.5)*400, dy:(R()-.5)*500}));
+};
+window.render = render;
+window.ready = Promise.all([
+  ...['900 80px Cairo','700 40px Cairo','500 30px "JetBrains Mono"','700 30px "Space Grotesk"'].map(f => document.fonts.load(f, 'لورا Lura')),
+  document.fonts.ready]);
+
+if (!navigator.webdriver) {          // live preview: combo.html?aspect=h&theme=light
+  const q = new URLSearchParams(location.search);
+  window.setup({ aspect: q.get('aspect') || 'v', theme: q.get('theme') || 'dark' });
+  const fit = () => $('stage').style.transform = `scale(${Math.min(innerWidth/W, innerHeight/H)})`;
+  addEventListener('resize', fit); fit();
+  const t0 = performance.now();
+  window.ready.then(function loop(){ render(((performance.now()-t0)/1000) % TL.total); requestAnimationFrame(loop); });
+}
+</script>
+</body>
+</html>
