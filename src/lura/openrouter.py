@@ -95,10 +95,11 @@ def transcribe(settings: Settings, key: str, wav: bytes) -> str:
     """Speech to text."""
     import base64
 
+    # OpenRouter wants input_audio {data, format}; "file"/"filename" is rejected
+    # with HTTP 400 invalid_union (found by running it, 2026-10).
     payload = {
         "model": settings.openrouter_stt_model,
-        "file": base64.b64encode(wav).decode(),
-        "filename": "speech.wav",
+        "input_audio": {"data": base64.b64encode(wav).decode(), "format": "wav"},
     }
     if settings.language:
         payload["language"] = settings.language.split("-")[0]
