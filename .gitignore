@@ -36,6 +36,14 @@ MANIFEST
 *.key
 credentials.json
 
+# API keys — never commit these
+env-d.txt
+keys.json
+
 # Promo video
 video/node_modules/
 video/out/
+node_modules/
+
+# Scratch output
+_to_delete/

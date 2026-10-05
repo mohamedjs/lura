@@ -84,6 +84,24 @@ class Conversation:
             from .overlay import State
             self._overlay.state = State(state_name)
 
+    def _set_overlay_amplitude(self, chunk: bytes | None) -> None:
+        """Push voice loudness to the overlay so the mouth tracks real audio."""
+        if self._overlay is None:
+            return
+        if not chunk:
+            self._overlay.amplitude = 0.0
+            return
+        import numpy as np
+
+        if len(chunk) % 2:  # int16 frames only; never let a ragged slice raise
+            chunk = chunk[:-1]
+        samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32)
+        if samples.size == 0:
+            self._overlay.amplitude = 0.0
+            return
+        rms = float(np.sqrt(np.mean(samples * samples))) / 32768.0
+        self._overlay.amplitude = min(1.0, rms * 4.0)
+
     def _set_overlay_transcript(self, text: str) -> None:
         """Push transcript text to the overlay HUD."""
         if self._overlay is not None:
@@ -174,13 +192,20 @@ class Conversation:
                 chunk = await chunks.get()
                 if chunk is None:  # turn finished
                     self._speaking.clear()
+                    self._set_overlay_amplitude(None)
                     self._set_overlay("listening")
                     continue
                 self._speaking.set()
                 self._set_overlay("speaking")
                 self._last_voice = time.monotonic()
                 try:
-                    await asyncio.to_thread(stream.write, chunk)
+                    # Written in ~50ms slices so the overlay mouth tracks the
+                    # audio as it plays rather than jumping once per chunk.
+                    stride = OUT_BLOCK * CHANNELS * 2
+                    for off in range(0, len(chunk), stride):
+                        part = chunk[off:off + stride]
+                        self._set_overlay_amplitude(part)
+                        await asyncio.to_thread(stream.write, part)
                 except Exception as exc:
                     log.warning("Audio playback write warning: %s", exc)
         except Exception as exc:

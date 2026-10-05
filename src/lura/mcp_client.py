@@ -1,6 +1,8 @@
 """Model Context Protocol (MCP) client for Lura assistant."""
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 import os
@@ -184,6 +186,55 @@ class MCPManager:
                 except Exception as exc:
                     log.warning("Failed converting tool %s: %s", raw, exc)
         return decls
+
+    def get_openai_tools(self) -> list[dict]:
+        """The same tools in OpenAI shape, for the OpenRouter path.
+
+        No schema conversion here: MCP already speaks JSON Schema, which is
+        exactly what the OpenAI tools field wants.
+        """
+        out: list[dict] = []
+        for s in self.servers.values():
+            for t in s.tools:
+                if not (raw := t.get("name", "")):
+                    continue
+                schema = t.get("inputSchema")
+                if not isinstance(schema, dict):
+                    schema = {"type": "object", "properties": {}}
+                out.append({
+                    "type": "function",
+                    "function": {
+                        "name": f"mcp_{s.name}_{raw}",
+                        "description": f"[{s.name}] {t.get('description', '')}".strip(),
+                        "parameters": schema,
+                    },
+                })
+        return out
+
+    def search_openai_tools(self, query: str, limit: int = 8) -> list[dict]:
+        """The MCP tools that best match a plain-language query.
+
+        Words are cut to a six-letter prefix so "repositories" finds
+        "repository", and a hit in the tool's name outweighs any number of hits
+        in its description — otherwise a common word like "list" drags in every
+        tool whose prose happens to contain it.
+        """
+        stems = {w[:6] for w in re.split(r"\W+", query.lower()) if len(w) > 2}
+        if not stems:
+            return []
+
+        scored: list[tuple[int, int, dict]] = []
+        for tool in self.get_openai_tools():
+            fn = tool["function"]
+            name = fn["name"].lower()
+            description = (fn.get("description") or "").lower()
+            in_name = sum(1 for stem in stems if stem in name)
+            in_description = sum(1 for stem in stems if stem in description)
+            if in_name or in_description:
+                scored.append((in_name, in_description, tool))
+
+        scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+        return [tool for _, _, tool in scored[:limit]]
 
     def call_tool(self, gemini_tool_name: str, arguments: dict | None = None) -> str:
         if gemini_tool_name in self._tool_map:

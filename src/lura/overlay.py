@@ -1,65 +1,33 @@
-"""Lura Hologram Overlay — 3D Cyberpunk AI Wireframe Face.
+"""Lura Hologram Overlay — shaded 3D face on a transparent background.
 
 Floating in the top-right corner with zero chrome, border, or background.
-Supports three smoothly transitioned visual states:
-- Listening: Stable, gentle idle pulse/glow.
-- Thinking: Rotational 3D motion + data-processing glow animation through vertices.
-- Speaking: Audio-reactive wave/pulse animation across wireframe nodes.
+
+Look (matches the promo video's head): the MediaPipe face mesh (468 vertices,
+898 triangles) drawn as indigo wireframe over lavender facets lit from the
+upper left, glowing teal eyes, teal lips and jaw and a dotted cyan orbit ring;
+nothing else: the window background is fully transparent.
+
+Animation:
+- The head sways slowly (yaw/pitch), eyes blink, a light band sweeps down.
+- Listening: calm, dimmer glow.
+- Thinking: the head turns further and the light band speeds up.
+- Speaking: the jaw drops with live voice amplitude and the mouth glows.
+- 30fps on a transparent window.
 """
 
 from __future__ import annotations
 
 import enum
-import io
 import logging
 import math
-from pathlib import Path
 import threading
+import time
+
+import numpy as np
+
+from .face_mp import TRIANGLES, VERTICES
 
 log = logging.getLogger(__name__)
-
-# ── 3D Wireframe Face Model ──────────────────────────────────────────────────
-# 67 anatomical facial vertices centered at (0, 0, 0)
-VERTICES_3D: list[tuple[float, float, float]] = [
-    (0.0, -170.0, 3.8), (-35.0, -160.0, -4.8), (35.0, -160.0, -4.8), (-65.0, -136.0, -20.0),
-    (65.0, -136.0, -20.0), (0.0, -133.0, 24.4), (-40.0, -118.0, 22.1), (40.0, -118.0, 22.1),
-    (-88.0, -100.0, -20.0), (88.0, -100.0, -20.0), (0.0, -93.0, 41.1), (-25.0, -88.0, 40.0),
-    (25.0, -88.0, 40.0), (-55.0, -83.0, 30.1), (55.0, -83.0, 30.1), (-25.0, -66.0, 46.5),
-    (25.0, -66.0, 46.5), (0.0, -63.0, 49.7), (-55.0, -60.0, 37.6), (55.0, -60.0, 37.6),
-    (-100.0, -58.0, -20.0), (100.0, -58.0, -20.0), (-35.0, -52.0, 47.3), (35.0, -52.0, 47.3),
-    (-80.0, -48.0, 22.9), (80.0, -48.0, 22.9), (-18.0, -46.0, 45.9), (0.0, -46.0, 75.1),
-    (18.0, -46.0, 45.9), (-55.0, -43.0, 41.5), (55.0, -43.0, 41.5), (-35.0, -38.0, 49.8),
-    (35.0, -38.0, 49.8), (0.0, -18.0, 78.4), (-80.0, -13.0, 29.3), (80.0, -13.0, 29.3),
-    (-48.0, -8.0, 48.3), (48.0, -8.0, 48.3), (-16.0, 0.0, 56.1), (16.0, 0.0, 56.1),
-    (0.0, 4.0, 87.0), (0.0, 12.0, 86.7), (-35.0, 17.0, 52.0), (35.0, 17.0, 52.0),
-    (-70.0, 27.0, 35.5), (70.0, 27.0, 35.5), (0.0, 34.0, 70.9), (-20.0, 37.0, 69.0),
-    (20.0, 37.0, 69.0), (-35.0, 44.0, 48.8), (35.0, 44.0, 48.8), (-20.0, 48.0, 67.3),
-    (20.0, 48.0, 67.3), (0.0, 50.0, 68.4), (0.0, 64.0, 65.5), (-62.0, 67.0, 31.5),
-    (62.0, 67.0, 31.5), (-45.0, 102.0, 27.5), (45.0, 102.0, 27.5), (-18.0, 127.0, 39.4),
-    (18.0, 127.0, 39.4), (0.0, 132.0, 38.9), (-35.0, 137.0, 13.8), (35.0, 137.0, 13.8),
-    (-50.0, 167.0, -20.0), (50.0, 167.0, -20.0), (0.0, 170.0, 17.8),
-]
-
-# 138 connecting mesh edges
-EDGES: list[tuple[int, int]] = [
-    (0, 1), (0, 2), (1, 3), (2, 4), (3, 8), (4, 9), (8, 20), (9, 21), (20, 24), (21, 25),
-    (0, 5), (1, 6), (2, 7), (3, 6), (4, 7), (8, 13), (9, 14), (5, 1), (5, 2), (5, 6),
-    (5, 7), (5, 10), (6, 10), (7, 10), (6, 13), (7, 14), (13, 11), (14, 12), (10, 11),
-    (10, 12), (10, 17), (11, 17), (12, 17), (11, 15), (12, 16), (13, 18), (14, 19),
-    (17, 15), (17, 16), (15, 18), (16, 19), (18, 24), (19, 25), (15, 22), (18, 22),
-    (18, 29), (29, 22), (22, 26), (26, 31), (31, 29), (22, 31), (16, 23), (19, 23),
-    (19, 30), (30, 23), (23, 28), (28, 32), (32, 30), (23, 32), (17, 27), (15, 27),
-    (16, 27), (27, 26), (27, 28), (27, 33), (33, 40), (33, 38), (33, 39), (26, 38),
-    (28, 39), (38, 40), (39, 40), (40, 41), (38, 41), (39, 41), (31, 36), (32, 37),
-    (29, 34), (30, 35), (24, 34), (25, 35), (34, 36), (35, 37), (34, 44), (35, 45),
-    (36, 42), (37, 43), (38, 36), (39, 37), (38, 42), (39, 43), (42, 44), (43, 45),
-    (41, 46), (38, 47), (39, 48), (46, 47), (46, 48), (47, 49), (48, 50), (42, 49),
-    (43, 50), (49, 51), (50, 52), (53, 51), (53, 52), (46, 53), (47, 51), (48, 52),
-    (53, 54), (51, 54), (52, 54), (44, 55), (45, 56), (55, 49), (56, 50), (55, 57),
-    (56, 58), (57, 54), (58, 54), (57, 59), (58, 60), (59, 54), (60, 54), (59, 61),
-    (60, 61), (59, 62), (60, 63), (61, 62), (61, 63), (57, 64), (58, 65), (62, 64),
-    (63, 65), (62, 66), (63, 66), (64, 66), (65, 66),
-]
 
 
 # ── State Machine ────────────────────────────────────────────────────────────
@@ -79,6 +47,8 @@ class OverlayState:
     def __init__(self):
         self._state = State.LISTENING
         self._transcript = ""
+        self._amp = 0.0
+        self._amp_ts = 0.0
         self._lock = threading.Lock()
 
     @property
@@ -92,6 +62,25 @@ class OverlayState:
             val = State(val)
         with self._lock:
             self._state = val
+
+    @property
+    def amplitude(self) -> float:
+        """Voice loudness 0..1, decaying to silence between audio chunks.
+
+        Chunks arrive far slower than the 60fps render loop, so the value is
+        decayed against wall-clock time rather than per read.
+        """
+        with self._lock:
+            if self._amp <= 0.0:
+                return 0.0
+            age = time.monotonic() - self._amp_ts
+            return self._amp * max(0.0, 1.0 - age / 0.22)
+
+    @amplitude.setter
+    def amplitude(self, val: float):
+        with self._lock:
+            self._amp = max(0.0, min(1.0, val))
+            self._amp_ts = time.monotonic()
 
     @property
     def transcript(self) -> str:
@@ -108,12 +97,11 @@ class StateBlender:
     """Smooth continuous interpolation between visual states."""
 
     def __init__(self):
-        self.wl = 1.0  # listening weight
+        self.wl = 1.0  # listening / idle weight
         self.wt = 0.0  # thinking weight
         self.ws = 0.0  # speaking weight
 
     def update(self, target_st: State, dt: float = 0.04):
-        # Normalize alias states
         if target_st in (State.IDLE, State.LISTENING):
             tl, tt, ts = 1.0, 0.0, 0.0
         elif target_st in (State.CONNECTING, State.THINKING):
@@ -121,7 +109,6 @@ class StateBlender:
         else:  # SPEAKING
             tl, tt, ts = 0.0, 0.0, 1.0
 
-        # Smooth exponential lerp (~300ms transition)
         k = min(1.0, dt * 5.0)
         self.wl += (tl - self.wl) * k
         self.wt += (tt - self.wt) * k
@@ -136,15 +123,143 @@ class StateBlender:
 
 # ── Dimensions & Placement ──────────────────────────────────────────────────
 
-OVERLAY_SIZE = 170
+OVERLAY_SIZE = 260
 MARGIN_RIGHT = 24
 MARGIN_TOP = 20
 
 
-# ── Cairo Procedural 3D Head Renderer ───────────────────────────────────────
+# ── Face model, precomputed once ────────────────────────────────────────────
 
-def _render_frame(t: float, blender: StateBlender, size: int = OVERLAY_SIZE) -> bytes:
-    """Render the 3D wireframe head frame to PNG bytes."""
+V0 = np.asarray(VERTICES, dtype=np.float64)          # (468, 3), ~2 units tall
+TRI = np.asarray(TRIANGLES, dtype=np.int64)          # (898, 3)
+
+
+def _smooth(a: float, b: float, x):
+    t = np.clip((x - a) / (b - a), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _gauss(x, s: float):
+    return np.exp(-(x * x) / (2.0 * s * s))
+
+
+# Unique edges plus, for each, the triangles that share it.
+def _edges():
+    seen: dict[tuple[int, int], int] = {}
+    pairs: list[tuple[int, int]] = []
+    owner_e: list[int] = []
+    owner_t: list[int] = []
+    for ti, (a, b, c) in enumerate(TRIANGLES):
+        for p, q in ((a, b), (b, c), (c, a)):
+            k = (p, q) if p < q else (q, p)
+            if k not in seen:
+                seen[k] = len(pairs)
+                pairs.append(k)
+            owner_e.append(seen[k])
+            owner_t.append(ti)
+    return np.asarray(pairs, np.int64), np.asarray(owner_e), np.asarray(owner_t)
+
+
+EDGES, _EDGE_OWN, _TRI_OWN = _edges()
+
+# Landmarks (MediaPipe indices).
+LIP_UP, LIP_LO = V0[13, 1], V0[14, 1]
+EYES = np.array([V0[[33, 133, 159, 145]].mean(0), V0[[263, 362, 386, 374]].mean(0)])
+EYES[:, 2] += 0.02
+INNER_LIP = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324, 308,
+             415, 310, 311, 312, 13, 82, 81, 80, 191]
+OUTER_LIP = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291,
+             409, 270, 269, 267, 0, 37, 39, 40, 185]
+
+# How far each vertex follows the jaw when the mouth opens.
+JAW = _smooth(LIP_UP - 0.01, LIP_LO + 0.005, V0[:, 1]) * _gauss(V0[:, 0], 0.42)
+# Lines below the mouth turn teal (the jaw/chin in the reference look).
+_EDGE_Y = V0[EDGES, 1].mean(1)
+EDGE_TEAL = _smooth(LIP_LO - 0.02, LIP_LO - 0.30, _EDGE_Y)
+
+# Sparse dotted skull shell behind the mask.
+_shell = []
+for i in range(22):
+    for j in range(44):
+        th, ph = (i + 0.5) / 22 * math.pi, j / 44 * math.pi * 2
+        p = (math.sin(th) * math.sin(ph) * 0.86, math.cos(th) * 1.02 + 0.14,
+             math.sin(th) * math.cos(ph) * 1.0 - 0.32)
+        if (p[2] > 0.05 and p[1] < 0.95) or p[1] < -0.55:
+            continue
+        _shell.append(p)
+SHELL = np.asarray(_shell)
+
+_ring_an = np.arange(0, 80) / 80.0 * math.pi * 2
+
+_LIGHT = np.array([-0.5, 0.55, 0.68])
+_LIGHT /= np.linalg.norm(_LIGHT)
+
+# Palette (taken from the reference frame).
+INDIGO = (0.44, 0.41, 0.90)       # wireframe
+LAVENDER = (0.62, 0.60, 0.94)     # facet shading
+TEAL = (0.05, 0.68, 0.80)         # eyes, lips, jaw lines
+CYAN = (0.13, 0.75, 0.88)         # orbit ring, light band
+
+
+def _rot(p: np.ndarray, yaw: float, pitch: float) -> np.ndarray:
+    cy, sy, cp, sp = math.cos(yaw), math.sin(yaw), math.cos(pitch), math.sin(pitch)
+    x, y, z = p[..., 0], p[..., 1], p[..., 2]
+    x2 = x * cy + z * sy
+    z2 = -x * sy + z * cy
+    y3 = y * cp - z2 * sp
+    z3 = y * sp + z2 * cp
+    return np.stack([x2, y3, z3], -1)
+
+
+# ── Cairo renderer ──────────────────────────────────────────────────────────
+
+def _render_frame(
+    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
+) -> bytes:
+    """Render one frame to PNG bytes."""
+    import io
+
+    bio = io.BytesIO()
+    _render_surface(t, blender, size, amp).write_to_png(bio)
+    return bio.getvalue()
+
+
+def _surface_rgba(surface) -> bytes:
+    """Cairo ARGB32 (premultiplied, BGRA in memory) -> straight RGBA bytes.
+
+    Feeding these to GdkPixbuf skips a PNG encode/decode, which costs more
+    than drawing the whole face.
+    """
+    surface.flush()
+    w, h, stride = surface.get_width(), surface.get_height(), surface.get_stride()
+    buf = np.frombuffer(surface.get_data(), np.uint8).reshape(h, stride)[:, : w * 4]
+    px = buf.reshape(h, w, 4).astype(np.uint16)
+    a = px[..., 3:4]
+    rgb = np.where(a > 0, (px[..., 2::-1] * 255 + a // 2) // np.maximum(a, 1), 0)
+    out = np.concatenate([np.minimum(rgb, 255), a], -1).astype(np.uint8)
+    return out.tobytes()
+
+
+def _bucket_stroke(cr, segs, alphas, rgb, levels=7):
+    """Stroke many segments with few cairo calls by grouping alpha levels."""
+    if len(segs) == 0:
+        return
+    q = np.clip((alphas * levels).astype(int), 0, levels)
+    for lv in range(1, levels + 1):
+        sel = segs[q == lv].tolist()
+        if not sel:
+            continue
+        for x1, y1, x2, y2 in sel:
+            cr.move_to(x1, y1)
+            cr.line_to(x2, y2)
+        cr.set_source_rgba(*rgb, lv / levels)
+        cr.stroke()
+
+
+def _render_surface(
+    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
+):
+    """Draw one frame of the head. ``amp`` (0..1 voice loudness) opens the jaw."""
     import cairo
 
     wl, wt, ws = blender.wl, blender.wt, blender.ws
@@ -153,130 +268,137 @@ def _render_frame(t: float, blender: StateBlender, size: int = OVERLAY_SIZE) -> 
     cr.set_operator(cairo.OPERATOR_CLEAR)
     cr.paint()
     cr.set_operator(cairo.OPERATOR_OVER)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cr.set_line_join(cairo.LINE_JOIN_ROUND)
 
-    cx, cy = size / 2.0, size / 2.0
-    dist = 310.0
+    cx, cy = size * 0.5, size * 0.47
+    fs = size * 0.26                                   # model unit -> pixels
+    glow = 0.65 * wl + 1.0 * wt + 1.25 * ws
 
-    # 1. State-specific orientations & parameters
-    # Listening: stable, gentle idle pulse
-    theta_y_l = 0.04 * math.sin(t * 0.8)
-    theta_x_l = 0.02 * math.cos(t * 0.6)
-    scale_l = 1.0 + 0.03 * math.sin(t * 2.0)
-    pulse_l = 0.7 + 0.3 * math.sin(t * 2.0)
+    yaw = 0.26 * math.sin(t * 0.45) + wt * 0.22 * math.sin(t * 1.3)
+    pitch = 0.07 * math.sin(t * 0.31) - 0.06
+    mouth = ws * max(amp, 0.10 * abs(math.sin(t * 7.0)))
+    scan_y = 1.25 - (((t * (0.55 + 0.6 * wt)) % 2.0) / 2.0) * 2.7
 
-    # Thinking: continuous 3D rotational motion + vertical data-scan sweep
-    theta_y_t = 0.72 * math.sin(t * 1.5)
-    theta_x_t = 0.12 * math.cos(t * 1.1)
-    scan_y = -170.0 + 340.0 * ((t * 0.75) % 1.0)
+    def proj(v):
+        k = 3.4 / (3.4 - v[..., 2])
+        return np.stack([cx + v[..., 0] * fs * k, cy - v[..., 1] * fs * k], -1)
 
-    # Speaking: organic head tilts + audio-reactive ripple wave
-    theta_y_s = 0.07 * math.sin(t * 2.4)
-    theta_x_s = 0.04 * math.sin(t * 3.0)
+    # Deform (jaw) and transform the mesh.
+    V = V0.copy()
+    V[:, 1] -= JAW * mouth * 0.11
+    V[:, 2] -= JAW * mouth * 0.02
+    VV = _rot(V, yaw, pitch)
+    S = proj(VV)
 
-    # Blended rotation & base scale
-    rot_y = wl * theta_y_l + wt * theta_y_t + ws * theta_y_s
-    rot_x = wl * theta_x_l + wt * theta_x_t + ws * theta_x_s
-    base_scale = 0.37 * (wl * scale_l + wt * 1.0 + ws * 1.0)
+    # Per-triangle lighting.
+    A, B, C = VV[TRI[:, 0]], VV[TRI[:, 1]], VV[TRI[:, 2]]
+    n = np.cross(B - A, C - A)
+    n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-9
+    n[n[:, 2] < 0] *= -1.0
+    lam = np.clip(n @ _LIGHT, 0.0, 1.0)
+    TL = np.clip(0.05 + 0.95 * lam ** 1.6 + 0.5 * (1.0 - n[:, 2]) ** 4, 0.0, 1.0)
 
-    cos_y, sin_y = math.cos(rot_y), math.sin(rot_y)
-    cos_x, sin_x = math.cos(rot_x), math.sin(rot_x)
-
-    # Ambient center bloom
-    if wl > 0.05 or ws > 0.05:
-        pat = cairo.RadialGradient(cx, cy, 5, cx, cy, 70)
-        alpha_b = (0.07 * pulse_l * wl) + (0.10 * ws)
-        pat.add_color_stop_rgba(0.0, 0.0, 0.85, 1.0, alpha_b)
-        pat.add_color_stop_rgba(1.0, 0.0, 0.2, 0.8, 0.0)
-        cr.set_source(pat)
-        cr.arc(cx, cy, 70, 0, 6.283)
+    # Skull shell dots.
+    sv = _rot(SHELL, yaw, pitch)
+    front = sv[:, 2] > -0.2
+    sp = proj(sv[front])
+    sal = (0.10 + 0.25 * _smooth(-0.2, 0.6, sv[front, 2])
+           + 0.45 * _gauss(SHELL[front, 1] - scan_y, 0.04))
+    q = np.clip((sal * 4).astype(int), 1, 4)
+    for lv in range(1, 5):
+        for x, y in sp[q == lv].tolist():
+            cr.rectangle(x - 0.8, y - 0.8, 1.6, 1.6)
+        cr.set_source_rgba(*LAVENDER, lv / 4 * 0.8)
         cr.fill()
 
-    # 2. Transform 3D Vertices
-    proj: list[tuple[float, float, float]] = []
-    node_glow: list[float] = []
-    node_radii: list[float] = []
+    # Shaded facets: a translucent lavender skin that reads on dark and light wallpapers.
+    shade = 0.10 + 0.16 * (1.0 - TL) + 0.12 * TL
+    qf = np.clip((shade * 10).astype(int), 0, 10)
+    tri_xy = S[TRI].reshape(-1, 6)
+    for lv in range(1, 11):
+        sel = tri_xy[qf == lv].tolist()
+        if not sel:
+            continue
+        for x1, y1, x2, y2, x3, y3 in sel:
+            cr.move_to(x1, y1)
+            cr.line_to(x2, y2)
+            cr.line_to(x3, y3)
+            cr.close_path()
+        cr.set_source_rgba(*LAVENDER, lv / 10)
+        cr.fill()
 
-    for x, y, z in VERTICES_3D:
-        # Speaking: wave ripples outward from mouth center (0, 48, 68)
-        dist_m = math.sqrt(x * x + (y - 48.0) ** 2 + (z - 68.0) ** 2)
-        wave = math.sin(dist_m * 0.07 - t * 9.0)
+    # Wireframe: indigo, teal below the mouth, cyan where the light band passes.
+    el = np.zeros(len(EDGES))
+    np.maximum.at(el, _EDGE_OWN, TL[_TRI_OWN])
+    band = np.maximum(_gauss(V0[EDGES[:, 0], 1] - scan_y, 0.022),
+                      _gauss(V0[EDGES[:, 1], 1] - scan_y, 0.022))
+    alpha = np.clip(0.42 + 0.30 * (1.0 - el) + 0.15 * el, 0, 0.9)
+    segs = np.concatenate([S[EDGES[:, 0]], S[EDGES[:, 1]]], 1)
+    teal = EDGE_TEAL > 0.5
+    hot = band > 0.5
+    cr.set_line_width(0.75)
+    _bucket_stroke(cr, segs[~teal & ~hot], alpha[~teal & ~hot], INDIGO)
+    _bucket_stroke(cr, segs[teal & ~hot], np.clip(alpha[teal & ~hot] + 0.15, 0, 1), TEAL)
+    cr.set_line_width(1.1)
+    _bucket_stroke(cr, segs[hot], np.clip(0.55 * band[hot] * glow, 0, 1), CYAN)
 
-        # Displacements
-        dx = ws * (2.8 * wave * (x / 100.0))
-        dy = ws * (3.2 * wave * ((y - 48.0) / 100.0))
-        dz = ws * (4.0 * wave)
+    # Vertex dots on the front-facing half.
+    d = _smooth(-0.3, 0.8, VV[:, 2])
+    for x, y in S[d > 0.55].tolist():
+        cr.rectangle(x - 0.7, y - 0.7, 1.4, 1.4)
+    cr.set_source_rgba(*INDIGO, 0.55)
+    cr.fill()
 
-        # Mouth opening cadence during speech
-        if abs(x) < 25 and 30 < y < 70:
-            dy += ws * (2.5 * abs(math.sin(t * 7.5)))
-
-        vx, vy, vz = x + dx, y + dy, z + dz
-
-        # Rotate around Y then X
-        rx = vx * cos_y + vz * sin_y
-        rz = -vx * sin_y + vz * cos_y
-        ry = vy * cos_x - rz * sin_x
-        rz = vy * sin_x + rz * cos_x
-
-        # Perspective projection
-        factor = dist / (dist - rz)
-        px = cx + rx * factor * base_scale
-        py = cy + ry * factor * base_scale
-        proj.append((px, py, rz))
-
-        # Thinking data scan glow
-        d_scan = abs(y - scan_y)
-        scan_glow = wt * max(0.0, 1.0 - d_scan / 38.0)
-        node_glow.append(scan_glow)
-
-        # Node radius modulation
-        r_base = 1.7
-        r_pulse = ws * (1.8 * max(0.0, wave)) + wt * (2.0 * scan_glow) + wl * (0.4 * math.sin(t * 2.0))
-        node_radii.append(max(1.2, r_base + r_pulse))
-
-    # 3. Draw Wireframe Edges
-    cr.set_line_width(1.2 + 0.3 * ws)
-    for i1, i2 in EDGES:
-        p1, p2 = proj[i1], proj[i2]
-        avg_z = (p1[2] + p2[2]) / 2.0
-        base_alpha = max(0.16, min(0.92, 0.48 + avg_z / 150.0))
-        e_glow = max(node_glow[i1], node_glow[i2])
-
-        # State color blending
-        r = wl * 0.0 + wt * (0.2 + 0.8 * e_glow) + ws * 0.0
-        g = wl * 0.85 + wt * (0.75 + 0.25 * e_glow) + ws * 1.0
-        b = wl * 1.0 + wt * 1.0 + ws * 0.8
-        alpha = min(1.0, base_alpha + e_glow * 0.5)
-
-        cr.set_source_rgba(r, g, b, alpha)
-        cr.move_to(p1[0], p1[1])
-        cr.line_to(p2[0], p2[1])
-        cr.stroke()
-
-    # 4. Draw Wireframe Nodes (Vertices)
-    for i, (px, py, rz) in enumerate(proj):
-        nr = node_radii[i]
-        glow = node_glow[i]
-        depth_alpha = max(0.25, min(1.0, 0.60 + rz / 130.0))
-
-        # Glowing Aura
-        if glow > 0.08 or ws > 0.3:
-            aura_alpha = (glow * 0.6 * wt) + (0.35 * ws)
-            cr.set_source_rgba(0.0, 0.95, 1.0, aura_alpha)
-            cr.arc(px, py, nr * 2.2, 0, 6.283)
+    # Lips: teal outline, dark glowing mouth opening while speaking.
+    cr.set_line_width(1.2)
+    for loop, al in ((OUTER_LIP, 0.75), (INNER_LIP, 0.9)):
+        pts = S[loop].tolist()
+        cr.move_to(*pts[0])
+        for p in pts[1:]:
+            cr.line_to(*p)
+        cr.close_path()
+        cr.set_source_rgba(*TEAL, al)
+        if loop is INNER_LIP and mouth > 0.03:
+            cr.stroke_preserve()
+            cr.set_source_rgba(0.0, 0.32, 0.42, min(0.6, 0.2 + 0.5 * mouth))
             cr.fill()
+        else:
+            cr.stroke()
 
-        # Core node
-        cr_r = wl * 0.85 + wt * (0.85 + 0.15 * glow) + ws * 0.70
-        cr_g = wl * 0.95 + wt * 0.95 + ws * 1.00
-        cr_b = wl * 1.00 + wt * 1.00 + ws * 0.90
-        cr.set_source_rgba(cr_r, cr_g, cr_b, depth_alpha)
-        cr.arc(px, py, nr, 0, 6.283)
+    # Eyes: teal glow, blinking.
+    blink = 1.0 - max(0.0, math.sin(t * 0.9 + 1.3)) ** 80
+    for e in _rot(EYES, yaw, pitch):
+        ex, ey = proj(e).tolist()
+        rx = fs * 0.09
+        ry = max(0.8, rx * 0.6 * blink)
+        g = cairo.RadialGradient(ex, ey, 0, ex, ey, rx)
+        g.add_color_stop_rgba(0.0, *TEAL, min(1.0, 0.85 + 0.15 * glow))
+        g.add_color_stop_rgba(0.45, *TEAL, 0.55)
+        g.add_color_stop_rgba(1.0, *TEAL, 0.0)
+        cr.save()
+        cr.translate(ex, ey)
+        cr.scale(1.0, ry / rx)
+        cr.translate(-ex, -ey)
+        cr.set_source(g)
+        cr.arc(ex, ey, rx, 0, 2 * math.pi)
+        cr.fill()
+        cr.restore()
+
+    # Dotted orbit ring around the head, back half dimmer.
+    an = _ring_an + t * 0.5
+    ring = np.stack([np.cos(an) * 1.5, np.full_like(an, -0.05), np.sin(an) * 1.5], -1)
+    rv = _rot(ring, yaw * 0.4, 0.22 + pitch)
+    rp = proj(rv)
+    for back in (True, False):
+        sel = (rv[:, 2] <= 0) if back else (rv[:, 2] > 0)
+        for x, y in rp[sel].tolist():
+            cr.arc(x, y, 1.15, 0, 2 * math.pi)
+            cr.new_sub_path()
+        cr.set_source_rgba(*CYAN, (0.25 if back else 0.75) * min(1.0, glow))
         cr.fill()
 
-    bio = io.BytesIO()
-    surface.write_to_png(bio)
-    return bio.getvalue()
+    return surface
 
 
 # ── GTK Window Builder ──────────────────────────────────────────────────────
@@ -314,7 +436,6 @@ def _build_monitor_window(monitor, shared: OverlayState):
     y = wa.y + MARGIN_TOP
     win.move(x, y)
 
-    # Completely transparent window CSS
     css_provider = Gtk.CssProvider()
     css = b"""
     window, window.background, .cyber-window {
@@ -329,7 +450,6 @@ def _build_monitor_window(monitor, shared: OverlayState):
         screen, css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
     )
 
-    # Draggable image container
     ev = Gtk.EventBox()
     ev.set_visible_window(False)
     ev.connect(
@@ -345,19 +465,32 @@ def _build_monitor_window(monitor, shared: OverlayState):
     blender = StateBlender()
     phase = [0.0]
 
+    # Frames go to GdkPixbuf as raw RGBA (see _surface_rgba): drawing is
+    # ~9ms, and a PNG round-trip of this detailed face would add ~15ms.
     def _tick():
-        blender.update(shared.state, dt=0.04)
-        phase[0] += 0.04
-        png_data = _render_frame(phase[0], blender, size=OVERLAY_SIZE)
-        loader = GdkPixbuf.PixbufLoader.new_with_type("png")
-        loader.write(png_data)
-        loader.close()
-        pix = loader.get_pixbuf()
-        if pix:
-            GLib.idle_add(img.set_from_pixbuf, pix)
+        blender.update(shared.state, dt=0.033)
+        # Idle motion slows to 60%; scale the increment so the phase stays
+        # monotonic and the breath/wave never jump across a state blend.
+        phase[0] += 0.033 * (0.60 * blender.wl + blender.wt + blender.ws)
+        surf = _render_surface(
+            phase[0], blender, size=OVERLAY_SIZE, amp=shared.amplitude
+        )
+        pix = GdkPixbuf.Pixbuf.new_from_bytes(
+            GLib.Bytes.new(_surface_rgba(surf)), GdkPixbuf.Colorspace.RGB,
+            True, 8, OVERLAY_SIZE, OVERLAY_SIZE, OVERLAY_SIZE * 4,
+        )
+        # GLib.idle_add, not a direct call: Gtk.main() runs in a daemon
+        # thread here, and setting the pixbuf inline leaves the overlay
+        # blank on screen.
+        GLib.idle_add(img.set_from_pixbuf, pix)
         return True
 
-    GLib.timeout_add(40, _tick)  # 25 FPS animation loop
+    # ponytail: 30fps, not 60. A frame costs ~11ms to render and convert,
+    # and one timeout runs per monitor — at 16ms the main loop saturates and
+    # GTK never gets to repaint, so the overlay shows up blank. 33ms leaves
+    # slack for the redraw. For a true 60fps, install python3-gi-cairo and
+    # paint the cairo surface straight into a Gtk.DrawingArea (~4ms/frame).
+    GLib.timeout_add(33, _tick)
     return win
 
 
@@ -402,3 +535,32 @@ def start_overlay(shared: OverlayState) -> threading.Thread | None:
     t = threading.Thread(target=_run, daemon=True, name="overlay")
     t.start()
     return t
+
+
+# ── Self-check ──────────────────────────────────────────────────────────────
+
+def _selfcheck() -> None:
+    """Catch bad indices / render crashes, which the GTK loop swallows silently."""
+    n = len(V0)
+    assert n == 468 and len(TRI) == 898, "unexpected face mesh size"
+    assert TRI.min() >= 0 and TRI.max() < n, "triangle index out of range"
+    assert EDGES.max() < n
+
+    st = OverlayState()
+    assert st.amplitude == 0.0
+    st.amplitude = 2.0
+    assert 0.9 < st.amplitude <= 1.0, "amplitude must clamp to 1.0"
+
+    for target in (State.LISTENING, State.THINKING, State.SPEAKING):
+        b = StateBlender()
+        for _ in range(60):
+            b.update(target, dt=0.016)
+        for amp in (0.0, 1.0):
+            png = _render_frame(1.7, b, size=OVERLAY_SIZE, amp=amp)
+            assert png.startswith(b"\x89PNG"), f"{target} amp={amp}: not a PNG"
+            assert len(png) > 1000, f"{target} amp={amp}: frame looks empty"
+    print("overlay self-check OK")
+
+
+if __name__ == "__main__":
+    _selfcheck()

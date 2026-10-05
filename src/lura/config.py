@@ -5,9 +5,11 @@ Two providers, two very different shapes:
 * ``gemini``     — the Live API. Full-duplex native audio: your voice streams
                    up, speech streams back, the server decides when you have
                    stopped talking.
-* ``openrouter`` — turn-based. Record an utterance, transcribe it, send the
-                   text to any of OpenRouter's models, speak the reply. Slower,
-                   but it works with every model on the service.
+* ``openrouter`` — turn-based, and the default. Record an utterance, hand the
+                   audio itself to a model that reads it, run whatever tools it
+                   asks for, speak the reply. Slower and not interruptible, but
+                   it works with every model on the service and costs a
+                   fraction of a cent an exchange.
 
 Keys live in a 0600 JSON file rather than the login keyring on purpose:
 libsecret needs an *unlocked* keyring, and this service starts with the
@@ -54,24 +56,63 @@ class Settings:
 
     #: Which service answers you. Explicit, not guessed from which key exists —
     #: having both keys stored is normal.
-    provider: str = "gemini"
+    provider: str = "openrouter"
 
     # ── models, kept per provider so switching back does not lose the other ──
     # Preview ids churn. If one is retired the error reads "model not found".
     gemini_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-    openrouter_model: str = "google/gemini-2.5-flash"
-    #: Transcription for the OpenRouter path. Not local Vosk: that model is
-    #: en-US only and would quietly mistranscribe every other language.
-    openrouter_stt_model: str = "openai/whisper-1"
-    openrouter_tts_model: str = "openai/gpt-4o-mini-tts"
-    openrouter_tts_voice: str = "alloy"
+    #: Reads audio natively *and* calls tools, so one request covers hearing,
+    #: thinking and deciding — no separate transcription step, and no local
+    #: Vosk (that model is en-US only and would mistranscribe Arabic).
+    #: `gemini-3.1-flash-lite` is the fast, cheap option — 2.5s and $0.0005 a
+    #: turn against 6-11s and $0.0025 here — but it is the weaker instruction
+    #: follower: asked in English it still answered in Arabic. Chosen for
+    #: answer quality over speed.
+    openrouter_model: str = "google/gemini-3.8-flash"
+    #: English only, and free — but "free" on OpenRouter means 50 requests a
+    #: day without credits, and the limit is shared across every :free model
+    #: on the account. When it runs out this 429s and the fallback answers.
+    openrouter_tts_model: str = "deepgram/flux-tts:free"
+    openrouter_tts_voice: str = "flux-alexis-en"
+    #: Same vendor, paid, English: it sounds like the primary rather than like
+    #: a different assistant when the free tier is spent. fish-audio/s1 is the
+    #: one to come back to if Arabic speech is ever wanted again — deepgram
+    #: does not speak it.
+    openrouter_tts_fallback_model: str = "deepgram/aura-2"
+    #: Voice names are vendor-specific; the fallback rejects the primary's.
+    openrouter_tts_fallback_voice: str = "aura-2-thalia-en"
+    #: Which upstream OpenRouter should prefer, most wanted first.
+    #:
+    #: Google caches a repeated prompt prefix implicitly, but only on the
+    #: machine that saw it: left to route freely, consecutive turns land on
+    #: different upstreams and none of them hit. Ordinary turns are now small
+    #: enough not to care, but a turn where `find_tools` attaches MCP schemas
+    #: is not, and that is where this earns its keep. Fallbacks stay on, so a
+    #: pinned upstream that is down costs money rather than silence.
+    openrouter_provider_order: tuple[str, ...] = ("google-vertex", "google-ai-studio")
+    #: How hard the model may think before answering. The thinking models spend
+    #: it on deciding which tool to call, which for "what is my CPU
+    #: temperature" is not a decision worth 367 tokens: minimal cut a
+    #: gemini-3.8-flash turn from 9.3s and $0.0028 to 7.4s and $0.0014 with the
+    #: same answer. Harmless on models that do not think. Empty to leave it
+    #: to the model; not every endpoint lets it be switched off entirely.
+    openrouter_reasoning_effort: str = "minimal"
 
     # ── voice ───────────────────────────────────────────────────────────────
     voice: str = "Puck"          # Gemini Live voice
     language: str = "en-US"
+    #: Force every spoken answer into one language. Empty mirrors whoever is
+    #: speaking, which is right for Gemini Live. It is wrong when the voice
+    #: only speaks English: the model answers the Arabic it heard in Arabic,
+    #: and an English synthesiser reads that as noise.
+    reply_language: str = "English"
     system_instruction: str = (
-        "You are a spoken assistant. Keep answers short and conversational, "
-        "as if talking out loud. Do not use markdown or lists."
+        "You are Lura, a spoken assistant. Keep answers short and "
+        "conversational, as if talking out loud. Do not use markdown or lists. "
+        # The language rule is repeated at the end of the machine context too:
+        # buried in the middle of a long system message it gets ignored, and
+        # an Arabic question comes back answered in English.
+        "Always reply in the same language the user spoke to you in."
     )
 
     # ── wake word (always local, always Vosk, whichever provider answers) ────
