@@ -44,6 +44,28 @@ else:
 
 a = Analysis([str(Path(SPECPATH) / "entry.py")], pathex=[str(SRC)], binaries=binaries, datas=datas,
              hiddenimports=hidden, excludes=excludes, noarchive=False)
+
+# Linux: never ship libraries that must match the host's GPU driver or C++
+# runtime (mohamedjs/lura#6). Built on Ubuntu 22.04 (the glibc floor), the
+# bundle used to carry 22.04's libstdc++ / libgbm, which shadow the newer host
+# copies: Mesa 25's GLX driver then fails to load ("Could not initialize
+# GLX", core dump) and Qt WebEngine's GBM path renders a blank window.
+# The set is the issue's list plus the bundled entries of AppImage's
+# excludelist (github.com/AppImage/pkg2appimage/blob/master/excludelist),
+# i.e. libraries every desktop has; build-deb.sh depends on each of them.
+# pcre2-8, selinux, mount and blkid are only there for glib: left bundled, the
+# host's glib would load 22.04's copies.
+HOST_LIBS = re.compile(
+    r"^lib(stdc\+\+|gcc_s|gbm|xcb-glx|GL|GLX|EGL|OpenGL|drm|"
+    r"(glib|gio|gobject|gmodule|gthread)-2\.0|pcre2-8|selinux|mount|blkid|"
+    r"X11|X11-xcb|asound|fontconfig|freetype|harfbuzz|fribidi|com_err|expat|gpg-error|"
+    r"uuid|z|jack|gmp)\.so(\.|$)")
+if sys.platform.startswith("linux"):
+    # PyInstaller 6: a.binaries is a plain list of (dest, src, typecode) tuples.
+    dropped = sorted(Path(dest).name for dest, _src, _kind in a.binaries if HOST_LIBS.match(Path(dest).name))
+    a.binaries = [b for b in a.binaries if not HOST_LIBS.match(Path(b[0]).name)]
+    print("lura.spec: left to the host:", ", ".join(dropped) or "nothing")
+
 pyz = PYZ(a.pure)
 
 icon = str(ROOT / "packaging" / "icons" / ("lura.icns" if sys.platform == "darwin" else "lura.ico"))

@@ -72,6 +72,14 @@ interface would hide exactly that.
 - PyInstaller executables are `lura` (console CLI) and `LuraApp` (windowed daemon).
   Not "Lura": macOS and Windows filesystems are case-insensitive.
 - Windows ships `npx` as `npx.cmd`; `Popen` without a shell won't find it unless resolved.
+- **The Linux bundle must not carry the C++ runtime or the GPU stack** (#6). Built on
+  22.04, a bundled `libstdc++.so.6` / `libgbm.so.1` shadows the host's and Mesa 25
+  (Ubuntu 24.04+) fails: "Could not initialize GLX" + core dump, or a blank window.
+  `lura.spec` drops `HOST_LIBS` from `a.binaries` (issue list + AppImage excludelist);
+  `build-deb.sh` depends on each; release.yml greps the bundle; `distro-test.yml`
+  opens the dashboard on Ubuntu 24.04/22.04, Fedora and Arch. Keep the 22.04 runner.
+- The dashboard window is always a child process (`lura window <url>`), reaped by a
+  thread; if it dies the page opens in a browser instead (`window.run` / `launch`).
 
 ### Service (Linux)
 - Exit **78** (`EX_CONFIG`) means a human must fix something; `RestartPreventExitStatus=78`.

@@ -20,6 +20,8 @@ install -m644 "$HERE/lura.service" "$PKG/usr/lib/systemd/user/lura.service"
 install -m644 "$ROOT/packaging/icons/lura.png" "$PKG/usr/share/icons/hicolor/512x512/apps/lura.png"
 install -m644 "$ROOT/src/lura/modules/dashboard/static/fonts/OFL.txt" "$PKG/usr/share/doc/lura/fonts-OFL.txt"
 
+# The bundle leaves the GPU stack, the C++ runtime and glib to the host
+# (lura.spec: HOST_LIBS, mohamedjs/lura#6); the libs it expects are listed here.
 SIZE="$(du -sk "$PKG" | cut -f1)"
 cat > "$PKG/DEBIAN/control" <<CONTROL
 Package: lura
@@ -30,7 +32,7 @@ Architecture: $ARCH
 Installed-Size: $SIZE
 Maintainer: Mohamed <mohamed@tripklik.com>
 Homepage: https://github.com/mohamedjs/lura
-Depends: libportaudio2, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xkb1, libxcb-shape0, libxcb-randr0, libxcb-render-util0, libxcb-image0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3, libnss3, libnspr4, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1, libasound2t64 | libasound2
+Depends: libportaudio2, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xkb1, libxcb-shape0, libxcb-randr0, libxcb-render-util0, libxcb-image0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3, libnss3, libnspr4, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1, libasound2t64 | libasound2, libgbm1, libxcb-glx0, libglib2.0-0t64 | libglib2.0-0, libstdc++6, libgcc-s1, libwayland-client0, libwayland-server0, libwayland-egl1, libwayland-cursor0, libx11-6, libx11-xcb1, libfreetype6, libharfbuzz0b, libfribidi0, libexpat1, libcom-err2, libgpg-error0, libuuid1, zlib1g, libgmp10, libjack-jackd2-0 | libjack-0.125, libpcre2-8-0, libmount1, libblkid1, libselinux1
 Recommends: nodejs, npm, ffmpeg
 Suggests: google-chrome-stable | chromium
 Description: Voice-first desktop assistant

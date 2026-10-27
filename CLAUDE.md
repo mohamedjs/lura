@@ -69,7 +69,7 @@ mcp.json, license.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.0, Oct 2026)
+## Current behaviour (2.0.2, Oct 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
@@ -90,6 +90,8 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   `python3 tests/test_command_guard.py` → `command guard OK (29 blocked, 19 allowed)`.
 - **Dashboard window:** native — pywebview (WebView2 / WKWebView) on Windows/macOS, Qt
   WebEngine on Linux (bundled in the Linux build only), in a separate `lura window` process.
+  If that process dies, it is reaped and the page opens in a browser. The Linux bundle
+  leaves libstdc++/libgbm/glib & co. to the host (`HOST_LIBS` in lura.spec, #6).
 - **Model picker:** `/api/catalog` lists brain-capable models (chat + tools) of every keyed
   provider (`brain/domain.py: brain_candidate`). Modes: "My model" / "Gemini Realtime".
 - **Restart button** appears after settings/key changes (except live ones: subtitles,
