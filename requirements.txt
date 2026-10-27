@@ -1,7 +1,7 @@
 # Runtime, everything on: pip install -r requirements.txt
 numpy>=1.26
 sounddevice>=0.4.6
-vosk>=0.3.45
+vosk>=0.3.44
 anthropic>=2.3
 google-genai>=1.0.0
 pycairo>=1.25

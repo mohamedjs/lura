@@ -8,7 +8,7 @@ license = { text = "Proprietary" }
 dependencies = [
     "numpy>=1.26",
     "sounddevice>=0.4.6",
-    "vosk>=0.3.45",
+    "vosk>=0.3.44",  # 0.3.45 has no macOS wheel
 ]
 
 [project.optional-dependencies]

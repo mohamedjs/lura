@@ -331,7 +331,19 @@ def cmd_selftest(args) -> int:
     return run(_container())
 
 
+def _utf8_console() -> None:
+    """Windows consoles default to a legacy code page that cannot print Arabic
+    (or "──"), and a print would raise mid-command. Reconfigure, never crash."""
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 def main(argv=None) -> int:
+    _utf8_console()
     parser = argparse.ArgumentParser(prog="lura", description="Lura — a voice-first desktop assistant.")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"lura {__version__}")
