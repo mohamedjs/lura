@@ -37,7 +37,7 @@ jobs:
           echo "$(dirname "$(node -p "require('ffmpeg-static')")")" >> "$GITHUB_PATH"
           export PATH="$(dirname "$(node -p "require('ffmpeg-static')")"):$PATH"
           ffmpeg -version | head -1
-          npx playwright install --with-deps chromium
+          npx playwright install chromium   # runners ship Chrome's libraries; --with-deps would hit apt
           node intro.mjs --lang en
           node intro.mjs --lang ar
       - name: Assemble the site
