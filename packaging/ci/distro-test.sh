@@ -48,6 +48,17 @@ find "$APP" -name '*.so*' -type f | while read -r f; do
   ldd "$f" 2>/dev/null | grep 'not found' | sed "s|^|  ${f#$APP/}:|"
 done | sort -u | head -40
 
+FAIL=0
+# What the window itself loads must resolve with only the package's own
+# dependencies (2.0.1's .deb missed libwayland-server0, so Qt WebEngine never
+# loaded on a fresh system).
+WEB="$(find "$APP" -name 'libQt6WebEngineCore.so.6' | head -1)"
+if [ -n "$WEB" ] && ldd "$WEB" | grep -q 'not found'; then
+  echo "FAIL: Qt WebEngine has unresolved libraries:"; ldd "$WEB" | grep 'not found' | sort -u; FAIL=1
+  # Every desktop has these; carry on to check the window itself.
+  [ "$ID" = ubuntu ] && apt-get install -y -qq libwayland-server0 >/dev/null
+fi
+
 Xvfb :99 -screen 0 1440x900x24 +extension GLX >/dev/null 2>&1 &
 export DISPLAY=:99 LANG=C.UTF-8
 export LURA_CONFIG_DIR=/tmp/lura-test/config LURA_DATA_DIR=/tmp/lura-test/data
@@ -60,7 +71,6 @@ LOG="$SHOTS/dashboard-$ID.log"
 "$APP/LuraApp" dashboard >"$LOG" 2>&1 &
 PID=$!
 sleep 30
-FAIL=0
 if ! kill -0 "$PID" 2>/dev/null; then
   wait "$PID"; echo "FAIL: 'LuraApp dashboard' exited with code $?"; FAIL=1
 fi

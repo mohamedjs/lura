@@ -4,7 +4,9 @@
 #
 #   release.yml calls it with the build of the same run (artifact "linux").
 #   A manual run tests a published release:  tag=v2.0.1, expect=fail checks
-#   that the test still catches the build #6 was about.
+#   that the test still catches the build #6 was about (a push of this file
+#   does the same). On ubuntu:22.04, its build host, 2.0.1 is expected to pass.
+#   Proof that it goes red on 2.0.1: run 40557097125 (24.04, Fedora, Arch red).
 name: Linux distros
 
 on:
@@ -62,7 +64,10 @@ jobs:
         with: { name: distro-input, path: in }
       - name: Install and open the dashboard
         env:
-          EXPECT: ${{ inputs.expect || 'pass' }}
+          # A push re-checks that 2.0.1 is still caught: it breaks on every distro
+          # newer than the Ubuntu 22.04 it was built on, and works there.
+          EXPECT: >-
+            ${{ matrix.image != 'ubuntu:22.04' && (inputs.expect || (env.TAG == 'v2.0.1' && github.event_name == 'push' && 'fail')) || 'pass' }}
         run: |
           if [ "$EXPECT" = fail ]; then
             if bash packaging/ci/distro-test.sh in shots; then
