@@ -249,7 +249,7 @@ def check_connectors():
         pass
     pro[0] = True
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "echo_mcp.py")
-    svc.add_command("echo", f"{sys.executable} {fixture}")
+    svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")
     assert row["status"] == "ready" and row["tools"] == ["echo_text", "open_tab"], row
     found = svc.search("open a new tab in the browser")
@@ -258,7 +258,8 @@ def check_connectors():
     # Persisted in mcp.json, in the shape other clients read; builtins are not written.
     saved = json.loads(svc.config_path.read_text())
     assert list(saved["mcpServers"]) == ["echo"] and saved["mcpServers"]["echo"]["command"] == sys.executable
-    assert oct(svc.config_path.stat().st_mode)[-3:] == "600"
+    if os.name != "nt":   # Windows has no Unix modes; the profile folder is private instead
+        assert oct(svc.config_path.stat().st_mode)[-3:] == "600"
     # Losing Pro stops custom connectors but keeps them configured.
     pro[0] = False
     svc.refresh_plan()

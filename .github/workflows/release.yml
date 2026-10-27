@@ -1,6 +1,8 @@
 # Builds Lura for Linux (.deb + tar.gz), macOS (.app zip, arm64 + Intel) and
-# Windows (installer .exe), publishes a GitHub Release, and updates the
-# Homebrew tap. Triggered by pushing a tag like v2.0.0.
+# Windows (installer .exe), installs and runs each build on its runner and
+# takes screenshots. On a tag like v2.0.0 it also publishes a GitHub Release
+# and updates the Homebrew tap; on claude/** branches the builds are only
+# downloadable artifacts of the run.
 #
 # Optional configuration (Settings → Secrets and variables → Actions):
 #   vars.LS_STORE_ID, vars.LS_PRODUCT_ID, vars.CHECKOUT_URL  Lemon Squeezy store for Pro
@@ -10,6 +12,7 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    branches: ["claude/**"]
   workflow_dispatch:
     inputs:
       version:
@@ -31,9 +34,10 @@ jobs:
       - uses: actions/checkout@v4
       - id: v
         run: |
-          V="${{ github.event.inputs.version }}"
-          [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
           CODE=$(grep -oP '__version__ = "\K[^"]+' src/lura/__init__.py)
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; fi
+          [ -n "$V" ] || V="$CODE"   # branch builds use the code's version
           if [ "$V" != "$CODE" ]; then
             echo "::error::Tag $V does not match __version__ $CODE in src/lura/__init__.py"; exit 1
           fi
@@ -69,7 +73,11 @@ jobs:
 
       - name: System libraries (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libportaudio2 libcairo2-dev pkg-config libxcb-cursor0
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libportaudio2 libcairo2-dev pkg-config xvfb imagemagick \
+            libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxcb-shape0 libxcb-randr0 \
+            libxcb-render-util0 libxcb-image0 libxkbcommon-x11-0 libegl1
       - name: System libraries (macOS)
         if: runner.os == 'macOS'
         run: brew install cairo pkg-config
@@ -94,6 +102,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ".[all]" pyinstaller pillow
+
+      - name: Checks on this OS
+        run: python tests/run_all.py
 
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean packaging/pyinstaller/lura.spec
@@ -135,14 +146,34 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+      # Install / run / screenshot. Runner desktops differ from real ones (no
+      # audio device, no compositor on Linux), so this never blocks a release;
+      # read its log and screenshots.
+      - name: Smoke test — install, run, screenshot (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: packaging/ci/smoke-windows.ps1 -Version $env:VERSION
+      - name: Smoke test — run, screenshot (Linux, macOS)
+        if: runner.os != 'Windows'
+        continue-on-error: true
+        run: packaging/ci/smoke-unix.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots-${{ matrix.target }}
+          path: screenshots/*
+          if-no-files-found: ignore
+
   release:
+    if: github.ref_type == 'tag'
     needs: [version, build]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
-        with: { path: artifacts, merge-multiple: true }
+        with: { path: artifacts, merge-multiple: true, pattern: "[!s]*" }
       - run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
@@ -160,6 +191,7 @@ jobs:
             The built-in Chrome, web and files connectors need Node.js (npx).
 
   homebrew:
+    if: github.ref_type == 'tag'
     needs: [version, release]
     runs-on: ubuntu-latest
     env:
@@ -168,7 +200,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
-        with: { path: artifacts, merge-multiple: true }
+        with: { path: artifacts, merge-multiple: true, pattern: "macos-*" }
       - name: Update the tap
         if: env.TAP_TOKEN != ''
         run: |

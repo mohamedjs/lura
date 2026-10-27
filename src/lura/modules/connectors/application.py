@@ -84,7 +84,11 @@ class ConnectorService:
     def add_command(self, name: str, command_line: str, env: dict[str, str] | None = None) -> Connector:
         import shlex
 
-        argv = shlex.split(command_line)
+        from ...shared.platform import IS_WINDOWS
+
+        # POSIX rules would eat the backslashes in C:\Program Files\…
+        argv = [a[1:-1] if len(a) > 1 and a[0] == a[-1] == '"' else a
+                for a in shlex.split(command_line, posix=not IS_WINDOWS)]
         if not argv:
             raise ValueError("Empty command.")
         return self.add(Connector(name, command=argv[0], args=argv[1:], env=env or {}))
