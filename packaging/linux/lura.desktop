@@ -13,4 +13,4 @@ Actions=Dashboard;
 
 [Desktop Action Dashboard]
 Name=Open dashboard
-Exec=/opt/lura/lura dashboard
+Exec=/opt/lura/LuraApp dashboard

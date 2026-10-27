@@ -1,0 +1,167 @@
+<!doctype html>
+<!-- Lura intro (16:9), in the dashboard's look: graph paper, soft neumorphic
+     cards, handwritten type, the hologram face in ink. Drawn by render(t) so
+     frames.mjs can grab it frame by frame:  node intro.mjs --lang en|ar  -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Hand; src: url(../src/lura/modules/dashboard/static/fonts/patrickhand-latin.woff2); unicode-range: U+0000-00FF, U+2000-206F; }
+@font-face { font-family: Hand; src: url(../src/lura/modules/dashboard/static/fonts/marhey-arabic.woff2); unicode-range: U+0600-06FF, U+FB50-FDFF, U+FE70-FEFC; }
+@font-face { font-family: Script; src: url(../src/lura/modules/dashboard/static/fonts/caveat-latin.woff2); unicode-range: U+0000-00FF, U+2000-206F; font-weight: 400 700; }
+@font-face { font-family: Script; src: url(../src/lura/modules/dashboard/static/fonts/marhey-arabic.woff2); unicode-range: U+0600-06FF, U+FB50-FDFF, U+FE70-FEFC; font-weight: 300 700; }
+:root { --bg:#e9ecf3; --ink:#33364a; --muted:#7b7f96; --hi:#fff; --lo:#c4c9d8; --indigo:#6f69e6; --teal:#0fa7bd;
+  --raise: 14px 14px 30px var(--lo), -14px -14px 30px var(--hi); --raise-sm: 7px 7px 16px var(--lo), -7px -7px 16px var(--hi);
+  --inset: inset 7px 7px 16px var(--lo), inset -7px -7px 16px var(--hi); }
+* { box-sizing: border-box; margin: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; }
+body { background-color: var(--bg); color: var(--ink); font-family: Hand, cursive;
+  background-image: linear-gradient(rgba(111,105,230,.14) 1px, transparent 1px), linear-gradient(90deg, rgba(111,105,230,.14) 1px, transparent 1px),
+    linear-gradient(rgba(111,105,230,.07) 1px, transparent 1px), linear-gradient(90deg, rgba(111,105,230,.07) 1px, transparent 1px);
+  background-size: 160px 160px, 160px 160px, 32px 32px, 32px 32px; }
+body.rtl { direction: rtl; }
+canvas#face { position: absolute; inset: 0; }
+.el { position: absolute; opacity: 0; will-change: transform, opacity; }
+.title { font-family: Script; font-weight: 700; font-size: 230px; color: var(--indigo); line-height: 1; }
+.tag { font-size: 58px; color: var(--muted); }
+.card { background: var(--bg); border-radius: 44px; box-shadow: var(--raise); padding: 34px 46px; }
+.bubble { font-size: 60px; line-height: 1.3; max-width: 900px; min-height: 1.3em; }
+.bubble .who { display: block; font-size: 34px; color: var(--muted); margin-bottom: 6px; }
+.bubble.lura .who { color: var(--teal); }
+.pill { font-size: 40px; padding: 16px 34px; border-radius: 999px; box-shadow: var(--inset); color: var(--muted); display: flex; align-items: center; gap: 18px; }
+.dot { width: 22px; height: 22px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 16px var(--teal); }
+.chip { font-size: 54px; padding: 26px 46px; border-radius: 30px; background: var(--bg); box-shadow: var(--raise-sm); white-space: nowrap; }
+.chip.voice { color: #fff; background: linear-gradient(135deg, var(--indigo), var(--teal)); }
+.h2 { font-family: Script; font-weight: 700; font-size: 120px; color: var(--indigo); white-space: nowrap; }
+.ring { position: absolute; border: 4px solid var(--teal); border-radius: 50%; opacity: 0; }
+.shot { border-radius: 30px; box-shadow: var(--raise); overflow: hidden; background: var(--bg); padding: 18px; }
+.shot img { display: block; border-radius: 18px; }
+.player { width: 560px; height: 330px; border-radius: 34px; box-shadow: var(--inset); display: grid; place-items: center; }
+.player svg { width: 130px; height: 130px; fill: var(--teal); }
+.cta { font-size: 64px; color: #fff; padding: 30px 70px; border-radius: 34px; background: linear-gradient(135deg, var(--indigo), var(--teal)); box-shadow: var(--raise-sm); white-space: nowrap; }
+</style>
+</head>
+<body>
+<canvas id="face" width="1920" height="1080"></canvas>
+<div class="el title" id="title">Lura</div>
+<div class="el tag" id="tag"></div>
+<div class="el pill" id="pill"><span class="dot"></span><span id="pilltext"></span></div>
+<div class="el card bubble" id="you"><span class="who" id="youwho"></span><span id="youtext"></span></div>
+<div class="el card bubble lura" id="lura"><span class="who">Lura</span><span id="luratext"></span></div>
+<div class="el player" id="player"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+<div class="el h2" id="h2"></div>
+<div class="el chip" id="c0">Google Gemini</div>
+<div class="el chip" id="c1">OpenAI</div>
+<div class="el chip" id="c2">Claude</div>
+<div class="el chip" id="c3">OpenRouter</div>
+<div class="el chip voice" id="cv"></div>
+<div class="el card bubble lura" id="other"><span class="who">Lura</span><span id="othertext"></span></div>
+<div class="el shot" id="shot1"><img src="../docs/screenshots/windows/dashboard-en-light.png" width="1000"></div>
+<div class="el shot" id="shot2"><img src="../docs/screenshots/windows/windows-desktop-dashboard.png" width="760"></div>
+<div class="el cta" id="cta"></div>
+<div class="el tag" id="os"></div>
+<div class="ring" id="r0"></div><div class="ring" id="r1"></div><div class="ring" id="r2"></div>
+<script src="face_mesh.js"></script>
+<script src="face.js"></script>
+<script>
+const COPY = {
+  en: { tag: "your voice on this computer", listening: "listening…", thinking: "thinking…", speaking: "speaking…",
+        you: "You", wake: "“Lura”", ask: "Open YouTube and play some lo-fi",
+        reply: "Opening it now… done, it's playing.", h2a: "Any brain. One voice.", voice: "Gemini 3.8 voice · 30 voices",
+        other: "ازيك! أقدر أساعدك في إيه؟", h2b: "Set up in a minute", h2c: "Talk to your computer", cta: "Free download",
+        os: "Windows · macOS" },
+  ar: { tag: "صوتك على الجهاز ده", listening: "بسمعك…", thinking: "بفكّر…", speaking: "بتكلم…",
+        you: "إنت", wake: "«لورا»", ask: "افتحلي يوتيوب وشغّل موسيقى هادية",
+        reply: "حاضر… فتحته وشغال دلوقتي.", h2a: "أي عقل. صوت واحد.", voice: "صوت Gemini 3.8 · ٣٠ صوت",
+        other: "Hi! How can I help you today?", h2b: "تجهّزها في دقيقة", h2c: "كلّم جهازك", cta: "حمّلها مجاناً",
+        os: "Windows · macOS" },
+};
+let L = COPY.en, RTL = false;
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const ease = x => { x = clamp(x); return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const back = x => { x = clamp(x); const c = 1.70158; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+// 0→1 as t goes a→a+d, then 1→0 as t goes b→b+d.
+const win = (t, a, b, d = 0.6) => Math.min(ease((t - a) / d), 1 - ease((t - b) / d));
+const type = (s, t, a, cps = 22) => { const n = Math.floor(clamp((t - a) * cps, 0, [...s].length)); return [...s].slice(0, n).join(''); };
+const mirror = x => RTL ? 1920 - x : x;
+function place(id, x, y, o = 1, s = 1, anchor = 'left') {
+  const el = $(id), w = el.offsetWidth;
+  let left = anchor === 'center' ? x - w / 2 : x;
+  if (RTL && anchor !== 'center') left = 1920 - x - w;
+  el.style.left = `${left}px`; el.style.top = `${y}px`;
+  el.style.opacity = o.toFixed(3); el.style.transform = `scale(${s.toFixed(4)})`;
+}
+
+window.ready = Promise.all([document.fonts.ready, ...[...document.images].map(i => i.decode().catch(() => {}))]);
+window.setup = tl => {
+  RTL = tl.lang === 'ar'; L = COPY[tl.lang] || COPY.en;
+  document.body.classList.toggle('rtl', RTL);
+  $('tag').textContent = L.tag; $('youwho').textContent = L.you; $('h2').textContent = L.h2a;
+  $('cv').textContent = L.voice; $('cta').textContent = L.cta; $('os').textContent = L.os;
+};
+
+const ctx = $('face').getContext('2d');
+const INK = { line: [96, 88, 220], hot: [12, 150, 172], eye: [12, 150, 172], blend: 'source-over', boost: 1.8 };
+
+window.render = t => {
+  // ── the face: where it sits and what it is doing ──
+  let fx = 960, fy = 470, fs = 250, fa = ease(t / 1.5);
+  if (t > 4) { const k = ease((t - 4) / 1.2); fx = 960 + (mirror(470) - 960) * k; fy = 470 + 70 * k; fs = 250 - 40 * k; }
+  if (t > 16) { const k = ease((t - 16) / 1); fa *= 1 - k; }
+  if (t > 28) { const k = ease((t - 28) / 1.2); fx = 960; fy = 400; fs = 210; fa = k; }
+  const speaking = (t > 13.2 && t < 15.6) || (t > 18.6 && t < 20.6);
+  const mouth = speaking ? 0.35 + 0.45 * Math.abs(Math.sin(t * 13)) * (0.6 + 0.4 * Math.sin(t * 3.1)) : 0;
+  const thinking = t > 11.6 && t < 13.2;
+  ctx.clearRect(0, 0, 1920, 1080);
+  if (fa > 0.01) drawFace(ctx, fx, fy, fs, { t: t * (thinking ? 1.6 : 1), mouth, alpha: fa, glow: speaking ? 0.6 : 0.2,
+                                             yaw: thinking ? 0.25 * Math.sin(t * 2.4) : 0, ...INK });
+
+  // ── 1. title ──
+  const s1 = win(t, 0.6, 3.6);
+  place('title', 960, 690, s1, 0.92 + 0.08 * back((t - 0.6) / 0.8), 'center');
+  $('title').style.clipPath = `inset(0 ${RTL ? 0 : (1 - ease((t - 0.6) / 1.4)) * 100}% 0 ${RTL ? (1 - ease((t - 0.6) / 1.4)) * 100 : 0}%)`;
+  place('tag', 960, 935, win(t, 1.6, 3.6), 1, 'center');
+
+  // ── 2. wake word, 3. a command ──
+  const pillState = t < 11.6 ? L.listening : t < 13.2 ? L.thinking : L.speaking;
+  $('pilltext').textContent = pillState;
+  place('pill', 330, 860, win(t, 5.2, 15.6), 1);
+  place('you', 860, 250, win(t, 5.4, 15.6), 0.9 + 0.1 * back((t - 5.4) / 0.6));
+  $('youtext').textContent = t < 8.8 ? type(L.wake, t, 5.8, 10) : type(L.ask, t, 9.2, 26);
+  place('lura', 860, 560, win(t, 12.6, 15.6), 0.9 + 0.1 * back((t - 12.6) / 0.6));
+  $('luratext').textContent = type(L.reply, t, 13.2, 22);
+  place('player', 1290, 770, win(t, 14.4, 15.6), 0.8 + 0.2 * back((t - 14.4) / 0.6));
+  // wake chime rings
+  ['r0', 'r1', 'r2'].forEach((id, i) => {
+    const k = clamp((t - 6.2 - i * 0.25) / 1.4), r = fs * (1.3 + 1.6 * k);
+    const el = $(id); el.style.width = el.style.height = `${2 * r}px`;
+    el.style.left = `${fx - r}px`; el.style.top = `${fy - r}px`; el.style.opacity = (k > 0 && k < 1 ? 0.55 * (1 - k) : 0).toFixed(3);
+  });
+
+  // ── 4. any brain, one voice ──
+  $('h2').textContent = t < 22 ? L.h2a : t < 28 ? L.h2b : L.h2c;
+  const h2a = win(t, 16.2, 21.4), h2b = win(t, 22.2, 27.4), h2c = win(t, 29, 40);
+  place('h2', 960, t < 28 ? 90 : 640, Math.max(h2a, h2b, h2c), 1, 'center');
+  ['c0', 'c1', 'c2', 'c3'].forEach((id, i) => {
+    const a = 16.8 + i * 0.3, x = [330, 720, 1050, 1370][i] + (RTL ? 0 : 0);
+    place(id, x, 340, win(t, a, 21.4), 0.85 + 0.15 * back((t - a) / 0.5));
+  });
+  place('cv', 960, 560, win(t, 18.2, 21.4), 0.85 + 0.15 * back((t - 18.2) / 0.5), 'center');
+  place('other', 960, 760, win(t, 18.6, 21.4), 1, 'center');
+  $('othertext').textContent = type(L.other, t, 18.8, 24);
+  $('other').style.direction = RTL ? 'ltr' : 'rtl';
+
+  // ── 5. the real app ──
+  const pan = ease((t - 22) / 6);
+  place('shot1', 170 + 30 * pan, 250, win(t, 22.4, 27.4), 1);
+  place('shot2', 1030 - 20 * pan, 400, win(t, 23.2, 27.4), 1);
+
+  // ── 6. end card ──
+  place('cta', 960, 800, win(t, 29.8, 40), 0.9 + 0.1 * back((t - 29.8) / 0.6), 'center');
+  place('os', 960, 950, win(t, 30.4, 40), 1, 'center');
+  document.body.style.opacity = (1 - ease((t - 33.2) / 0.8)).toFixed(3);
+};
+</script>
+</body>
+</html>

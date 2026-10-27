@@ -41,8 +41,13 @@ Write-Host "status: $($status.status)  can_talk: $($status.capabilities.can_talk
 foreach ($c in $status.connectors) { Write-Host "  connector $($c.name): $($c.status) $($c.tools.Count) tools $($c.error)" }
 
 Shoot "windows-desktop-face"
-Start-Process "msedge" -ArgumentList "--no-first-run", "--no-default-browser-check", "--disable-features=msEdgeSidebarV2", $url
-Start-Sleep 10
+# The settings window, the way the Start-menu shortcut opens it: a native
+# window (WebView2), not a browser tab.
+$win = Start-Process "$app\LuraApp.exe" -ArgumentList "dashboard" -PassThru
+Start-Sleep 12
+if ($win.HasExited) { Write-Host "dashboard window exited with $($win.ExitCode)" }
+$title = (Get-Process -Id $win.Id -ErrorAction SilentlyContinue).MainWindowTitle
+Write-Host "dashboard window title: '$title'"
 Shoot "windows-desktop-dashboard"
 
 Write-Host "== dashboard screenshots"
