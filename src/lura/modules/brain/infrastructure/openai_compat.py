@@ -183,11 +183,14 @@ def _merge_call(target: dict[str, Any], delta: dict[str, Any]) -> None:
             target[key] = value
 
 
-def list_models(provider: str, key: str | None) -> list[str]:
-    """Model ids the provider offers. OpenRouter's list needs no key."""
+def list_model_records(provider: str, key: str | None) -> list[dict]:
+    """The provider's model listing, as it returns it. OpenRouter's needs no key."""
     headers = {"Authorization": f"Bearer {key}"} if key else {}
-    data = request_json(f"{BASES[provider]}/models", headers, timeout=30)
-    ids = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+    return request_json(f"{BASES[provider]}/models", headers, timeout=30).get("data", [])
+
+
+def list_models(provider: str, key: str | None) -> list[str]:
+    ids = [m.get("id", "") for m in list_model_records(provider, key) if m.get("id")]
     # Gemini's compatible endpoint prefixes ids with "models/".
     return sorted(i.removeprefix("models/") for i in ids)
 

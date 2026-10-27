@@ -75,6 +75,16 @@ def main() -> int:
         assert call(server, "GET", "/api/nothing")[0] == 404
         status, res, _ = call(server, "GET", "/api/status")
         assert status == 200 and res["status"] == "ready"
+        assert res["restart_pending"] is True, "the settings changed above should offer a restart"
+        asked = []
+        from lura.shared import events
+        c.bus.subscribe(events.RESTART_REQUESTED, lambda p: asked.append(1))
+        assert call(server, "POST", "/api/restart", {})[0] == 200 and asked == [1]
+        # The token survives a restart, so an open dashboard window keeps working.
+        from lura.modules.dashboard.server import _stable_token
+        assert _stable_token() == server.token
+        status, res, _ = call(server, "GET", "/api/catalog")
+        assert status == 200 and res["catalog"] == {}, "no keys → no providers in the picker"
     finally:
         server.stop()
     print("dashboard OK")

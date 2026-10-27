@@ -151,6 +151,19 @@ def check_assistant_rules():
     assert trimmed[0].role == "user" and trimmed[0].text == "q4" and len(trimmed) == 40
 
 
+def check_brain_catalog():
+    from lura.modules.brain.domain import brain_candidate as bc
+    tools = {"supported_parameters": ["tools"], "architecture": {"input_modalities": ["text", "audio"], "output_modalities": ["text"]}}
+    assert bc("openrouter", {"id": "google/gemini-3.8-flash", **tools})["hears"] is True
+    assert bc("openrouter", {"id": "x/no-tools", "supported_parameters": []}) is None
+    assert bc("openrouter", {"id": "google/gemini-3.8-flash-tts", **tools}) is None
+    assert bc("gemini", {"id": "models/gemini-3.8-flash"})["id"] == "gemini-3.8-flash"
+    assert bc("gemini", {"id": "models/text-embedding-004"}) is None
+    assert bc("openai", {"id": "gpt-5.5"}) and not bc("openai", {"id": "gpt-4o-mini-tts"})
+    assert not bc("openai", {"id": "gpt-realtime"}) and not bc("openai", {"id": "dall-e-3"})
+    assert bc("anthropic", {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"})["name"] == "Claude Sonnet 5.5"
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):

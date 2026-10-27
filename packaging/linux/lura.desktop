@@ -9,6 +9,7 @@ Terminal=false
 Categories=Utility;Accessibility;
 Keywords=voice;assistant;ai;gemini;claude;
 StartupNotify=false
+StartupWMClass=lura
 Actions=Dashboard;
 
 [Desktop Action Dashboard]

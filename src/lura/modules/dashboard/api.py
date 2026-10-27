@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ... import __version__
@@ -18,6 +18,9 @@ from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, Set
 from ..voice import VoiceService
 from .server import ApiError
 
+#: Settings that apply the moment they change, so they never ask for a restart.
+LIVE = {"onboarded", "subtitles", "ui_language"}
+
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
 
@@ -30,6 +33,21 @@ class DashboardApi:
     billing: BillingService
     bus: EventBus
     status: Callable[[], str]
+    #: Whether a restart applies the changes made since Lura started. False
+    #: for the standalone dashboard, which has no assistant to restart.
+    can_restart: bool = True
+    _pending: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # Changes are applied on the next conversation anyway, but a restart
+        # makes sure (wake word, devices, the face) — the dashboard offers one.
+        self.bus.subscribe(events.SETTINGS_CHANGED,
+                           lambda p: self._pending.extend(c for c in p.get("changed", []) if c not in LIVE))
+        self.bus.subscribe(events.KEYS_CHANGED, lambda p: self._pending.append(f"key:{p.get('provider')}"))
+
+    @property
+    def restart_pending(self) -> bool:
+        return self.can_restart and bool(self._pending)
 
     def register(self, server) -> None:
         r = server.route
@@ -37,7 +55,11 @@ class DashboardApi:
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
                                               "connectors": self.connectors.list(),
-                                              "plan": self.billing.plan()})
+                                              "plan": self.billing.plan(),
+                                              "restart_pending": self.restart_pending})
+        r("GET", "/api/catalog", lambda b, m: {"catalog": self.brain.full_catalog(
+            self.settings.capabilities().keys)})
+        r("POST", "/api/restart", lambda b, m: self.restart())
         r("PUT", "/api/settings", lambda b, m: self.update_settings(b))
         r("PUT", r"/api/keys/(\w+)", lambda b, m: self.set_key(m[1], b))
         r("DELETE", r"/api/keys/(\w+)", lambda b, m: self.remove_key(m[1]))
@@ -69,12 +91,20 @@ class DashboardApi:
             "plan": self.billing.plan(), "connectors": self.connectors.list(),
             "languages": LANGUAGES, "i18n": {lang: catalog(lang) for lang in LANGUAGES},
             "paths": {"config": str(self.settings.settings_path.parent)},
+            "restart_pending": self.restart_pending, "can_restart": self.can_restart,
         }
+
+    def restart(self) -> dict:
+        if not self.can_restart:
+            raise ApiError(409, "Lura is not running; start it to apply the changes.")
+        self.bus.publish(events.RESTART_REQUESTED)
+        return {"ok": True}
 
     def update_settings(self, body: dict) -> dict:
         changed = self.settings.update(body.get("patch") or {})
         return {"changed": changed, "settings": self.settings.current.to_dict(),
-                "capabilities": self.settings.capabilities().to_dict()}
+                "capabilities": self.settings.capabilities().to_dict(),
+                "restart_pending": self.restart_pending}
 
     def set_key(self, provider: str, body: dict) -> dict:
         if provider not in PROVIDERS:
@@ -92,12 +122,13 @@ class DashboardApi:
             self.settings.update({"brain_provider": provider})
         return {"message": message, "keys": self.settings.key_status(),
                 "capabilities": self.settings.capabilities().to_dict(),
-                "settings": self.settings.current.to_dict()}
+                "settings": self.settings.current.to_dict(), "restart_pending": self.restart_pending}
 
     def remove_key(self, provider: str) -> dict:
         self.settings.remove_key(provider)
         return {"keys": self.settings.key_status(),
-                "capabilities": self.settings.capabilities().to_dict()}
+                "capabilities": self.settings.capabilities().to_dict(),
+                "restart_pending": self.restart_pending}
 
     def preview(self, body: dict) -> dict:
         s = self.settings.current

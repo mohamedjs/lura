@@ -156,9 +156,12 @@ def _echoable(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return head + blocks[last:]
 
 
-def list_models(key: str) -> list[str]:
+def list_model_records(key: str) -> list[dict]:
     from ....shared.http import request_json
 
-    data = request_json("https://api.anthropic.com/v1/models?limit=100",
-                        {"x-api-key": key, "anthropic-version": "2023-06-01"}, timeout=20)
-    return sorted(m["id"] for m in data.get("data", []) if m.get("id"))
+    return request_json("https://api.anthropic.com/v1/models?limit=100",
+                        {"x-api-key": key, "anthropic-version": "2023-06-01"}, timeout=20).get("data", [])
+
+
+def list_models(key: str) -> list[str]:
+    return sorted(m["id"] for m in list_model_records(key) if m.get("id"))

@@ -30,7 +30,7 @@ Architecture: $ARCH
 Installed-Size: $SIZE
 Maintainer: Mohamed <mohamed@tripklik.com>
 Homepage: https://github.com/mohamedjs/lura
-Depends: libportaudio2, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xkb1, libxcb-shape0, libxcb-randr0, libxcb-render-util0, libxcb-image0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3
+Depends: libportaudio2, libxcb-cursor0, libxcb-icccm4, libxcb-keysyms1, libxcb-xkb1, libxcb-shape0, libxcb-randr0, libxcb-render-util0, libxcb-image0, libxkbcommon-x11-0, libegl1, libgl1, libfontconfig1, libdbus-1-3, libnss3, libnspr4, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libxkbfile1, libasound2t64 | libasound2
 Recommends: nodejs, npm, ffmpeg
 Suggests: google-chrome-stable | chromium
 Description: Voice-first desktop assistant

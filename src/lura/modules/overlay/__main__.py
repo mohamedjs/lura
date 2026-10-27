@@ -27,6 +27,14 @@ def selfcheck() -> None:
             assert len(png) > 1000, f"{target} amp={amp}: frame looks empty"
             rgba = surface_rgba(render_surface(1.7, b, size=OVERLAY_SIZE, amp=amp))
             assert len(rgba) == OVERLAY_SIZE * OVERLAY_SIZE * 4
+    from .captions import caption_lines
+    st = OverlayState()
+    assert caption_lines(st) is None, "nothing said, nothing shown"
+    st.set_state("speaking"); st.set_caption("you", "hi"); st.set_caption("lura", "word " * 100)
+    you, lura = caption_lines(st)
+    assert you == "hi" and lura.startswith("…") and len(lura) <= 192, lura
+    st.subtitles_enabled = False
+    assert caption_lines(st) is None, "the switch hides them"
     print("overlay self-check OK")
 
 

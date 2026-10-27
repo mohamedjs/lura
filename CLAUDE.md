@@ -88,6 +88,16 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   converted on load (`settings/domain.py: migrate_legacy`).
 - **Command guard** also blocks Windows/macOS destructive commands. Test:
   `python3 tests/test_command_guard.py` → `command guard OK (29 blocked, 19 allowed)`.
+- **Dashboard window:** native — pywebview (WebView2 / WKWebView) on Windows/macOS, Qt
+  WebEngine on Linux (bundled in the Linux build only), in a separate `lura window` process.
+- **Model picker:** `/api/catalog` lists brain-capable models (chat + tools) of every keyed
+  provider (`brain/domain.py: brain_candidate`). Modes: "My model" / "Gemini Realtime".
+- **Restart button** appears after settings/key changes (except live ones: subtitles,
+  ui_language); daemon exits 75 under systemd, else re-execs. Dashboard token is stable
+  (`dashboard.token`) so the open window reconnects.
+- **Subtitles** under the face (`overlay/captions.py`, drawn by Qt/Pango so Arabic shapes):
+  what you said + Lura's streamed reply; toggle live from dashboard, tray, or right-click on
+  the face. When the brain hears audio directly, a parallel transcription fills "You".
 - **Briefing** once per boot, in the conversation language; GitHub line only if a
   connector named `github` is connected (it is custom → needs Pro).
 

@@ -171,13 +171,15 @@ class LiveConversation:
                 continue
             if (heard := getattr(server, "input_transcription", None)) and heard.text:
                 log.info("you: %s", heard.text)
-                self._presence.set_transcript(f"You: {heard.text}")
+                if not self._buffers["you"]:            # a new user turn
+                    self._presence.set_caption("lura", "")
                 self._flush("lura")
                 self._buffers["you"].append(heard.text)
+                self._presence.set_caption("you", "".join(self._buffers["you"]))
             if (said := getattr(server, "output_transcription", None)) and said.text:
-                self._presence.set_transcript(f"Lura: {said.text}")
                 self._flush("you")
                 self._buffers["lura"].append(said.text)
+                self._presence.set_caption("lura", "".join(self._buffers["lura"]))
             if getattr(server, "interrupted", False):
                 while not chunks.empty():
                     chunks.get_nowait()

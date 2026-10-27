@@ -42,6 +42,13 @@ def _logging(verbose: bool) -> None:
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
 
 
+def _overlay_labels(lang: str) -> dict:
+    from .shared.i18n import t
+    labels = {k: t(f"tray.{k}", lang) for k in ("open", "talk", "subtitles", "quit")}
+    labels.update(you=t("caption.you", lang), lura=t("caption.lura", lang))
+    return labels
+
+
 def _container(presence=None):
     from .bootstrap import build
     return build(presence)
@@ -73,10 +80,22 @@ def cmd_run(args) -> int:
         return 1
 
     from .shared import events
+    def toggle_subtitles():
+        c.settings.update({"subtitles": not c.settings.current.subtitles})
+
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
-                      actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED)},
-                      labels={k: t(f"tray.{k}", s.ui_language) for k in ("open", "talk", "quit")})
+                      actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
+                               "subtitles": toggle_subtitles},
+                      labels=_overlay_labels(s.ui_language))
     c.assistant.presence = overlay.state
+    overlay.state.subtitles_enabled = s.subtitles
+
+    def on_settings(payload):
+        # Applied live, no restart: the subtitles switch.
+        if "subtitles" in payload.get("changed", ()):
+            overlay.state.subtitles_enabled = c.settings.current.subtitles
+
+    c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
 
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)
@@ -86,6 +105,14 @@ def cmd_run(args) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, on_signal)
 
+    restart = threading.Event()
+
+    def on_restart(_payload):
+        log.info("Restart requested from the dashboard.")
+        restart.set()
+        stop.set()
+
+    c.bus.subscribe(events.RESTART_REQUESTED, on_restart)
     c.connectors.start_all()
 
     def keep_licence_fresh():
@@ -116,8 +143,36 @@ def cmd_run(args) -> int:
         worker.join(timeout=5)
         c.connectors.stop_all()
         server.stop()
+    if restart.is_set():
+        return _restart_self()
     log.info("Stopped.")
     return 0
+
+
+#: EX_TEMPFAIL. Under systemd the unit's Restart=on-failure brings Lura back.
+EXIT_RESTART = 75
+
+
+def _restart_self() -> int:
+    """Start again with fresh settings, however Lura was started."""
+    import os
+    import subprocess
+
+    from .shared.desktop import launch_command
+    from .shared.platform import IS_WINDOWS
+
+    if os.environ.get("INVOCATION_ID"):   # running as a systemd service
+        log.info("Restarting through systemd.")
+        return EXIT_RESTART
+    argv = [*launch_command(), "--no-browser"]
+    log.info("Restarting: %s", " ".join(argv))
+    if IS_WINDOWS:
+        # No exec on Windows: start the new Lura detached, then leave.
+        subprocess.Popen(argv, creationflags=0x00000008 | 0x00000200, close_fds=True)
+        return 0
+    logging.shutdown()
+    os.execv(argv[0], argv)
+    return 0   # not reached
 
 
 # ── dashboard ───────────────────────────────────────────────────────────────
@@ -131,7 +186,8 @@ def cmd_dashboard(args) -> int:
         return 0
     c = _container()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
-                                          c.bus, lambda: "offline"), c.settings.current.dashboard_port)
+                                          c.bus, lambda: "offline", can_restart=False),
+                             c.settings.current.dashboard_port)
     server.start()
     log.info("Lura is not running; this dashboard is standalone until its window closes.")
     try:
@@ -231,7 +287,10 @@ def _talk(initial: bool) -> int:
     from .modules.overlay import Overlay
     from .shared.errors import NeedsSetup
 
-    overlay = Overlay(enabled=True)
+    from .modules.settings import SettingsService
+    lang = SettingsService().current
+    overlay = Overlay(enabled=True, labels=_overlay_labels(lang.ui_language))
+    overlay.state.subtitles_enabled = lang.subtitles
     c = _container(overlay.state)
     c.connectors.start_all()
     stop = threading.Event()

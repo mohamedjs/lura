@@ -34,8 +34,16 @@ for package in ("vosk", "sounddevice", "_sounddevice_data", "anthropic", "google
     except Exception:
         pass
 
+# Qt WebEngine (~200 MB) draws the settings window on Linux only; Windows and
+# macOS use the system's web engine through pywebview instead.
+excludes = ["tkinter", "gi"]
+if sys.platform.startswith("linux"):
+    hidden += ["PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineCore"]
+else:
+    excludes += ["PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineQuick"]
+
 a = Analysis([str(Path(SPECPATH) / "entry.py")], pathex=[str(SRC)], binaries=binaries, datas=datas,
-             hiddenimports=hidden, excludes=["tkinter", "gi"], noarchive=False)
+             hiddenimports=hidden, excludes=excludes, noarchive=False)
 pyz = PYZ(a.pure)
 
 icon = str(ROOT / "packaging" / "icons" / ("lura.icns" if sys.platform == "darwin" else "lura.ico"))

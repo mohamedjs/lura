@@ -44,6 +44,7 @@ class PipelineConversation:
         self._ending = False
         self._hears = brain_hears_audio(self._model.provider, self._model.model)
         self._transcriber = None if self._hears else voice.transcriber(settings)
+        self._caption_transcriber = self._transcriber
         self._system = domain.system_prompt(settings.persona, settings.assistant_name,
                                             settings.user_name, settings.language,
                                             tools.machine_context())
@@ -64,7 +65,7 @@ class PipelineConversation:
                     return None
                 if isinstance(event, TextDelta):
                     said += event.text
-                    self._presence.set_transcript(f"{self.s.assistant_name}: {said.strip()}")
+                    self._presence.set_caption("lura", said)
                     player.feed(event.text)
                 else:
                     done = event
@@ -111,6 +112,21 @@ class PipelineConversation:
             self._history.append(Message("tool", text[:6000], tool_call_id=call.id,
                                          tool_name=call.name, is_error=not call.valid))
 
+    def _caption_heard(self, wav: bytes) -> None:
+        """The brain hears the audio itself, so there is no text of what was
+        said. For the subtitle, transcribe it alongside — in parallel, so
+        the answer is not held up by it."""
+        def run():
+            try:
+                if self._caption_transcriber is None:
+                    self._caption_transcriber = self._voice.transcriber(self.s)
+                if heard := self._caption_transcriber.transcribe(wav):
+                    self._presence.set_caption("you", heard)
+            except Exception as exc:
+                log.debug("Subtitle transcription failed: %s", exc)
+
+        threading.Thread(target=run, daemon=True, name="caption").start()
+
     # ── one user turn ──
     def _answer(self) -> None:
         rounds = 0
@@ -137,6 +153,8 @@ class PipelineConversation:
     def run(self, initial_prompt: str | None = None) -> None:
         started = time.monotonic()
         if initial_prompt:
+            self._presence.set_caption("you", "")
+            self._presence.set_caption("lura", "")
             self._history.append(Message("user", initial_prompt))
             self._answer()
             return
@@ -150,8 +168,12 @@ class PipelineConversation:
                 log.info("Nothing said — closing.")
                 return
             wav = self._voice.to_wav(pcm)
+            self._presence.set_caption("lura", "")
+            self._presence.set_caption("you", "…")
             if self._hears:
                 self._history.append(Message("user", audio_wav=wav))
+                if self.s.subtitles:
+                    self._caption_heard(wav)
             else:
                 self._presence.set_state("thinking")
                 try:
@@ -162,7 +184,7 @@ class PipelineConversation:
                     return
                 if not heard:
                     continue
-                self._presence.set_transcript(f"You: {heard}")
+                self._presence.set_caption("you", heard)
                 self._history.append(Message("user", heard))
             self._answer()
 

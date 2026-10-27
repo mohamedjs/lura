@@ -21,7 +21,8 @@ class OverlayState:
 
     def __init__(self):
         self._state = State.LISTENING
-        self._transcript = ""
+        self._captions: dict[str, str] = {}
+        self._caption_ts = 0.0
         self._amp = 0.0
         self._amp_ts = 0.0
         self._lock = threading.Lock()
@@ -64,18 +65,19 @@ class OverlayState:
     def set_amplitude(self, level: float) -> None:
         self.amplitude = level
 
-    def set_transcript(self, text: str) -> None:
-        self.transcript = text
-
-    @property
-    def transcript(self) -> str:
+    def set_caption(self, who: str, text: str) -> None:
         with self._lock:
-            return self._transcript
+            self._captions[who] = text.strip()
+            self._caption_ts = time.monotonic()
 
-    @transcript.setter
-    def transcript(self, val: str):
+    def captions(self) -> tuple[str, str, float]:
+        """(what you said, what Lura is saying, seconds since either changed)."""
         with self._lock:
-            self._transcript = val
+            return (self._captions.get("you", ""), self._captions.get("lura", ""),
+                    time.monotonic() - self._caption_ts)
+
+    #: Subtitles under the face, switched live from the dashboard or the tray.
+    subtitles_enabled: bool = True
 
 
 class StateBlender:

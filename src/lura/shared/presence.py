@@ -12,10 +12,16 @@ from typing import Protocol
 IDLE, LISTENING, THINKING, SPEAKING, CONNECTING = "idle", "listening", "thinking", "speaking", "connecting"
 
 
+#: Who a caption belongs to.
+YOU, LURA = "you", "lura"
+
+
 class Presence(Protocol):
     def set_state(self, state: str) -> None: ...
     def set_amplitude(self, level: float) -> None: ...
-    def set_transcript(self, text: str) -> None: ...
+    def set_caption(self, who: str, text: str) -> None:
+        """The subtitle line for ``who`` (YOU or LURA); empty clears it."""
+        ...
 
 
 class NullPresence:
@@ -25,5 +31,5 @@ class NullPresence:
     def set_amplitude(self, level: float) -> None:
         pass
 
-    def set_transcript(self, text: str) -> None:
+    def set_caption(self, who: str, text: str) -> None:
         pass

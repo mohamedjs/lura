@@ -65,6 +65,7 @@ async function save(patch) {
     const res = await api("PUT", "/api/settings", { patch });
     S.settings = res.settings;
     S.capabilities = res.capabilities;
+    S.restart_pending = res.restart_pending;
     render();
   } catch (e) { fail(e); render(); }
 }
@@ -98,6 +99,41 @@ function renderStatus() {
   const ul = $("#problems");
   ul.replaceChildren(...caps.problems.map((p) => Object.assign(document.createElement("li"), { textContent: t(p) })));
   $("#stop-btn").hidden = status !== "talking";
+  const showRestart = !!S.restart_pending && S.can_restart !== false && status !== "offline";
+  $("#restart-btn").hidden = !showRestart && !restarting;
+  $("#restart-hint").hidden = !showRestart || restarting;
+}
+
+let restarting = false;
+async function restartLura() {
+  const btn = $("#restart-btn");
+  restarting = true;
+  btn.classList.add("busy");
+  btn.disabled = true;
+  toast(t("restart.restarting"));
+  try { await api("POST", "/api/restart"); } catch (e) { restarting = false; btn.classList.remove("busy"); btn.disabled = false; return fail(e); }
+  // Wait for this Lura to go away, then for the new one to answer. The token
+  // survives restarts, so this same page keeps working.
+  let wentAway = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 60000) {
+    await new Promise((r) => setTimeout(r, 1000));
+    try {
+      const st = await api("GET", "/api/status");
+      if (wentAway || !st.restart_pending) {
+        restarting = false;
+        btn.classList.remove("busy");
+        btn.disabled = false;
+        toast(t("restart.done"));
+        await refresh();
+        return;
+      }
+    } catch (_) { wentAway = true; }
+  }
+  restarting = false;
+  btn.classList.remove("busy");
+  btn.disabled = false;
+  toast(t("restart.timeout"), true);
 }
 
 function renderKeys() {
@@ -129,7 +165,7 @@ function renderKeys() {
       saveBtn.textContent = t("keys.testing");
       try {
         const res = await api("PUT", `/api/keys/${p}`, { key: input.value });
-        Object.assign(S, { keys: res.keys, capabilities: res.capabilities, settings: res.settings });
+        Object.assign(S, { keys: res.keys, capabilities: res.capabilities, settings: res.settings, restart_pending: res.restart_pending });
         toast(`${k.label}: ${res.message}`);
         render();
       } catch (e) { fail(e); saveBtn.disabled = false; saveBtn.textContent = t("keys.save"); }
@@ -149,30 +185,72 @@ function renderKeys() {
   }
 }
 
+let catalog = null;          // {provider: [{id, name, hears}]} for providers with keys
+let catalogFor = "";         // which key set it was loaded for
+
+async function loadCatalog() {
+  const keyed = S.providers.filter((p) => S.keys[p].set).join(",");
+  if (catalog && catalogFor === keyed) return;
+  catalogFor = keyed;
+  catalog = null;
+  renderModels();
+  try { catalog = (await api("GET", "/api/catalog")).catalog; } catch (e) { catalog = {}; fail(e); }
+  renderModels();
+}
+
+function pickModel(provider, id) {
+  save({ brain_provider: provider, models: { [provider]: id } });
+}
+
+function renderModels() {
+  const s = S.settings, box = $("#model-list");
+  const cur = s.models[s.brain_provider] || "";
+  const curEntry = (catalog && (catalog[s.brain_provider] || []).find((m) => m.id === cur));
+  const head = $("#current-model");
+  head.replaceChildren();
+  head.append(Object.assign(document.createElement("small"), { textContent: t("brain.current", { provider: S.keys[s.brain_provider].label }) }),
+              Object.assign(document.createElement("b"), { textContent: cur }));
+  if (curEntry && curEntry.hears) head.append(Object.assign(document.createElement("span"), { className: "tag voice", textContent: t("brain.hears_short") }));
+
+  if (catalog === null) { box.replaceChildren(Object.assign(document.createElement("div"), { className: "model-empty", textContent: t("brain.loading") })); return; }
+  const q = $("#model-search").value.trim().toLowerCase();
+  const rows = [];
+  for (const p of S.providers) {
+    if (!S.keys[p].set) continue;
+    const models = (catalog[p] || []).filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q));
+    const group = Object.assign(document.createElement("div"), { className: "model-group" });
+    group.append(Object.assign(document.createElement("span"), { textContent: S.keys[p].label }),
+                 Object.assign(document.createElement("span"), { textContent: t("brain.count", { n: models.length }) }));
+    rows.push(group);
+    for (const m of models.slice(0, q ? 200 : 60)) {
+      const b = Object.assign(document.createElement("button"), { className: "model" + (p === s.brain_provider && m.id === cur ? " on" : ""), title: m.name });
+      b.setAttribute("role", "option");
+      b.append(Object.assign(document.createElement("span"), { className: "mid", textContent: m.id }));
+      if (m.hears) b.append(Object.assign(document.createElement("span"), { className: "ear", textContent: "🎧 " + t("brain.hears_short") }));
+      b.onclick = () => pickModel(p, m.id);
+      rows.push(b);
+    }
+    // Any id the provider accepts still works, listed or not.
+    if (q && !models.some((m) => m.id.toLowerCase() === q)) {
+      const raw = $("#model-search").value.trim();
+      const b = Object.assign(document.createElement("button"), { className: "model", textContent: t("brain.custom", { id: raw, provider: S.keys[p].label }) });
+      b.onclick = () => pickModel(p, raw);
+      rows.push(b);
+    }
+  }
+  if (!rows.length) rows.push(Object.assign(document.createElement("div"), { className: "model-empty", textContent: t("brain.no_models") }));
+  box.replaceChildren(...rows);
+}
+
 function renderBrain() {
   const s = S.settings;
   seg($("#mode"), s.mode, (v) => save({ mode: v }));
   $("#mode-hint").textContent = t(s.mode === "realtime" ? "brain.mode.realtime_hint" : "brain.mode.pipeline_hint");
   $("#brain-pipeline").hidden = s.mode === "realtime";
-
-  const sel = $("#brain-provider");
-  sel.replaceChildren(...S.providers.map((p) => {
-    const o = Object.assign(document.createElement("option"), { value: p, textContent: S.keys[p].label });
-    if (!S.keys[p].set) { o.disabled = true; o.textContent += ` — ${t("brain.needs_key")}`; }
-    return o;
-  }));
-  sel.value = s.brain_provider;
-  sel.onchange = () => save({ brain_provider: sel.value });
-
-  const model = $("#brain-model");
-  if (document.activeElement !== model) model.value = s.models[s.brain_provider] || "";
-  model.onchange = () => save({ models: { [s.brain_provider]: model.value.trim() } });
-  fillModels(S.suggested_models[s.brain_provider] || []);
-  model.onfocus = async () => {
-    if (model.dataset.loaded === s.brain_provider) return;
-    model.dataset.loaded = s.brain_provider;
-    try { fillModels((await api("GET", `/api/models/${s.brain_provider}`)).models); } catch (_) {}
-  };
+  const search = $("#model-search");
+  search.oninput = renderModels;
+  renderModels();
+  loadCatalog();
   const effort = $("#effort");
   effort.value = s.reasoning_effort;
   effort.onchange = () => save({ reasoning_effort: effort.value });
@@ -180,10 +258,6 @@ function renderBrain() {
   const p = s.brain_provider, m = s.models[p] || "";
   const hears = p === "gemini" || (p === "openrouter" && (m.startsWith("google/gemini") || m.startsWith("openai/gpt-audio")));
   $("#hearing-hint").textContent = t(hears ? "brain.hears" : "brain.transcribes");
-}
-
-function fillModels(list) {
-  $("#model-list").replaceChildren(...list.map((id) => Object.assign(document.createElement("option"), { value: id })));
 }
 
 function renderVoice() {
@@ -331,6 +405,8 @@ function renderAdvanced() {
   bindCheck("#briefing", "briefing_on_boot");
   bindCheck("#start-login", "start_at_login");
   bindCheck("#overlay", "overlay_enabled");
+  bindCheck("#subtitles", "subtitles");
+  bindCheck("#subtitles-voice", "subtitles");
   bindText("#silence-ms", "silence_ms", Number);
   bindText("#silence-factor", "silence_factor", Number);
   bindText("#input-device", "input_device", (v) => v.trim() || null);
@@ -365,10 +441,11 @@ async function poll() {
   try {
     const s = await api("GET", "/api/status");
     const changed = s.status !== S.status || s.capabilities.can_talk !== S.capabilities.can_talk ||
+      s.restart_pending !== S.restart_pending ||
       JSON.stringify(s.connectors.map((c) => [c.status, c.tools.length])) !== JSON.stringify(S.connectors.map((c) => [c.status, c.tools.length]));
     Object.assign(S, s);
     if (changed) render();
-  } catch (_) { S.status = "offline"; renderStatus(); }
+  } catch (_) { if (!restarting) { S.status = "offline"; renderStatus(); } }
 }
 
 // ── theme
@@ -389,6 +466,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#theme-btn").onclick = cycleTheme;
   $("#talk-btn").onclick = () => api("POST", "/api/talk").then(() => toast(t("hero.listening"))).catch(fail);
   $("#stop-btn").onclick = () => api("POST", "/api/stop").catch(fail);
+  $("#restart-btn").onclick = restartLura;
   $("#conn-form").onsubmit = submitConnector;
   await refresh();
   setInterval(poll, 2500);
