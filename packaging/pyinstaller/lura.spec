@@ -50,6 +50,10 @@ if sys.platform == "darwin":
         coll, name="Lura.app", icon=icon, bundle_identifier="com.lura.assistant",
         info_plist={
             "CFBundleExecutable": "LuraApp",
+            # Shown in permission prompts; without it macOS says "Python".
+            "CFBundleName": "Lura",
+            "CFBundleDisplayName": "Lura",
+            "NSLocalNetworkUsageDescription": "Lura's dashboard and connectors talk to services on this computer.",
             "CFBundleShortVersionString": re.search(r'__version__ = "([^"]+)"', (LURA / "__init__.py").read_text()).group(1),
             # The one permission a voice assistant cannot work without.
             "NSMicrophoneUsageDescription": "Lura listens for her wake word and to what you say to her.",

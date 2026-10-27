@@ -27,6 +27,19 @@ lura:  "Opening it now… done, it's playing."
 - **Dashboard:** a local, hand-drawn neumorphic page for keys, models, voice,
   language, connectors and your plan, in Arabic or English.
 
+## Screenshots
+
+These come from the release pipeline itself: each build is installed and run on
+a clean machine and photographed (`docs/screenshots/`).
+
+| Windows: the face over your apps, and the dashboard | macOS: the face and the menu-bar icon |
+|---|---|
+| ![Windows](docs/screenshots/windows/windows-desktop-dashboard.png) | ![macOS](docs/screenshots/macos-arm64/macos-desktop-face.png) |
+
+| Dashboard: English, light | Dashboard: Arabic, dark |
+|---|---|
+| ![English](docs/screenshots/windows/dashboard-en-light.png) | ![Arabic](docs/screenshots/windows/dashboard-ar-dark.png) |
+
 ## Install
 
 | Platform | How |
