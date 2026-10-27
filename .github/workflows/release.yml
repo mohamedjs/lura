@@ -225,7 +225,7 @@ jobs:
   # Branch builds only: keep the smoke-test screenshots in the repo
   # (docs/screenshots/<platform>/), where they document what each build looks like.
   screenshots:
-    if: always() && github.ref_type == 'branch'
+    if: always() && github.ref_type == 'branch' && github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     steps:
