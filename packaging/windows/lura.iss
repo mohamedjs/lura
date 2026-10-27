@@ -41,7 +41,7 @@ Source: "..\..\dist\lura\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 
 [Icons]
 Name: "{group}\Lura"; Filename: "{app}\LuraApp.exe"; Parameters: "run"
-Name: "{group}\Lura Dashboard"; Filename: "{app}\lura.exe"; Parameters: "dashboard"
+Name: "{group}\Lura Dashboard"; Filename: "{app}\LuraApp.exe"; Parameters: "dashboard"
 Name: "{group}\Uninstall Lura"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Lura"; Filename: "{app}\LuraApp.exe"; Parameters: "run"; Tasks: desktopicon
 

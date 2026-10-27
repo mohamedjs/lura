@@ -14,7 +14,6 @@ import mimetypes
 import re
 import secrets
 import threading
-import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -157,7 +156,9 @@ class DashboardServer:
             pass
 
     def open(self) -> None:
-        webbrowser.open(self.url)
+        """The dashboard in its own app window (see window.py)."""
+        from .window import launch
+        launch(self.url)
 
 
 def running_url() -> str | None:

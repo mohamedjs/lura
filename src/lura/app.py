@@ -10,7 +10,6 @@ import signal
 import sys
 import threading
 import time
-import webbrowser
 
 from . import __version__
 
@@ -57,7 +56,8 @@ def cmd_run(args) -> int:
 
     if url := running_url():
         log.info("Lura is already running; opening its dashboard.")
-        webbrowser.open(url)
+        from .modules.dashboard import open_window
+        open_window(url)
         return 0
 
     c = _container()
@@ -123,27 +123,31 @@ def cmd_run(args) -> int:
 # ── dashboard ───────────────────────────────────────────────────────────────
 
 def cmd_dashboard(args) -> int:
-    from .modules.dashboard import DashboardApi, DashboardServer, running_url
+    """The settings window. Opens the running Lura's, or serves one just for setup."""
+    from .modules.dashboard import DashboardApi, DashboardServer, running_url, show_window
 
     if url := running_url():
-        print(f"Opening {url.split('#')[0]}")
-        webbrowser.open(url)
+        show_window(url)
         return 0
-    # Lura is not running: serve the dashboard alone so it can be set up.
     c = _container()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
                                           c.bus, lambda: "offline"), c.settings.current.dashboard_port)
     server.start()
-    print(f"Lura is not running, so this dashboard is standalone.\n  {server.url}\n"
-          "Start the assistant with `lura` (or restart its service). Ctrl+C to close.")
-    server.open()
+    log.info("Lura is not running; this dashboard is standalone until its window closes.")
     try:
-        while True:
-            time.sleep(1)
+        show_window(server.url)
     except KeyboardInterrupt:
         pass
     finally:
         server.stop()
+    return 0
+
+
+def cmd_window(args) -> int:
+    """Internal: the dashboard window process the daemon starts."""
+    from .modules.dashboard import show_window
+
+    show_window(args.url)
     return 0
 
 
@@ -352,7 +356,9 @@ def main(argv=None) -> int:
     run = subs.add_parser("run", help="run the assistant (the default)")
     run.add_argument("--no-overlay", action="store_true", help="no face on screen")
     run.add_argument("--no-browser", action="store_true", help="never open the dashboard by itself")
-    subs.add_parser("dashboard", help="open the dashboard")
+    subs.add_parser("dashboard", help="open the settings window")
+    win = subs.add_parser("window")   # internal: the daemon's dashboard window
+    win.add_argument("url")
     from .modules.settings import PROVIDERS
     for name, helptext in (("login", "store and test an API key"), ("logout", "forget an API key")):
         p = subs.add_parser(name, help=helptext)
@@ -384,7 +390,7 @@ def main(argv=None) -> int:
     if args.command is None:
         args = parser.parse_args([*(["-v"] if args.verbose else []), "run"])
     handlers = {
-        "run": cmd_run, "dashboard": cmd_dashboard, "login": cmd_login, "logout": cmd_logout,
+        "run": cmd_run, "dashboard": cmd_dashboard, "window": cmd_window, "login": cmd_login, "logout": cmd_logout,
         "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest, "say": cmd_say,
         "briefing": cmd_briefing, "mcp": cmd_mcp, "pro": cmd_pro, "autostart": cmd_autostart,
     }

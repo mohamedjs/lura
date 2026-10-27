@@ -18,7 +18,9 @@ anthropic = ["anthropic>=2.3"]
 live = ["google-genai>=1.0.0"]
 # The floating face and the tray icon on macOS/Windows (Linux can use system GTK instead).
 overlay = ["pycairo>=1.25", "PySide6>=6.7"]
-all = ["anthropic>=2.3", "google-genai>=1.0.0", "pycairo>=1.25", "PySide6>=6.7"]
+# The dashboard as a native window (WebView2 on Windows, WKWebView on macOS).
+window = ["pywebview>=5.0"]
+all = ["anthropic>=2.3", "google-genai>=1.0.0", "pycairo>=1.25", "PySide6>=6.7", "pywebview>=5.0"]
 
 [project.scripts]
 lura = "lura.app:main"
