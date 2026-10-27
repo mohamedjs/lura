@@ -1,0 +1,59 @@
+# The landing page (site/) on GitHub Pages: renders the intro videos
+# (video/intro.mjs, EN + AR), assembles _site/ with the latest release's
+# download links, and deploys it. Branch pushes build only, as a check.
+name: Landing page
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["site/**", "video/intro.*", "video/face*.js", "video/frames.mjs", "docs/screenshots/**",
+            ".github/workflows/pages.yml"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Render the intro videos
+        working-directory: video
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+          node intro.mjs --lang en
+          node intro.mjs --lang ar
+      - name: Assemble the site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: site/build.sh
+      - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main' || github.event_name != 'push'
+        with: { enablement: true }
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+
+  deploy:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

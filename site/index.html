@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lura — talk to your computer</title>
+<meta name="description" content="Lura is a voice-first desktop assistant for Windows, macOS and Linux. Say “Lura”, talk in Arabic or English, and she answers out loud and gets things done.">
+<meta property="og:title" content="Lura — talk to your computer">
+<meta property="og:description" content="A voice-first desktop assistant. Arabic & English. Any AI brain, one natural voice.">
+<meta property="og:image" content="assets/intro-en.jpg">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#e9ecf3">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="site.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<div class="paper">
+
+<nav class="nav">
+  <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" class="logo"><span>Lura</span></a>
+  <div class="links">
+    <a href="#download" data-i18n="nav.download"></a>
+    <a href="#features" data-i18n="nav.features"></a>
+    <a href="#pricing" data-i18n="nav.pricing"></a>
+    <a href="#faq" data-i18n="nav.faq"></a>
+  </div>
+  <div class="nav-actions">
+    <div class="seg small" id="lang" role="group" aria-label="Language"><button data-value="en">EN</button><button data-value="ar">ع</button></div>
+    <button class="icon-btn" id="theme" aria-label="Theme">◐</button>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="hero-copy">
+    <h1 data-i18n="hero.title"></h1>
+    <p class="lead" data-i18n="hero.lead"></p>
+    <div class="row">
+      <a class="btn primary big" id="hero-download" href="#download"><span class="os-icon" id="hero-icon"></span><span id="hero-download-text"></span></a>
+      <a class="btn ghost" href="#download" data-i18n="hero.other"></a>
+    </div>
+    <p class="hint" id="hero-version"></p>
+  </div>
+  <div class="hero-face card"><canvas id="face" width="520" height="520" aria-hidden="true"></canvas>
+    <div class="say"><span class="dot"></span><span data-i18n="hero.say"></span></div>
+  </div>
+</header>
+
+<section class="card video-card">
+  <video id="intro" controls playsinline preload="metadata" poster="assets/intro-en.jpg">
+    <source src="assets/intro-en.mp4" type="video/mp4">
+  </video>
+</section>
+
+<section id="download" class="section">
+  <h2 data-i18n="dl.title"></h2>
+  <p class="sub" data-i18n="dl.sub"></p>
+  <div class="grid3" id="platforms">
+    <article class="card platform" data-os="windows">
+      <div class="os-head"><span class="os-icon win"></span><h3>Windows</h3><span class="badge" data-i18n="dl.yours"></span></div>
+      <p class="hint" data-i18n="dl.win.req"></p>
+      <a class="btn primary block" data-asset="setup" data-i18n="dl.win.setup"></a>
+      <a class="btn ghost block" data-asset="portable" data-i18n="dl.win.portable"></a>
+      <p class="note" data-i18n="dl.win.note"></p>
+    </article>
+    <article class="card platform" data-os="macos">
+      <div class="os-head"><span class="os-icon mac"></span><h3>macOS</h3><span class="badge" data-i18n="dl.yours"></span></div>
+      <p class="hint" data-i18n="dl.mac.req"></p>
+      <a class="btn primary block" data-asset="mac-arm" data-i18n="dl.mac.arm"></a>
+      <a class="btn ghost block" data-asset="mac-intel" data-i18n="dl.mac.intel"></a>
+      <div class="cmd"><code>brew install --cask mohamedjs/lura/lura</code><button class="copy" data-i18n="dl.copy"></button></div>
+    </article>
+    <article class="card platform" data-os="linux">
+      <div class="os-head"><span class="os-icon linux"></span><h3>Linux</h3><span class="badge" data-i18n="dl.yours"></span></div>
+      <p class="hint" data-i18n="dl.linux.req"></p>
+      <a class="btn primary block" data-asset="deb" data-i18n="dl.linux.deb"></a>
+      <a class="btn ghost block" data-asset="tar" data-i18n="dl.linux.tar"></a>
+      <div class="cmd"><code id="apt-cmd">sudo apt install ./lura_amd64.deb</code><button class="copy" data-i18n="dl.copy"></button></div>
+    </article>
+  </div>
+  <p class="center hint"><span data-i18n="dl.node"></span> · <a id="all-releases" href="https://github.com/mohamedjs/lura/releases" target="_blank" rel="noopener" data-i18n="dl.all"></a> · <a id="checksums" target="_blank" rel="noopener">SHA256</a></p>
+</section>
+
+<section class="section" id="how">
+  <h2 data-i18n="how.title"></h2>
+  <div class="steps">
+    <div class="card step"><span class="num">1</span><h3 data-i18n="how.1.t"></h3><p data-i18n="how.1.d"></p></div>
+    <div class="card step"><span class="num">2</span><h3 data-i18n="how.2.t"></h3><p data-i18n="how.2.d"></p></div>
+    <div class="card step"><span class="num">3</span><h3 data-i18n="how.3.t"></h3><p data-i18n="how.3.d"></p></div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <h2 data-i18n="feat.title"></h2>
+  <div class="grid3">
+    <div class="card feat"><span class="emoji">🧠</span><h3 data-i18n="feat.brain.t"></h3><p data-i18n="feat.brain.d"></p></div>
+    <div class="card feat"><span class="emoji">🎙️</span><h3 data-i18n="feat.voice.t"></h3><p data-i18n="feat.voice.d"></p></div>
+    <div class="card feat"><span class="emoji">🌍</span><h3 data-i18n="feat.lang.t"></h3><p data-i18n="feat.lang.d"></p></div>
+    <div class="card feat"><span class="emoji">🧭</span><h3 data-i18n="feat.chrome.t"></h3><p data-i18n="feat.chrome.d"></p></div>
+    <div class="card feat"><span class="emoji">🔌</span><h3 data-i18n="feat.mcp.t"></h3><p data-i18n="feat.mcp.d"></p></div>
+    <div class="card feat"><span class="emoji">🛡️</span><h3 data-i18n="feat.safe.t"></h3><p data-i18n="feat.safe.d"></p></div>
+  </div>
+</section>
+
+<section class="section" id="shots">
+  <h2 data-i18n="shots.title"></h2>
+  <p class="sub" data-i18n="shots.sub"></p>
+  <div class="gallery">
+    <figure class="card shot wide"><img loading="lazy" src="assets/shots/windows-desktop-dashboard.png" alt=""><figcaption data-i18n="shots.win"></figcaption></figure>
+    <figure class="card shot"><img loading="lazy" id="shot-dash" src="assets/shots/dashboard-en-light.png" alt=""><figcaption data-i18n="shots.dash"></figcaption></figure>
+    <figure class="card shot"><img loading="lazy" src="assets/shots/macos-desktop-face.png" alt=""><figcaption data-i18n="shots.mac"></figcaption></figure>
+  </div>
+</section>
+
+<section class="section" id="pricing">
+  <h2 data-i18n="price.title"></h2>
+  <div class="plans">
+    <div class="card plan">
+      <h3 data-i18n="price.free"></h3><p class="price">$0</p>
+      <ul><li data-i18n="price.f1"></li><li data-i18n="price.f2"></li><li data-i18n="price.f3"></li><li data-i18n="price.f4"></li></ul>
+      <a class="btn block" href="#download" data-i18n="price.free.cta"></a>
+    </div>
+    <div class="card plan pro">
+      <h3>Pro</h3><p class="price">$5<small data-i18n="price.month"></small></p>
+      <ul><li data-i18n="price.p1"></li><li data-i18n="price.p2"></li><li data-i18n="price.p3"></li></ul>
+      <a class="btn primary block" href="#download" data-i18n="price.pro.cta"></a>
+    </div>
+  </div>
+  <p class="center hint" data-i18n="price.keys"></p>
+</section>
+
+<section class="section" id="faq">
+  <h2 data-i18n="faq.title"></h2>
+  <div class="faq">
+    <details class="card"><summary data-i18n="faq.1.q"></summary><p data-i18n="faq.1.a"></p></details>
+    <details class="card"><summary data-i18n="faq.2.q"></summary><p data-i18n="faq.2.a"></p></details>
+    <details class="card"><summary data-i18n="faq.3.q"></summary><p data-i18n="faq.3.a"></p></details>
+    <details class="card"><summary data-i18n="faq.4.q"></summary><p data-i18n="faq.4.a"></p></details>
+    <details class="card"><summary data-i18n="faq.5.q"></summary><p data-i18n="faq.5.a"></p></details>
+  </div>
+</section>
+
+<footer class="foot">
+  <img src="assets/favicon.svg" alt="" class="logo small">
+  <p><span data-i18n="foot.made"></span> · <a href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener">GitHub</a> · <span id="foot-version"></span></p>
+</footer>
+</div>
+<script src="assets/face_mesh.js" defer></script>
+<script src="assets/face.js" defer></script>
+</body>
+</html>

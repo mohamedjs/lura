@@ -22,6 +22,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 env:
   PYTHON_VERSION: "3.12"
@@ -192,6 +193,12 @@ jobs:
             - **Other Linux:** unpack `lura-${{ env.VERSION }}-linux-x86_64.tar.gz` and run `lura/LuraApp`
 
             The built-in Chrome, web and files connectors need Node.js (npx).
+      # A release made with GITHUB_TOKEN triggers no other workflow, except a
+      # dispatch: refresh the landing page so its buttons point at this version.
+      - name: Refresh the landing page
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main || echo "::warning::could not trigger pages.yml"
 
   homebrew:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
