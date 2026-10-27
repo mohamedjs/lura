@@ -2,6 +2,6 @@
 
 from .api import DashboardApi
 from .server import DashboardServer, running_url
-from .window import launch as open_window, show as show_window
+from .window import launch as open_window, run as run_window, show as show_window
 
-__all__ = ["DashboardApi", "DashboardServer", "running_url", "open_window", "show_window"]
+__all__ = ["DashboardApi", "DashboardServer", "running_url", "open_window", "run_window", "show_window"]

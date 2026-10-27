@@ -1,0 +1,81 @@
+# Installs the Linux build on distros newer than the Ubuntu 22.04 it is built
+# on — the .deb on Ubuntu, the tarball on Fedora and Arch — and opens the
+# native dashboard under Xvfb (packaging/ci/distro-test.sh, #6).
+#
+#   release.yml calls it with the build of the same run (artifact "linux").
+#   A manual run tests a published release:  tag=v2.0.1, expect=fail checks
+#   that the test still catches the build #6 was about.
+name: Linux distros
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        type: string
+        default: linux
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release to test, e.g. v2.0.1"
+        required: true
+      expect:
+        description: "pass, or fail for a build known to be broken"
+        default: pass
+  push:
+    branches: ["claude/**"]
+    paths: [".github/workflows/distro-test.yml", "packaging/ci/distro-test.sh"]
+
+permissions:
+  contents: read
+
+env:
+  # A push of this workflow tests 2.0.1, the release #6 was reported on.
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || (inputs.artifact == '' && 'v2.0.1' || '') }}
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release assets
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p '*.deb' -p '*linux-x86_64.tar.gz' -D in && ls -l in
+      - name: Build of this run
+        if: env.TAG == ''
+        uses: actions/download-artifact@v4
+        with: { name: "${{ inputs.artifact }}", path: in }
+      - uses: actions/upload-artifact@v4
+        with: { name: distro-input, path: in/*, if-no-files-found: error }
+
+  test:
+    needs: fetch
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "ubuntu:22.04", "fedora:latest", "archlinux:latest"]
+    runs-on: ubuntu-latest
+    container: { image: "${{ matrix.image }}" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: distro-input, path: in }
+      - name: Install and open the dashboard
+        env:
+          EXPECT: ${{ inputs.expect || 'pass' }}
+        run: |
+          if [ "$EXPECT" = fail ]; then
+            if bash packaging/ci/distro-test.sh in shots; then
+              echo "::error::the test passed on a build known to be broken"; exit 1
+            fi
+            echo "Caught the broken build, as expected."
+          else
+            bash packaging/ci/distro-test.sh in shots
+          fi
+      - name: Shots name
+        if: always()
+        id: n
+        run: echo "name=distro-${{ matrix.image }}" | tr ':' '-' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: "${{ steps.n.outputs.name }}", path: shots/*, if-no-files-found: ignore }

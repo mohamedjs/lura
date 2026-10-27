@@ -179,10 +179,12 @@ def _restart_self() -> int:
 
 def cmd_dashboard(args) -> int:
     """The settings window. Opens the running Lura's, or serves one just for setup."""
-    from .modules.dashboard import DashboardApi, DashboardServer, running_url, show_window
+    from .modules.dashboard import DashboardApi, DashboardServer, run_window, running_url
 
+    # The window runs in a child process: if it crashes (GPU driver, missing
+    # library), this one is still here to open the page in a browser.
     if url := running_url():
-        show_window(url)
+        run_window(url)
         return 0
     c = _container()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
@@ -191,7 +193,10 @@ def cmd_dashboard(args) -> int:
     server.start()
     log.info("Lura is not running; this dashboard is standalone until its window closes.")
     try:
-        show_window(server.url)
+        if not run_window(server.url):
+            # The page went to a browser tab, which needs this server alive.
+            print(f"The dashboard is open in your browser: {server.url}\nPress Ctrl+C to stop it.")
+            threading.Event().wait()
     except KeyboardInterrupt:
         pass
     finally:

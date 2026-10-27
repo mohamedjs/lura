@@ -15,6 +15,11 @@
 | macos-x86_64 | macos-15-intel | `Lura-<v>-macos-x86_64.zip` |
 | windows | windows-latest | `Lura-Setup-<v>.exe` (Inno Setup), portable zip |
 
+Before publishing, the `distros` job (`distro-test.yml`) installs the Linux build
+on Ubuntu 24.04 and 22.04 (.deb), Fedora and Arch (tarball) and opens the native
+dashboard under Xvfb; a crash, a GLX/GBM error or a blank window stops the release.
+To re-check a published build: run *Linux distros* with `tag=v2.0.1, expect=fail`.
+
 It publishes a GitHub Release with `SHA256SUMS.txt`, then updates the Homebrew
 cask. The tag must match `__version__`, or the run stops.
 

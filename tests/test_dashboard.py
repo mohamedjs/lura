@@ -87,8 +87,33 @@ def main() -> int:
         assert status == 200 and res["catalog"] == {}, "no keys → no providers in the picker"
     finally:
         server.stop()
+    window_fallback()
     print("dashboard OK")
     return 0
+
+
+def window_fallback():
+    """A window process that crashes is reaped and the page opens in a browser (#6)."""
+    import time
+    from lura.modules.dashboard import window
+
+    opened = []
+    real = window._self_command, window.app_window_or_browser
+    window.app_window_or_browser = opened.append
+    try:
+        window._self_command = lambda: [sys.executable, "-c", "import os, sys; sys.argv[1:] and os.abort()"]
+        assert window.run("http://x/crash") is False and opened == ["http://x/crash"]
+        window.launch("http://x/daemon")
+        for _ in range(100):
+            if opened[-1] == "http://x/daemon":
+                break
+            time.sleep(0.05)
+        assert opened[-1] == "http://x/daemon", "the daemon's crashed window falls back too"
+        assert window._child.poll() is not None, "and is reaped, not left <defunct>"
+        window._self_command = lambda: [sys.executable, "-c", "pass"]
+        assert window.run("http://x/closed") is True and opened[-1] != "http://x/closed"
+    finally:
+        window._self_command, window.app_window_or_browser = real
 
 
 if __name__ == "__main__":

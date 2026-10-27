@@ -104,7 +104,7 @@ jobs:
       - name: Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ".[all]" pyinstaller pillow
+          pip install ".[all]" "pyinstaller>=6,<7" pillow   # lura.spec filters a.binaries as a 6.x list
 
       - name: Checks on this OS
         run: python tests/run_all.py
@@ -118,6 +118,15 @@ jobs:
           if [ "$RUNNER_OS" = "macOS" ]; then dist/Lura.app/Contents/MacOS/lura --version
           elif [ "$RUNNER_OS" = "Windows" ]; then dist/lura/lura.exe --version
           else dist/lura/lura --version; fi
+
+      # The bundle must leave the C++ runtime and the GPU stack to the host:
+      # Ubuntu 22.04's copies break the window on newer distros (#6).
+      - name: No host-coupled libraries in the bundle (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if ls dist/lura/_internal/ | grep -E '^lib(stdc\+\+|gcc_s|gbm|xcb-glx|glib-2\.0|gio-2\.0|gobject-2\.0)\.'; then
+            echo "::error::these libraries must come from the host (see HOST_LIBS in lura.spec)"; exit 1
+          fi
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
@@ -168,9 +177,15 @@ jobs:
           path: screenshots/*
           if-no-files-found: ignore
 
+  # Install the Linux build on newer distros than the one it was built on and
+  # open the native dashboard there (#6). A release waits for it.
+  distros:
+    needs: build
+    uses: ./.github/workflows/distro-test.yml
+
   release:
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    needs: [version, build]
+    needs: [version, build, distros]
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.version.outputs.version }}
