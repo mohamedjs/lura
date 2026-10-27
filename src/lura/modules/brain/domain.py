@@ -9,6 +9,7 @@ replayed to a *different* provider falls back to the neutral fields.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterator, Protocol, Union
 
@@ -74,3 +75,45 @@ def missing_required(spec: ToolSpec | None, arguments: dict[str, Any]) -> list[s
         return []
     required = spec.parameters.get("required") or []
     return [name for name in required if name not in arguments]
+
+
+# ── which listed models can be the brain ────────────────────────────────────
+
+_NOT_A_BRAIN = re.compile(r"tts|embed|image|imagen|veo|whisper|transcri|moderation|dall-e|sora|"
+                          r"realtime|native-audio|live|aqa|search-preview|-instruct|babbage|davinci|"
+                          r"computer-use|guard|rerank|lyria|:batch$", re.I)
+
+
+def brain_candidate(provider: str, record: dict[str, Any]) -> dict[str, Any] | None:
+    """A provider's model listing → a picker entry, or None if it cannot think + act.
+
+    The brain must chat and call tools. OpenRouter says so per model
+    (``supported_parameters`` has "tools"); the others are filtered by name,
+    because their listings mix in speech, image and embedding models.
+    """
+    mid = str(record.get("id") or "").removeprefix("models/")
+    if not mid or _NOT_A_BRAIN.search(mid):
+        return None
+    if provider == "openrouter":
+        arch = record.get("architecture") or {}
+        if "tools" not in (record.get("supported_parameters") or []):
+            return None
+        if "text" not in (arch.get("output_modalities") or ["text"]):
+            return None
+        hears = "audio" in (arch.get("input_modalities") or [])
+    elif provider == "gemini":
+        if not mid.startswith("gemini"):
+            return None
+        hears = True
+    elif provider == "openai":
+        if not re.match(r"(gpt-|o\d|chatgpt-)", mid) or "audio" in mid:
+            return None
+        hears = False
+    elif provider == "anthropic":
+        if not mid.startswith("claude"):
+            return None
+        hears = False
+    else:
+        return None
+    name = record.get("display_name") or record.get("name") or mid
+    return {"id": mid, "name": str(name), "hears": hears}

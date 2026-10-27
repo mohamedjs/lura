@@ -39,6 +39,8 @@
         <ul class="problems" id="problems"></ul>
         <div class="row">
           <button class="btn ghost" id="stop-btn" data-i18n="hero.stop"></button>
+          <button class="btn primary" id="restart-btn" hidden><span class="spin" aria-hidden="true">↻</span><span data-i18n="restart.button"></span></button>
+          <span class="hint" id="restart-hint" hidden data-i18n="restart.hint"></span>
         </div>
       </div>
     </section>
@@ -61,13 +63,11 @@
       </label>
       <p class="hint" id="mode-hint"></p>
       <div id="brain-pipeline">
-        <label class="field"><span data-i18n="brain.provider"></span>
-          <select id="brain-provider"></select>
-        </label>
-        <label class="field"><span data-i18n="brain.model"></span>
-          <input id="brain-model" list="model-list" autocomplete="off" spellcheck="false">
-          <datalist id="model-list"></datalist>
-        </label>
+        <div class="field"><span data-i18n="brain.model_pick"></span>
+          <div class="current-model" id="current-model"></div>
+          <input id="model-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="brain.search">
+          <div class="model-list" id="model-list" role="listbox"></div>
+        </div>
         <label class="field"><span data-i18n="brain.effort"></span>
           <select id="effort">
             <option value="minimal" data-i18n="effort.minimal"></option>

@@ -33,6 +33,21 @@ def url_file() -> Path:
     return paths.config_dir() / "dashboard.url"
 
 
+def _stable_token() -> str:
+    """One token per install, kept private: an open dashboard window keeps
+    working across a restart of Lura instead of being locked out."""
+    path = paths.config_dir() / "dashboard.token"
+    try:
+        token = path.read_text().strip()
+        if len(token) >= 24:
+            return token
+    except OSError:
+        pass
+    token = secrets.token_urlsafe(24)
+    paths.write_private(path, token + "\n")
+    return token
+
+
 class ApiError(Exception):
     def __init__(self, status: int, message: str, **extra: Any):
         super().__init__(message)
@@ -43,7 +58,7 @@ class DashboardServer:
     def __init__(self, api, port: int):
         self._api = api
         self.port = port
-        self.token = secrets.token_urlsafe(24)
+        self.token = _stable_token()
         self._routes: list[tuple[str, re.Pattern, Route]] = []
         self._httpd: ThreadingHTTPServer | None = None
         api.register(self)

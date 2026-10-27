@@ -86,6 +86,14 @@ def cmd_run(args) -> int:
     if hasattr(signal, "SIGTERM"):
         signal.signal(signal.SIGTERM, on_signal)
 
+    restart = threading.Event()
+
+    def on_restart(_payload):
+        log.info("Restart requested from the dashboard.")
+        restart.set()
+        stop.set()
+
+    c.bus.subscribe(events.RESTART_REQUESTED, on_restart)
     c.connectors.start_all()
 
     def keep_licence_fresh():
@@ -116,8 +124,36 @@ def cmd_run(args) -> int:
         worker.join(timeout=5)
         c.connectors.stop_all()
         server.stop()
+    if restart.is_set():
+        return _restart_self()
     log.info("Stopped.")
     return 0
+
+
+#: EX_TEMPFAIL. Under systemd the unit's Restart=on-failure brings Lura back.
+EXIT_RESTART = 75
+
+
+def _restart_self() -> int:
+    """Start again with fresh settings, however Lura was started."""
+    import os
+    import subprocess
+
+    from .shared.desktop import launch_command
+    from .shared.platform import IS_WINDOWS
+
+    if os.environ.get("INVOCATION_ID"):   # running as a systemd service
+        log.info("Restarting through systemd.")
+        return EXIT_RESTART
+    argv = [*launch_command(), "--no-browser"]
+    log.info("Restarting: %s", " ".join(argv))
+    if IS_WINDOWS:
+        # No exec on Windows: start the new Lura detached, then leave.
+        subprocess.Popen(argv, creationflags=0x00000008 | 0x00000200, close_fds=True)
+        return 0
+    logging.shutdown()
+    os.execv(argv[0], argv)
+    return 0   # not reached
 
 
 # ── dashboard ───────────────────────────────────────────────────────────────
@@ -131,7 +167,8 @@ def cmd_dashboard(args) -> int:
         return 0
     c = _container()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
-                                          c.bus, lambda: "offline"), c.settings.current.dashboard_port)
+                                          c.bus, lambda: "offline", can_restart=False),
+                             c.settings.current.dashboard_port)
     server.start()
     log.info("Lura is not running; this dashboard is standalone until its window closes.")
     try:

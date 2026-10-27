@@ -35,6 +35,13 @@ if [ "$(uname)" = "Darwin" ]; then
   screencapture -x "$SHOTS/macos-desktop-face.png" || echo "screencapture not permitted on this runner"
 else
   import -window root "$SHOTS/linux-desktop-face.png"
+  # The settings as a native Qt window, the way the menu entry opens them.
+  # Xvfb has no GPU; a real desktop does not need this flag.
+  QTWEBENGINE_CHROMIUM_FLAGS="--disable-gpu" "$APP/LuraApp" dashboard & WPID=$!
+  sleep 15
+  xwininfo -root -tree | grep '"Lura"' | head -3 || echo "no Lura window found"
+  import -window root "$SHOTS/linux-desktop-dashboard.png"
+  kill "$WPID" || true
 fi
 ( cd "$RUNNER_TEMP" && npm init -y >/dev/null && npm install --silent playwright@1.56.1 >/dev/null \
   && npx --yes playwright@1.56.1 install --with-deps chromium >/dev/null \

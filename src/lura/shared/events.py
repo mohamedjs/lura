@@ -24,6 +24,7 @@ PLAN_CHANGED = "plan.changed"
 TALK_REQUESTED = "assistant.talk"
 STOP_REQUESTED = "assistant.stop"
 STATUS = "assistant.status"
+RESTART_REQUESTED = "app.restart"
 
 
 class EventBus:

@@ -193,3 +193,19 @@ details summary h3::after { content: " ▾"; font-size: .7em; color: var(--muted
 .toast.bad { border-color: var(--bad); }
 @keyframes pop { from { transform: translateY(10px); opacity: 0; } }
 [hidden] { display: none !important; }
+
+/* Model picker */
+.current-model { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 14px; box-shadow: var(--raise-sm); margin-bottom: 10px; flex-wrap: wrap; }
+.current-model b { font-weight: 400; color: var(--indigo); word-break: break-all; }
+.current-model small { color: var(--muted); }
+.model-list { margin-top: 10px; max-height: 290px; overflow: auto; border-radius: 14px; box-shadow: var(--inset); padding: 6px; }
+.model-group { position: sticky; top: -6px; z-index: 1; background: var(--bg); color: var(--muted); font-size: .82em; padding: 6px 10px 4px; display: flex; justify-content: space-between; }
+.model { display: flex; align-items: center; gap: 8px; width: 100%; text-align: start; font: inherit; font-size: .9em; color: var(--ink); background: transparent; border: 0; border-radius: 10px; padding: 6px 10px; cursor: pointer; }
+.model:hover { background: var(--line-strong); }
+.model.on { box-shadow: var(--raise-sm); color: var(--indigo); }
+.model .mid { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: ltr; text-align: start; }
+.model .ear { font-size: .78em; color: var(--teal); white-space: nowrap; }
+.model-empty { color: var(--muted); padding: 10px; font-size: .9em; }
+#restart-btn .spin { display: inline-block; }
+#restart-btn.busy .spin { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
