@@ -162,3 +162,9 @@ promo copy, and don't show the GitHub repo link in videos.
   `.git/*.lock` / `tmp_obj_*` behind and plain `git checkout` can't replace files.
   Clean stale locks after any git write.
 - Pushing over SSH only works from his machine (`git push origin main`).
+
+## Gemini TTS for voice-overs
+
+Lura's stored Gemini key (`~/.config/lura/keys.json` → `"gemini"`) is also the key used to generate
+voice-overs with `gemini-3.8-flash-tts` (voice `Mako`). The full reference script and transcript format
+live in `/var/www/html/old/mindspace/CLAUDE.md` → "Voice-over generation (Gemini TTS)".

@@ -430,11 +430,14 @@ def _build_monitor_window(monitor, shared: OverlayState):
         win.set_visual(visual)
 
     # Position in top-right corner of this monitor's work area
-    wa = monitor.get_workarea()
-    scale = monitor.get_scale_factor()
-    x = wa.x + (wa.width // scale) - OVERLAY_SIZE - MARGIN_RIGHT
-    y = wa.y + MARGIN_TOP
+    # GDK geometry is already in logical px; the work area is only the
+    # primary monitor's on some X11 setups, so use the full geometry.
+    geo = monitor.get_geometry()
+    x = geo.x + geo.width - OVERLAY_SIZE - MARGIN_RIGHT
+    y = geo.y + MARGIN_TOP
     win.move(x, y)
+    # Some WMs drop the pre-map move on secondary monitors; repeat once mapped.
+    win.connect("map-event", lambda w, e: w.move(x, y))
 
     css_provider = Gtk.CssProvider()
     css = b"""
