@@ -1,17 +1,21 @@
 # CLAUDE.md — Lura
 
-Lura (لورا) is Mohamed's voice assistant for his Linux desktop. Say "Lura", hear a
-chime, talk; she answers out loud in Arabic or English and can act on the machine
-(open apps, run commands, system briefing, MCP tools). It runs as a
-`systemd --user` service from `/var/www/html/lura`. A floating, transparent
-overlay window shows an animated 3D face while she listens, thinks and speaks.
+Lura (لورا) is a voice-first desktop assistant: Linux (.deb), macOS (Homebrew cask)
+and Windows (installer .exe). Say "Lura", hear a chime, talk; she answers out loud in
+Arabic or English and can act on the machine (open apps/URLs, find files, run guarded
+commands, briefing, MCP connectors). Any of Gemini / OpenAI / Anthropic / OpenRouter
+can be the brain; the voice is always Gemini 3.8 Flash TTS (direct or via OpenRouter).
+A floating transparent hologram face shows on every monitor; a local dashboard
+(neumorphism + grid, handwritten fonts, AR/EN) configures everything. Free plan +
+Pro ($5/month, Lemon Squeezy licence) which unlocks custom connectors. On Mohamed's
+machine it runs as a `systemd --user` service from `/var/www/html/lura`.
 
 Repo: `git@github.com:mohamedjs/lura.git`, default branch `main`.
 
 **Read these too:** `AGENTS.md` (hard-won facts: auth, wake word, audio, service —
 read before changing code), `README.md` (install + reference), `USAGE.md`
 (day-to-day), `video/README.md` (promo video renderer). Where they disagree with
-this file, this file is newer — see "Stale docs" below.
+this file, this file is newer.
 
 ---
 
@@ -37,57 +41,57 @@ this file, this file is newer — see "Stale docs" below.
 
 ---
 
-## Layout
+## Layout (modular monolith — see docs/ARCHITECTURE.md)
 
 ```
 src/lura/
-  app.py         CLI (run, login, logout, config, models, selftest, say, briefing, mcp)
-  config.py      Settings dataclass → ~/.config/lura/settings.json; keys → keys.json (0600)
-  wake.py        offline wake word (Vosk), chime, utterance recorder  [no network]
-  live.py        provider "gemini": Gemini Live, full-duplex streaming audio + tools
-  openrouter.py  provider "openrouter": turn-based, audio straight into the chat model, TTS back
-  tools.py       built-in tools + command guard (check_command)
-  mcp_client.py  MCP client (stdio JSON-RPC), config ~/.config/lura/mcp.json
-  briefing.py    Arabic morning briefing (weather, CPU temp, RAM/load, ping, last GitHub commit)
-  overlay.py     GTK3 + cairo floating face (top-right, every monitor)
-  face_mp.py     MediaPipe canonical face mesh, 468 verts / 898 tris (used by overlay)
-  face_mesh.py   older 153-vertex mesh — no longer used by overlay.py
-test_command_guard.py   assert-based test for the destructive-command guard
-install.sh / lura.service   idempotent installer / systemd user unit
+  app.py, bootstrap.py, selftest.py   CLI · composition root (only place modules are wired) · selftest
+  shared/       paths, http (JSON+SSE), events bus, presence protocol, desktop autostart, errors, i18n/{en,ar}.json
+  modules/      each: domain.py (pure) · application.py · infrastructure/ · __init__ = public API
+    settings/   Settings, providers, voices, capability rules; settings.json + keys.json (0600)
+    brain/      OpenAI-compatible adapter (OpenAI, OpenRouter, Gemini) + Anthropic SDK adapter, streaming
+    voice/      SentenceChunker, Gemini TTS direct/OpenRouter, transcriber, audio, Vosk wake, Gemini Live
+    tools/      built-in tools + command guard (check_command), per-OS impl, briefing
+    connectors/ MCP stdio + Streamable HTTP, mcp.json, 3 built-ins (chrome, web, files), Pro rule
+    billing/    Free/Pro, Lemon Squeezy licence API (store.json filled at release)
+    assistant/  wake loop, PipelineConversation (streams brain → TTS), realtime, briefing
+    overlay/    face_mp.py mesh, render.py (cairo), gtk_backend (Linux source), qt_backend (+tray)
+    dashboard/  server.py (127.0.0.1 + token), api.py, static/ (index.html, app.css, app.js, fonts)
+tests/          run_all.py → architecture, command guard, domain, integration (mock servers), dashboard
+packaging/      pyinstaller spec, linux (deb, unit, .desktop), windows (Inno Setup), homebrew cask, icons
+.github/workflows/  ci.yml, release.yml (tag v* → .deb/.tar.gz, .app zips, Setup.exe, release, tap)
+install.sh      from-source install on Linux (venv + user service)
 video/          Node + Playwright promo-video renderer (separate from the app)
 ```
 
-Paths: config `~/.config/lura/`, data `~/.local/share/lura/` (Vosk model,
-`last_briefing` flag). Venv `.venv/` is an **editable install**
-(`pip install -e .`), so editing `src/` + restarting the service is enough.
+Paths (Linux, unchanged from 1.x): config `~/.config/lura/` (settings.json, keys.json,
+mcp.json, license.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
+last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
+is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (as of Oct 2026)
+## Current behaviour (2.0, Oct 2026)
 
-- **Default provider: `openrouter`** with `google/gemini-3.8-flash`
-  (`openrouter_provider_order` = google-vertex, google-ai-studio;
-  `openrouter_reasoning_effort` = minimal). No transcription step: the recorded
-  WAV goes to the chat model as `input_audio`.
-- **TTS:** `deepgram/flux-tts:free` (voice `flux-alexis-en`), fallback
-  `deepgram/aura-2` (`aura-2-thalia-en`). Fallback only on errors a different
-  model could survive — never on HTTP 400.
-- **`reply_language` = "English"** forces one reply language (the English TTS
-  voices read Arabic as noise). The rule is repeated at the end of the machine
-  context on purpose.
-- **Gemini Live** (`provider gemini`): `gemini-2.5-flash-native-audio-preview-12-2025`,
-  voice `Puck`; 16 kHz in / 24 kHz out; mic gated while speaking.
-- **Wake word `lura`**: not in the Vosk English vocabulary, so `wake.py` maps it
-  to `laura` and accepts both.
-- **Tools:** `run_command`, `open_application`, `list_applications`,
-  `get_system_briefing`, `end_session`, plus MCP. On OpenRouter, MCP schemas are
-  *not* sent every turn (~12k tokens, 2.7 s latency); the model pulls them in via
-  `find_tools` only when needed.
-- **Command guard** (`tools.check_command`): destructive commands (rm, overwrite,
-  `$(…)`, backticks, `${…}`…) are refused with a spoken explanation. Test:
-  `python3 test_command_guard.py` → `Command guard OK (22 blocked, 15 allowed)`.
-- **Briefing** runs once per boot, in Arabic; GitHub line uses the MCP server
-  named exactly `github` and searches `user:mohamedjs`.
+- **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
+  `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
+  `Puck` (male), `reasoning_effort` minimal, language `en`.
+- **Rule:** any provider thinks; hearing + speaking need a Gemini or OpenRouter key.
+  Gemini brains hear the WAV directly; Claude/GPT get a Gemini 3.8 Flash transcript.
+- **Streaming:** brain text streams into `SpeechPlayer` → first sentence synthesised
+  while the rest is written. TTS falls back to the Lite TTS model on retryable errors only.
+- **Anthropic:** official SDK, default `claude-opus-5-5`, `output_config.effort`,
+  `fallbacks: "default"`; turns replayed verbatim.
+- **Realtime:** Gemini Live `gemini-2.5-flash-native-audio-preview-12-2025`, mic gated.
+- **Connectors:** built-ins `chrome` (chrome-devtools-mcp), `web` (mcp-fetch-server),
+  `files` (server-filesystem ~) via `npx`; custom ones need Pro. Pipeline mode pulls MCP
+  schemas only via `find_tools`.
+- **Settings migration:** a 1.x settings.json (`provider`, `openrouter_model`, …) is
+  converted on load (`settings/domain.py: migrate_legacy`).
+- **Command guard** also blocks Windows/macOS destructive commands. Test:
+  `python3 tests/test_command_guard.py` → `command guard OK (29 blocked, 19 allowed)`.
+- **Briefing** once per boot, in the conversation language; GitHub line only if a
+  connector named `github` is connected (it is custom → needs Pro).
 
-## The overlay face (`overlay.py`)
+## The overlay face (`modules/overlay/`)
 
 - Look Mohamed approved: the promo video's face — MediaPipe mesh as **indigo
   wireframe over translucent lavender facets**, teal blinking eyes, teal lips and
@@ -98,39 +102,36 @@ Paths: config `~/.config/lura/`, data `~/.local/share/lura/` (Vosk model,
   renderer; brightened so it reads on dark *and* light wallpapers.
 - States via `StateBlender`: listening (calm, dimmer), thinking (more turn,
   faster band), speaking (jaw opens with `OverlayState.amplitude`, mouth glows).
-- `OVERLAY_SIZE = 260`, 30 fps (`GLib.timeout_add(33, …)`), one window per
-  monitor, draggable.
+- `OVERLAY_SIZE = 260`, 30 fps, one window per monitor, draggable, double-click opens
+  the dashboard. GTK backend when running from source on Linux; Qt (+ tray icon)
+  on macOS/Windows and in packaged builds.
 - Performance: ~9 ms draw + ~2 ms conversion per frame. Frames go to GdkPixbuf as
-  raw RGBA via `_surface_rgba()` (un-premultiply BGRA → RGBA). **Don't go back to
+  raw RGBA via `surface_rgba()` (Qt takes the cairo buffer directly) (un-premultiply BGRA → RGBA). **Don't go back to
   a PNG round-trip** — it cost ~15 ms/frame for this detailed mesh. Keep cairo
   calls batched by alpha bucket (`_bucket_stroke`) and iterate `.tolist()`, not
   numpy scalars.
-- Self-check (no display needed): `cd src && python3 -m lura.overlay` →
+- Self-check (no display needed): `cd src && python3 -m lura.modules.overlay` →
   `overlay self-check OK`.
 
 ## Verify before claiming it works
 
 ```bash
 .venv/bin/python -m compileall -q src/
-cd src && ../.venv/bin/python -m lura.overlay      # overlay self-check
-.venv/bin/python test_command_guard.py
-.venv/bin/lura selftest                           # devices, key, model, real API call
+.venv/bin/python tests/run_all.py                  # all checks, no keys/audio needed
+cd src && ../.venv/bin/python -m lura.modules.overlay
+.venv/bin/lura selftest                            # devices, keys, real brain + TTS call
 systemctl --user restart lura.service && journalctl --user -u lura -n 50
 ```
 
 State what you ran and what it printed; say plainly what wasn't verified
 (anything needing a real key, audio device or the desktop session).
 
-## Stale docs (fix when touching them)
+## Mohamed's existing install after upgrading to 2.0
 
-- `README.md` settings table still shows old defaults (`provider gemini`,
-  `openrouter_model google/gemini-2.5-flash`, `openrouter_stt_model`,
-  `gpt-4o-mini-tts`) and says MCP/tools don't work on OpenRouter. All outdated —
-  see "Current behaviour".
-- `AGENTS.md` says `lura` can't be a wake word (now mapped to `laura`) and that
-  the OpenRouter path transcribes via `/audio/transcriptions` (now audio goes
-  straight to the chat model). `openrouter_stt_model` remains in config but the
-  app path no longer uses it.
+His old unit (`ExecStart=/var/www/html/lura/.venv/bin/lura run`) keeps working; keys,
+settings (migrated), mcp.json and the Vosk model stay where they are. Re-run
+`./install.sh` once to get the new unit (`--no-browser`) and `anthropic`. His `github`
+MCP server is a custom connector → locked until Pro is activated.
 
 ## Git history worth knowing
 

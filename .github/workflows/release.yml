@@ -1,0 +1,188 @@
+# Builds Lura for Linux (.deb + tar.gz), macOS (.app zip, arm64 + Intel) and
+# Windows (installer .exe), publishes a GitHub Release, and updates the
+# Homebrew tap. Triggered by pushing a tag like v2.0.0.
+#
+# Optional configuration (Settings → Secrets and variables → Actions):
+#   vars.LS_STORE_ID, vars.LS_PRODUCT_ID, vars.CHECKOUT_URL  Lemon Squeezy store for Pro
+#   secrets.HOMEBREW_TAP_TOKEN  a token that can push to mohamedjs/homebrew-lura
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (without v), e.g. 2.0.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          V="${{ github.event.inputs.version }}"
+          [ -n "$V" ] || V="${GITHUB_REF_NAME#v}"
+          CODE=$(grep -oP '__version__ = "\K[^"]+' src/lura/__init__.py)
+          if [ "$V" != "$CODE" ]; then
+            echo "::error::Tag $V does not match __version__ $CODE in src/lura/__init__.py"; exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+      - run: sudo apt-get update && sudo apt-get install -y libportaudio2 libcairo2-dev pkg-config
+      - run: pip install -e ".[anthropic]" pycairo
+      - run: python tests/run_all.py && python -m lura.modules.overlay
+
+  build:
+    needs: [version, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, target: linux }
+          - { os: macos-15, target: macos-arm64 }
+          - { os: macos-15-intel, target: macos-x86_64 }
+          - { os: windows-latest, target: windows }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "${{ env.PYTHON_VERSION }}" }
+
+      - name: System libraries (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libportaudio2 libcairo2-dev pkg-config libxcb-cursor0
+      - name: System libraries (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cairo pkg-config
+
+      - name: Pro store configuration
+        shell: python
+        env:
+          LS_STORE_ID: ${{ vars.LS_STORE_ID }}
+          LS_PRODUCT_ID: ${{ vars.LS_PRODUCT_ID }}
+          CHECKOUT_URL: ${{ vars.CHECKOUT_URL }}
+        run: |
+          import json, os, pathlib
+          p = pathlib.Path("src/lura/modules/billing/store.json")
+          data = json.loads(p.read_text())
+          if os.environ.get("LS_STORE_ID"): data["store_id"] = int(os.environ["LS_STORE_ID"])
+          if os.environ.get("LS_PRODUCT_ID"): data["product_id"] = int(os.environ["LS_PRODUCT_ID"])
+          if os.environ.get("CHECKOUT_URL"): data["checkout_url"] = os.environ["CHECKOUT_URL"]
+          p.write_text(json.dumps(data, indent=2) + "\n")
+          print("store_id set" if data["store_id"] else "WARNING: no store_id — any Lemon Squeezy key unlocks Pro")
+
+      - name: Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[all]" pyinstaller pillow
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/pyinstaller/lura.spec
+
+      - name: Smoke test the build
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then dist/Lura.app/Contents/MacOS/lura --version
+          elif [ "$RUNNER_OS" = "Windows" ]; then dist/lura/lura.exe --version
+          else dist/lura/lura --version; fi
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          packaging/linux/build-deb.sh "$VERSION" amd64
+          tar -C dist -czf "dist/lura-$VERSION-linux-x86_64.tar.gz" lura
+          mkdir -p out && cp dist/*.deb dist/*.tar.gz out/
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ARCH="${{ matrix.target }}"; ARCH="${ARCH#macos-}"
+          mkdir -p out
+          ditto -c -k --keepParent dist/Lura.app "out/Lura-$VERSION-macos-$ARCH.zip"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:VERSION" packaging\windows\lura.iss
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item "dist\Lura-Setup-$env:VERSION.exe" out\
+          Compress-Archive -Path dist\lura\* -DestinationPath "out\lura-$env:VERSION-windows-x64-portable.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Lura ${{ env.VERSION }}
+          generate_release_notes: true
+          files: artifacts/*
+          body: |
+            ## Install
+            - **Ubuntu / Debian:** download `lura_${{ env.VERSION }}_amd64.deb`, then `sudo apt install ./lura_${{ env.VERSION }}_amd64.deb`
+            - **macOS:** `brew install --cask mohamedjs/lura/lura`
+            - **Windows:** run `Lura-Setup-${{ env.VERSION }}.exe`
+            - **Other Linux:** unpack `lura-${{ env.VERSION }}-linux-x86_64.tar.gz` and run `lura/LuraApp`
+
+            The built-in Chrome, web and files connectors need Node.js (npx).
+
+  homebrew:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - name: Update the tap
+        if: env.TAP_TOKEN != ''
+        run: |
+          ARM=$(sha256sum "artifacts/Lura-$VERSION-macos-arm64.zip" | cut -d' ' -f1)
+          X86=$(sha256sum "artifacts/Lura-$VERSION-macos-x86_64.zip" | cut -d' ' -f1)
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mohamedjs/homebrew-lura.git" tap
+          mkdir -p tap/Casks
+          sed -e "s/@VERSION@/$VERSION/" -e "s/@SHA_ARM64@/$ARM/" -e "s/@SHA_X86_64@/$X86/" \
+            packaging/homebrew/lura.rb.tmpl > tap/Casks/lura.rb
+          cd tap
+          git config user.name "lura-release"
+          git config user.email "release@users.noreply.github.com"
+          git add Casks/lura.rb
+          git commit -m "lura $VERSION" && git push
+      - name: No tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew cask was not updated."

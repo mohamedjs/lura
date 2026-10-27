@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lura</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="paper">
+  <header class="top">
+    <div class="brand">
+      <img src="favicon.svg" alt="" class="logo">
+      <div>
+        <h1>Lura</h1>
+        <p class="tagline" data-i18n="app.tagline"></p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text"></span></span>
+      <div class="seg small" id="ui-lang" role="group" aria-label="Interface language">
+        <button data-value="en">EN</button><button data-value="ar">ع</button>
+      </div>
+      <button class="icon-btn" id="theme-btn" aria-label="Theme">◐</button>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- Talk -->
+    <section class="card hero span-all">
+      <button class="talk" id="talk-btn" aria-label="Talk">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2Z"/></svg>
+      </button>
+      <div class="hero-text">
+        <h2 id="hero-title" data-i18n="hero.title"></h2>
+        <p id="hero-sub"></p>
+        <ul class="problems" id="problems"></ul>
+        <div class="row">
+          <button class="btn ghost" id="stop-btn" data-i18n="hero.stop"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Keys -->
+    <section class="card span-2" id="keys-card">
+      <h3 data-i18n="keys.title"></h3>
+      <p class="hint" data-i18n="keys.hint"></p>
+      <div id="keys"></div>
+    </section>
+
+    <!-- Brain -->
+    <section class="card">
+      <h3 data-i18n="brain.title"></h3>
+      <label class="field"><span data-i18n="brain.mode"></span>
+        <div class="seg" id="mode" role="group">
+          <button data-value="pipeline" data-i18n="brain.mode.pipeline"></button>
+          <button data-value="realtime" data-i18n="brain.mode.realtime"></button>
+        </div>
+      </label>
+      <p class="hint" id="mode-hint"></p>
+      <div id="brain-pipeline">
+        <label class="field"><span data-i18n="brain.provider"></span>
+          <select id="brain-provider"></select>
+        </label>
+        <label class="field"><span data-i18n="brain.model"></span>
+          <input id="brain-model" list="model-list" autocomplete="off" spellcheck="false">
+          <datalist id="model-list"></datalist>
+        </label>
+        <label class="field"><span data-i18n="brain.effort"></span>
+          <select id="effort">
+            <option value="minimal" data-i18n="effort.minimal"></option>
+            <option value="low" data-i18n="effort.low"></option>
+            <option value="medium" data-i18n="effort.medium"></option>
+            <option value="high" data-i18n="effort.high"></option>
+            <option value="" data-i18n="effort.default"></option>
+          </select>
+        </label>
+        <p class="hint" id="hearing-hint"></p>
+      </div>
+    </section>
+
+    <!-- Voice -->
+    <section class="card">
+      <h3 data-i18n="voice.title"></h3>
+      <label class="field"><span data-i18n="voice.provider"></span>
+        <select id="voice-provider">
+          <option value="auto" data-i18n="voice.provider.auto"></option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openrouter">OpenRouter</option>
+        </select>
+      </label>
+      <p class="hint" data-i18n="voice.model_hint"></p>
+      <label class="field"><span data-i18n="voice.gender"></span>
+        <div class="seg" id="gender" role="group">
+          <button data-value="female" data-i18n="voice.female"></button>
+          <button data-value="male" data-i18n="voice.male"></button>
+        </div>
+      </label>
+      <div class="voices" id="voices"></div>
+      <label class="field"><span data-i18n="voice.style"></span>
+        <input id="tts-style" data-i18n-placeholder="voice.style_placeholder">
+      </label>
+    </section>
+
+    <!-- Language & you -->
+    <section class="card">
+      <h3 data-i18n="lang.title"></h3>
+      <label class="field"><span data-i18n="lang.conversation"></span>
+        <div class="seg" id="conv-lang" role="group">
+          <button data-value="en">English</button><button data-value="ar">العربية</button>
+        </div>
+      </label>
+      <label class="field"><span data-i18n="lang.assistant_name"></span><input id="assistant-name"></label>
+      <label class="field"><span data-i18n="lang.user_name"></span><input id="user-name"></label>
+      <label class="field"><span data-i18n="lang.wake_word"></span><input id="wake-word" spellcheck="false"></label>
+      <p class="hint" data-i18n="lang.wake_hint"></p>
+    </section>
+
+    <!-- Plan -->
+    <section class="card" id="plan-card">
+      <h3 data-i18n="plan.title"></h3>
+      <div class="plans">
+        <div class="plan" id="plan-free">
+          <h4 data-i18n="plan.free"></h4>
+          <p class="price">$0</p>
+          <ul><li data-i18n="plan.f.voice"></li><li data-i18n="plan.f.providers"></li><li data-i18n="plan.f.builtin"></li></ul>
+        </div>
+        <div class="plan pro" id="plan-pro">
+          <h4>Pro</h4>
+          <p class="price">$5<small data-i18n="plan.per_month"></small></p>
+          <ul><li data-i18n="plan.f.everything"></li><li data-i18n="plan.f.custom"></li><li data-i18n="plan.f.support"></li></ul>
+        </div>
+      </div>
+      <div id="plan-free-actions">
+        <a class="btn primary block" id="checkout" target="_blank" rel="noopener" data-i18n="plan.subscribe"></a>
+        <label class="field"><span data-i18n="plan.license"></span>
+          <div class="inline"><input id="license-key" spellcheck="false" autocomplete="off" placeholder="XXXXXXXX-XXXX-…"><button class="btn" id="activate" data-i18n="plan.activate"></button></div>
+        </label>
+      </div>
+      <div id="plan-pro-actions" hidden>
+        <p class="hint" id="plan-pro-info"></p>
+        <div class="row">
+          <a class="btn ghost" id="manage" target="_blank" rel="noopener" data-i18n="plan.manage"></a>
+          <button class="btn ghost" id="deactivate" data-i18n="plan.deactivate"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Connectors -->
+    <section class="card span-all" id="connectors-card">
+      <h3 data-i18n="conn.title"></h3>
+      <p class="hint" data-i18n="conn.hint"></p>
+      <div id="connectors"></div>
+      <div class="add-connector" id="add-connector">
+        <div class="lock" id="conn-lock">
+          <p data-i18n="conn.pro_only"></p>
+          <a class="btn primary" href="#plan-card" data-i18n="conn.upgrade"></a>
+        </div>
+        <h4 data-i18n="conn.add"></h4>
+        <div class="seg" id="conn-kind" role="group">
+          <button data-value="url" data-i18n="conn.kind.url"></button>
+          <button data-value="json" data-i18n="conn.kind.json"></button>
+          <button data-value="command" data-i18n="conn.kind.command"></button>
+        </div>
+        <form id="conn-form" autocomplete="off">
+          <div data-kind="url command"><label class="field"><span data-i18n="conn.name"></span><input name="name" placeholder="github" spellcheck="false"></label></div>
+          <div data-kind="url"><label class="field"><span data-i18n="conn.url"></span><input name="url" placeholder="https://api.githubcopilot.com/mcp/" spellcheck="false"></label>
+            <label class="field"><span data-i18n="conn.token"></span><input name="token" type="password" placeholder="ghp_…"></label></div>
+          <div data-kind="command"><label class="field"><span data-i18n="conn.command"></span><input name="command" placeholder="npx -y @modelcontextprotocol/server-github" spellcheck="false"></label>
+            <label class="field"><span data-i18n="conn.env"></span><textarea name="env" rows="2" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=ghp_…" spellcheck="false"></textarea></label></div>
+          <div data-kind="json"><label class="field"><span data-i18n="conn.json"></span><textarea name="json" rows="7" spellcheck="false" placeholder='{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}}}}'></textarea></label></div>
+          <button class="btn primary" type="submit" data-i18n="conn.add_button"></button>
+        </form>
+        <p class="hint" data-i18n="conn.node_hint"></p>
+      </div>
+    </section>
+
+    <!-- Advanced -->
+    <section class="card span-all">
+      <details>
+        <summary><h3 data-i18n="adv.title"></h3></summary>
+        <div class="adv">
+          <label class="switch"><input type="checkbox" id="briefing"><span></span><b data-i18n="adv.briefing"></b></label>
+          <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
+          <label class="switch"><input type="checkbox" id="overlay"><span></span><b data-i18n="adv.overlay"></b></label>
+          <label class="field"><span data-i18n="adv.silence_ms"></span><input id="silence-ms" type="number" min="300" max="4000" step="50"></label>
+          <label class="field"><span data-i18n="adv.silence_factor"></span><input id="silence-factor" type="number" min="1.2" max="6" step="0.1"></label>
+          <label class="field"><span data-i18n="adv.input_device"></span><input id="input-device" data-i18n-placeholder="adv.default_device"></label>
+          <label class="field"><span data-i18n="adv.output_device"></span><input id="output-device" data-i18n-placeholder="adv.default_device"></label>
+        </div>
+        <p class="hint" id="config-path"></p>
+      </details>
+    </section>
+  </main>
+  <footer class="foot"><span id="version"></span></footer>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>

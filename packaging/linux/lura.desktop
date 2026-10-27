@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Lura
+GenericName=Voice assistant
+Comment=Talk to your computer in Arabic or English
+Exec=/opt/lura/LuraApp run
+Icon=lura
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=voice;assistant;ai;gemini;claude;
+StartupNotify=false
+Actions=Dashboard;
+
+[Desktop Action Dashboard]
+Name=Open dashboard
+Exec=/opt/lura/lura dashboard

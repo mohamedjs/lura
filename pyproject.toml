@@ -1,14 +1,24 @@
 [project]
 name = "lura"
-version = "1.0.0"
-description = "Wake-word voice assistant — Gemini Live or OpenRouter"
+version = "2.0.0"
+description = "Lura — a voice-first desktop assistant: Gemini, OpenAI, Claude or OpenRouter thinks, Gemini 3.8 speaks"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "Proprietary" }
 dependencies = [
-    "google-genai>=1.0.0",
+    "numpy>=1.26",
     "sounddevice>=0.4.6",
     "vosk>=0.3.45",
-    "numpy>=1.26",
 ]
+
+[project.optional-dependencies]
+# Claude as the brain.
+anthropic = ["anthropic>=2.3"]
+# Realtime mode (Gemini Live).
+live = ["google-genai>=1.0.0"]
+# The floating face and the tray icon on macOS/Windows (Linux can use system GTK instead).
+overlay = ["pycairo>=1.25", "PySide6>=6.7"]
+all = ["anthropic>=2.3", "google-genai>=1.0.0", "pycairo>=1.25", "PySide6>=6.7"]
 
 [project.scripts]
 lura = "lura.app:main"
@@ -19,3 +29,11 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+lura = [
+    "shared/i18n/*.json",
+    "modules/billing/store.json",
+    "modules/dashboard/static/*",
+    "modules/dashboard/static/fonts/*",
+]
