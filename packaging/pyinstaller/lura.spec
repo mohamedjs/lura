@@ -53,9 +53,11 @@ a = Analysis([str(Path(SPECPATH) / "entry.py")], pathex=[str(SRC)], binaries=bin
 # The set is the issue's list plus the bundled entries of AppImage's
 # excludelist (github.com/AppImage/pkg2appimage/blob/master/excludelist),
 # i.e. libraries every desktop has; build-deb.sh depends on each of them.
+# pcre2-8, selinux, mount and blkid are only there for glib: left bundled, the
+# host's glib would load 22.04's copies.
 HOST_LIBS = re.compile(
     r"^lib(stdc\+\+|gcc_s|gbm|xcb-glx|GL|GLX|EGL|OpenGL|drm|"
-    r"(glib|gio|gobject|gmodule|gthread)-2\.0|"
+    r"(glib|gio|gobject|gmodule|gthread)-2\.0|pcre2-8|selinux|mount|blkid|"
     r"X11|X11-xcb|asound|fontconfig|freetype|harfbuzz|fribidi|com_err|expat|gpg-error|"
     r"uuid|z|jack|gmp)\.so(\.|$)")
 if sys.platform.startswith("linux"):

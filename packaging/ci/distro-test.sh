@@ -70,7 +70,22 @@ sleep 2
 LOG="$SHOTS/dashboard-$ID.log"
 "$APP/LuraApp" dashboard >"$LOG" 2>&1 &
 PID=$!
-sleep 30
+# Poll: a cold Qt WebEngine can take a while to paint under Xvfb; a window
+# that is still blank after 75 s is a failure.
+lura_window() {
+  xwininfo -root -tree | awk '/"Lura"/ { split($0, g, /\)  /); split(g[2], s, /[x+]/); print s[1]*s[2], $1 }' \
+    | sort -rn | awk 'NR==1 {print $2}'
+}
+COLORS=0; SD=0; WID=""
+for _ in $(seq 15); do
+  sleep 5
+  kill -0 "$PID" 2>/dev/null || break
+  WID="$(lura_window)"
+  [ -n "$WID" ] || continue
+  import -window "$WID" "$SHOTS/dashboard-$ID.png" 2>/dev/null || continue
+  read -r COLORS SD < <(convert "$SHOTS/dashboard-$ID.png" -format '%k %[fx:standard_deviation]\n' info: 2>/dev/null)
+  [ "${COLORS:-0}" -ge 64 ] && break
+done
 if ! kill -0 "$PID" 2>/dev/null; then
   wait "$PID"; echo "FAIL: 'LuraApp dashboard' exited with code $?"; FAIL=1
 fi
@@ -78,17 +93,13 @@ BAD='Could not initialize GLX|DRI_Mesa|GBM: Failed|null texture|dumped core|dash
 if grep -Eq "$BAD" "$LOG"; then
   echo "FAIL: known window failures in the output:"; grep -E "$BAD" "$LOG" | sort | uniq -c | head; FAIL=1
 fi
-# The biggest top-level window titled "Lura" must show the page, not a blank.
-WID="$(xwininfo -root -tree | awk '/"Lura"/ { split($0, g, /\)  /); split(g[2], s, /[x+]/); print s[1]*s[2], $1 }' \
-       | sort -rn | awk 'NR==1 {print $2}')"
 import -window root "$SHOTS/desktop-$ID.png"
+# The biggest top-level window titled "Lura" must show the page, not a blank.
 if [ -z "$WID" ]; then
   echo "FAIL: no window titled Lura"; FAIL=1
 else
-  import -window "$WID" "$SHOTS/dashboard-$ID.png"
-  read -r COLORS SD < <(convert "$SHOTS/dashboard-$ID.png" -format '%k %[fx:standard_deviation]\n' info:)
   echo "window $WID: $COLORS colours, stddev $SD"
-  if [ "$COLORS" -lt 64 ] || awk "BEGIN { exit !($SD < 0.02) }"; then
+  if [ "${COLORS:-0}" -lt 64 ] || awk "BEGIN { exit !(${SD:-0} < 0.02) }"; then
     echo "FAIL: the dashboard window is blank"; FAIL=1
   fi
 fi
