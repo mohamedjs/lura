@@ -191,7 +191,8 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
-        with: { path: artifacts, merge-multiple: true, pattern: "[!s]*" }
+        # Packages only: not the screenshots-* / distro-* test output.
+        with: { path: artifacts, merge-multiple: true, pattern: "[!sd]*" }
       - run: cd artifacts && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
