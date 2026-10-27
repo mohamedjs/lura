@@ -18,6 +18,9 @@ from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, Set
 from ..voice import VoiceService
 from .server import ApiError
 
+#: Settings that apply the moment they change, so they never ask for a restart.
+LIVE = {"onboarded", "subtitles", "ui_language"}
+
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
 
@@ -39,7 +42,7 @@ class DashboardApi:
         # Changes are applied on the next conversation anyway, but a restart
         # makes sure (wake word, devices, the face) — the dashboard offers one.
         self.bus.subscribe(events.SETTINGS_CHANGED,
-                           lambda p: self._pending.extend(c for c in p.get("changed", []) if c != "onboarded"))
+                           lambda p: self._pending.extend(c for c in p.get("changed", []) if c not in LIVE))
         self.bus.subscribe(events.KEYS_CHANGED, lambda p: self._pending.append(f"key:{p.get('provider')}"))
 
     @property

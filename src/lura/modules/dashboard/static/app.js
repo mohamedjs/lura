@@ -405,6 +405,8 @@ function renderAdvanced() {
   bindCheck("#briefing", "briefing_on_boot");
   bindCheck("#start-login", "start_at_login");
   bindCheck("#overlay", "overlay_enabled");
+  bindCheck("#subtitles", "subtitles");
+  bindCheck("#subtitles-voice", "subtitles");
   bindText("#silence-ms", "silence_ms", Number);
   bindText("#silence-factor", "silence_factor", Number);
   bindText("#input-device", "input_device", (v) => v.trim() || null);

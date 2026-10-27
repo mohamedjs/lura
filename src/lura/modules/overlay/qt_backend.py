@@ -15,6 +15,7 @@ import logging
 import sys
 import threading
 
+from .captions import CAPTION_HEIGHT, CAPTION_WIDTH, caption_lines
 from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, render_surface
 from .state import OverlayState, StateBlender
 
@@ -66,20 +67,78 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Lura")
 
+    import html
+
+    SIDE = (CAPTION_WIDTH - OVERLAY_SIZE) // 2   # extra width each side while subtitles show
+
     class Face(QtWidgets.QWidget):
         def __init__(self, screen):
             super().__init__(None, QtCore.Qt.FramelessWindowHint | QtCore.Qt.WindowStaysOnTopHint
                              | QtCore.Qt.Tool | QtCore.Qt.WindowDoesNotAcceptFocus)
             self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
             self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating)
-            self.setFixedSize(OVERLAY_SIZE, OVERLAY_SIZE)
             geo = screen.geometry()
-            self.move(geo.x() + geo.width() - OVERLAY_SIZE - MARGIN_RIGHT, geo.y() + MARGIN_TOP)
+            #: Where the face itself sits; the window grows around it.
+            self._face_pos = QtCore.QPoint(geo.x() + geo.width() - OVERLAY_SIZE - MARGIN_RIGHT,
+                                           geo.y() + MARGIN_TOP)
+            self._wide = None
+            self._offset = 0
             self._blender = StateBlender()
             self._phase = 0.0
             self._image = None
             self._surface = None
             self._drag = None
+            self._caption_html = ""
+            self.label = QtWidgets.QLabel(self)
+            self.label.setWordWrap(True)
+            self.label.setAlignment(QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop)
+            self.label.setTextFormat(QtCore.Qt.RichText)
+            self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
+            self.label.setStyleSheet(
+                "QLabel { background: rgba(18, 20, 34, 190); color: #ffffff; border-radius: 14px;"
+                " padding: 8px 14px; font-size: 15px; }")
+            self._layout(False)
+
+        def _layout(self, wide: bool) -> None:
+            """Wide with subtitles, face-sized without, the face never moving."""
+            if wide == self._wide:
+                return
+            self._wide = wide
+            if wide:
+                # Centred under the face, but never past the screen's edges:
+                # the face sits top-right, so a centred strip would hang off.
+                area = (self.screen() or app.primaryScreen()).availableGeometry()
+                left = self._face_pos.x() - SIDE
+                left = max(area.left(), min(left, area.right() + 1 - CAPTION_WIDTH))
+                self._offset = self._face_pos.x() - left
+                self.setFixedSize(CAPTION_WIDTH, OVERLAY_SIZE + CAPTION_HEIGHT)
+                self.move(left, self._face_pos.y())
+                self.label.setGeometry(0, OVERLAY_SIZE - 36, CAPTION_WIDTH, CAPTION_HEIGHT)
+            else:
+                self._offset = 0
+                self.setFixedSize(OVERLAY_SIZE, OVERLAY_SIZE)
+                self.move(self._face_pos)
+            self.label.setVisible(wide)
+
+        def _captions(self) -> None:
+            lines = caption_lines(shared)
+            self._layout(lines is not None)
+            if lines is None:
+                return
+            you, lura = lines
+            parts = []
+            if you:
+                parts.append(f'<span style="color:#b9bdd6">{html.escape(labels.get("you", "You"))}: '
+                             f'{html.escape(you)}</span>')
+            if lura:
+                parts.append(f'<span style="color:#7fe3f0">{html.escape(labels.get("lura", "Lura"))}:</span> '
+                             f'{html.escape(lura)}')
+            text = "<br>".join(parts)
+            if text != self._caption_html:
+                self._caption_html = text
+                self.label.setText(text)
+                self.label.adjustSize()
+                self.label.setFixedWidth(CAPTION_WIDTH)
 
         def tick(self):
             b = self._blender
@@ -90,6 +149,7 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             self._image = QtGui.QImage(self._surface.get_data(), OVERLAY_SIZE, OVERLAY_SIZE,
                                        self._surface.get_stride(),
                                        QtGui.QImage.Format_ARGB32_Premultiplied)
+            self._captions()
             self.update()
 
         def paintEvent(self, _event):
@@ -98,16 +158,20 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             painter.fillRect(self.rect(), QtCore.Qt.transparent)
             if self._image is not None:
                 painter.setCompositionMode(QtGui.QPainter.CompositionMode_SourceOver)
-                painter.drawImage(0, 0, self._image)
+                painter.drawImage(self._offset, 0, self._image)
             painter.end()
 
         def mousePressEvent(self, event):
             if event.button() == QtCore.Qt.LeftButton:
                 self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            elif event.button() == QtCore.Qt.RightButton and (toggle := actions.get("subtitles")):
+                toggle()   # right-click: show / hide the subtitles
 
         def mouseMoveEvent(self, event):
             if self._drag is not None and event.buttons() & QtCore.Qt.LeftButton:
-                self.move(event.globalPosition().toPoint() - self._drag)
+                top_left = event.globalPosition().toPoint() - self._drag
+                self.move(top_left)
+                self._face_pos = top_left + QtCore.QPoint(self._offset, 0)
 
         def mouseReleaseEvent(self, _event):
             self._drag = None
@@ -131,6 +195,12 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
     for key in ("open", "talk"):
         if key in actions:
             menu.addAction(labels.get(key, key)).triggered.connect(lambda _=False, k=key: actions[k]())
+    if "subtitles" in actions:
+        subs = menu.addAction(labels.get("subtitles", "Subtitles"))
+        subs.setCheckable(True)
+        subs.setChecked(shared.subtitles_enabled)
+        subs.triggered.connect(lambda _=False: actions["subtitles"]())
+        menu.aboutToShow.connect(lambda: subs.setChecked(shared.subtitles_enabled))
     menu.addSeparator()
     menu.addAction(labels.get("quit", "Quit")).triggered.connect(lambda: stop.set())
     tray.setContextMenu(menu)

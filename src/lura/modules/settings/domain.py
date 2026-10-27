@@ -138,6 +138,8 @@ class Settings:
     briefing_on_boot: bool = True
     start_at_login: bool = True
     overlay_enabled: bool = True
+    #: What you said and what Lura answers, as subtitles under the face.
+    subtitles: bool = True
     dashboard_port: int = 47321
     onboarded: bool = False
 

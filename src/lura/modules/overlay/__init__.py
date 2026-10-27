@@ -57,6 +57,6 @@ class Overlay:
                 log.warning("Qt overlay failed — running headless.", exc_info=True)
         elif self.backend == "gtk" and self._enabled:
             from . import gtk_backend
-            gtk_backend.start(self.state, self._actions.get("open"))
+            gtk_backend.start(self.state, self._actions, self._labels)
         while not stop.wait(0.5):
             pass

@@ -42,6 +42,13 @@ def _logging(verbose: bool) -> None:
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
 
 
+def _overlay_labels(lang: str) -> dict:
+    from .shared.i18n import t
+    labels = {k: t(f"tray.{k}", lang) for k in ("open", "talk", "subtitles", "quit")}
+    labels.update(you=t("caption.you", lang), lura=t("caption.lura", lang))
+    return labels
+
+
 def _container(presence=None):
     from .bootstrap import build
     return build(presence)
@@ -73,10 +80,22 @@ def cmd_run(args) -> int:
         return 1
 
     from .shared import events
+    def toggle_subtitles():
+        c.settings.update({"subtitles": not c.settings.current.subtitles})
+
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
-                      actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED)},
-                      labels={k: t(f"tray.{k}", s.ui_language) for k in ("open", "talk", "quit")})
+                      actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
+                               "subtitles": toggle_subtitles},
+                      labels=_overlay_labels(s.ui_language))
     c.assistant.presence = overlay.state
+    overlay.state.subtitles_enabled = s.subtitles
+
+    def on_settings(payload):
+        # Applied live, no restart: the subtitles switch.
+        if "subtitles" in payload.get("changed", ()):
+            overlay.state.subtitles_enabled = c.settings.current.subtitles
+
+    c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
 
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)
@@ -268,7 +287,10 @@ def _talk(initial: bool) -> int:
     from .modules.overlay import Overlay
     from .shared.errors import NeedsSetup
 
-    overlay = Overlay(enabled=True)
+    from .modules.settings import SettingsService
+    lang = SettingsService().current
+    overlay = Overlay(enabled=True, labels=_overlay_labels(lang.ui_language))
+    overlay.state.subtitles_enabled = lang.subtitles
     c = _container(overlay.state)
     c.connectors.start_all()
     stop = threading.Event()
