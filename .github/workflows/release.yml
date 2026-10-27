@@ -2,7 +2,8 @@
 # Windows (installer .exe), installs and runs each build on its runner and
 # takes screenshots. On a tag like v2.0.0 it also publishes a GitHub Release
 # and updates the Homebrew tap; on claude/** branches the builds are only
-# downloadable artifacts of the run.
+# downloadable artifacts of the run. A manual run (workflow_dispatch with a
+# version) publishes the release too, creating the tag on the built commit.
 #
 # Optional configuration (Settings → Secrets and variables → Actions):
 #   vars.LS_STORE_ID, vars.LS_PRODUCT_ID, vars.CHECKOUT_URL  Lemon Squeezy store for Pro
@@ -166,7 +167,7 @@ jobs:
           if-no-files-found: ignore
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: [version, build]
     runs-on: ubuntu-latest
     env:
@@ -178,6 +179,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
+          # A manual run creates the tag here, on the commit it built.
+          target_commitish: ${{ github.sha }}
           name: Lura ${{ env.VERSION }}
           generate_release_notes: true
           files: artifacts/*
@@ -191,7 +194,7 @@ jobs:
             The built-in Chrome, web and files connectors need Node.js (npx).
 
   homebrew:
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     needs: [version, release]
     runs-on: ubuntu-latest
     env:
