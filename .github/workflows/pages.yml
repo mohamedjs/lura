@@ -28,12 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Tools
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Render the intro videos
         working-directory: video
         run: |
           npm ci --no-audit --no-fund
+          # A static ffmpeg from npm: apt mirrors on the runners can stall for minutes.
+          npm install --no-save --no-audit --no-fund ffmpeg-static@5
+          echo "$(dirname "$(node -p "require('ffmpeg-static')")")" >> "$GITHUB_PATH"
+          export PATH="$(dirname "$(node -p "require('ffmpeg-static')")"):$PATH"
+          ffmpeg -version | head -1
           npx playwright install --with-deps chromium
           node intro.mjs --lang en
           node intro.mjs --lang ar
