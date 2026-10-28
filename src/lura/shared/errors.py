@@ -15,5 +15,4 @@ class NeedsSetup(LuraError):
     """
 
 
-class ProRequired(LuraError):
-    """The action needs the Pro plan."""
+

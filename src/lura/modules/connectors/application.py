@@ -9,10 +9,9 @@ import threading
 from typing import Any, Callable
 
 from ...shared import events
-from ...shared.errors import ProRequired
 from ...shared.events import EventBus
 from ..brain import ToolSpec
-from .domain import HTTP, Connector, may_add, parse_mcp_json, tool_name
+from .domain import HTTP, Connector, parse_mcp_json, tool_name
 from .infrastructure.repository import McpJsonRepository
 
 log = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ class _Running:
         self.connector = connector
         self.client = None
         self.tools: list[dict] = []
-        self.status = "starting"     # starting | ready | error | stopped | locked
+        self.status = "starting"     # starting | ready | error | stopped
         self.error = ""
         self.lock = threading.Lock()
 
@@ -31,9 +30,7 @@ class _Running:
 class ConnectorService:
     """Implements the tools module's ``ConnectorTools`` port."""
 
-    def __init__(self, is_pro: Callable[[], bool], repo: McpJsonRepository | None = None,
-                 bus: EventBus | None = None):
-        self._is_pro = is_pro
+    def __init__(self, repo: McpJsonRepository | None = None, bus: EventBus | None = None):
         self._repo = repo or McpJsonRepository()
         self._bus = bus
         self._connectors = self._repo.load()
@@ -44,11 +41,9 @@ class ConnectorService:
     # ── management ──
     def list(self) -> list[dict[str, Any]]:
         out = []
-        pro = self._is_pro()
         for c in self._connectors:
             run = self._running.get(c.name)
-            status = "locked" if not may_add(c, pro) else run.status if run else (
-                "disabled" if not c.enabled else "stopped")
+            status = run.status if run else ("disabled" if not c.enabled else "stopped")
             out.append({**c.public(), "status": status, "error": run.error if run else "",
                         "tools": [t["name"] for t in run.tools] if run else []})
         return out
@@ -64,8 +59,6 @@ class ConnectorService:
     def add(self, connector: Connector, replace: bool = False) -> Connector:
         connector.builtin = False
         connector.validate()
-        if not may_add(connector, self._is_pro()):
-            raise ProRequired("Adding connectors is part of Lura Pro.")
         with self._lock:
             existing = self.get(connector.name)
             if existing and (existing.builtin or not replace):
@@ -95,8 +88,6 @@ class ConnectorService:
 
     def import_json(self, text: str) -> list[str]:
         parsed = parse_mcp_json(text)
-        if not self._is_pro():
-            raise ProRequired("Adding connectors is part of Lura Pro.")
         added = []
         for connector in parsed:
             self.add(connector, replace=True)
@@ -120,8 +111,6 @@ class ConnectorService:
             connector = self.get(name)
             if connector is None:
                 raise KeyError(name)
-            if enabled and not may_add(connector, self._is_pro()):
-                raise ProRequired("This connector needs Lura Pro.")
             connector.enabled = enabled
             self._changed()
         if enabled:
@@ -131,24 +120,15 @@ class ConnectorService:
 
     # ── lifecycle ──
     def start_all(self) -> None:
-        """Start every enabled connector the plan allows, each in the background:
+        """Start every enabled connector, each in the background:
         a first `npx -y` download must not hold up the wake word."""
         for connector in self._connectors:
             if connector.enabled:
                 self.start_one(connector.name)
 
-    def refresh_plan(self) -> None:
-        """After the plan changes: stop what is no longer allowed, start what is."""
-        pro = self._is_pro()
-        for connector in self._connectors:
-            if not may_add(connector, pro):
-                self._stop(connector.name)
-            elif connector.enabled and connector.name not in self._running:
-                self.start_one(connector.name)
-
     def start_one(self, name: str) -> None:
         connector = self.get(name)
-        if connector is None or not connector.enabled or not may_add(connector, self._is_pro()):
+        if connector is None or not connector.enabled:
             return
         self._stop(name)
         run = _Running(connector)

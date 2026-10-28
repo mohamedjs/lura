@@ -1,7 +1,0 @@
-{
-  "_comment": "Fill these from your Lemon Squeezy dashboard before a release (the release workflow can write them from repository variables). With store_id/product_id null, any Lemon Squeezy key is accepted — fine for development, not for production.",
-  "store_id": null,
-  "product_id": null,
-  "checkout_url": "https://lura.lemonsqueezy.com/checkout",
-  "manage_url": "https://app.lemonsqueezy.com/my-orders"
-}

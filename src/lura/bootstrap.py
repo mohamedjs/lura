@@ -11,7 +11,6 @@ import logging
 from dataclasses import dataclass
 
 from .modules.assistant import Assistant
-from .modules.billing import BillingService
 from .modules.brain import BrainService
 from .modules.connectors import ConnectorService
 from .modules.memory import MemoryService
@@ -30,7 +29,6 @@ log = logging.getLogger(__name__)
 class Container:
     bus: EventBus
     settings: SettingsService
-    billing: BillingService
     connectors: ConnectorService
     tools: ToolService
     brain: BrainService
@@ -43,8 +41,7 @@ class Container:
 def build(presence: Presence | None = None) -> Container:
     bus = EventBus()
     settings = SettingsService(bus=bus)
-    billing = BillingService(bus=bus)
-    connectors = ConnectorService(billing.is_pro, bus=bus)
+    connectors = ConnectorService(bus=bus)
     tools = ToolService(connectors, language=lambda: settings.current.language)
     brain = BrainService(settings.key)
     voice = VoiceService(settings.key, settings.has_key)
@@ -58,11 +55,9 @@ def build(presence: Presence | None = None) -> Container:
     assistant = Assistant(settings, brain, voice, tools, bus, presence, memory=memory,
                           extra_prompt=skills.prompt_block)
 
-    bus.subscribe(events.PLAN_CHANGED, lambda _: connectors.refresh_plan())
-
     def on_settings(payload: dict) -> None:
         if "start_at_login" in payload.get("changed", ()):
             desktop.apply_autostart(settings.current.start_at_login)
 
     bus.subscribe(events.SETTINGS_CHANGED, on_settings)
-    return Container(bus, settings, billing, connectors, tools, brain, voice, memory, skills, assistant)
+    return Container(bus, settings, connectors, tools, brain, voice, memory, skills, assistant)

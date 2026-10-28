@@ -3,12 +3,10 @@
 import _setup  # noqa: F401
 import json
 import sys
-import time
 
 from lura.modules.assistant import fit_history, system_prompt
-from lura.modules.billing import License, entitled
 from lura.modules.brain import Message
-from lura.modules.connectors import Connector, may_add, parse_mcp_json, tool_name
+from lura.modules.connectors import Connector, parse_mcp_json, tool_name
 from lura.modules.settings import Settings, brain_hears_audio
 from lura.modules.settings.domain import apply_patch, capabilities, migrate_legacy
 from lura.modules.voice import SentenceChunker, speakable
@@ -121,22 +119,8 @@ def check_connectors():
             pass
     vscode = parse_mcp_json('{"servers": {"s": {"type": "stdio", "command": "npx", "args": ["x"]}}}')
     assert vscode[0].command == "npx"
-    assert may_add(Connector("chrome", builtin=True), is_pro=False)
-    assert not may_add(Connector("github"), is_pro=False)
-    assert may_add(Connector("github"), is_pro=True)
     assert tool_name("chrome-devtools", "new_page") == "mcp_chrome_devtools_new_page"
     assert len(tool_name("x" * 40, "y" * 40)) == 64
-
-
-def check_billing():
-    now = time.time()
-    lic = License(key="k", instance_id="i", status="active", last_validated=now)
-    assert entitled(lic, now)
-    assert entitled(lic, now + 6 * 86400), "offline grace"
-    assert not entitled(lic, now + 8 * 86400), "grace ends"
-    lic.status = "expired"
-    assert not entitled(lic, now)
-    assert not entitled(License(), now)
 
 
 def check_assistant_rules():

@@ -252,18 +252,9 @@ def wait_ready(svc, name, timeout=20):
 
 def check_connectors():
     from lura.modules.connectors import ConnectorService
-    from lura.shared.errors import ProRequired
-
-    pro = [False]
-    svc = ConnectorService(lambda: pro[0])
+    svc = ConnectorService()
     names = [c["name"] for c in svc.list()]
     assert names[:3] == ["chrome", "web", "files"], names
-    try:
-        svc.add_command("echo", f"{sys.executable} tests/fixtures/echo_mcp.py")
-        raise AssertionError("free plan added a connector")
-    except ProRequired:
-        pass
-    pro[0] = True
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "echo_mcp.py")
     svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")
@@ -276,13 +267,12 @@ def check_connectors():
     assert list(saved["mcpServers"]) == ["echo"] and saved["mcpServers"]["echo"]["command"] == sys.executable
     if os.name != "nt":   # Windows has no Unix modes; the profile folder is private instead
         assert oct(svc.config_path.stat().st_mode)[-3:] == "600"
-    # Losing Pro stops custom connectors but keeps them configured.
-    pro[0] = False
-    svc.refresh_plan()
-    assert next(c for c in svc.list() if c["name"] == "echo")["status"] == "locked"
+    # Switched off: stopped, but kept configured.
+    svc.set_enabled("echo", False)
+    assert next(c for c in svc.list() if c["name"] == "echo")["status"] == "disabled"
     assert not svc.owns("mcp_echo_echo_text")
     svc.set_enabled("chrome", False)
-    assert ConnectorService(lambda: False).get("chrome").enabled is False
+    assert ConnectorService().get("chrome").enabled is False
     svc.stop_all()
 
     # Streamable HTTP with a bearer token and a session id.
@@ -313,8 +303,7 @@ def check_connectors():
         h.wfile.write(out)
 
     httpd, url = serve(mcp_http)
-    pro[0] = True
-    svc = ConnectorService(lambda: pro[0])
+    svc = ConnectorService()
     svc.add(__import__("lura.modules.connectors", fromlist=["Connector"]).Connector(
         "tracker", "http", url="http://127.0.0.1:" + url.rsplit(":", 1)[1] + "/mcp", token="tok"))
     row = wait_ready(svc, "tracker")

@@ -98,7 +98,6 @@ def run(c) -> int:
         ok("npx found (built-in connectors can start)")
     else:
         bad("npx not found — install Node.js for the Chrome, web and files connectors")
-    print(f"plan: {c.billing.plan()['plan']}")
 
     print("\n" + ("All good." if not failures else f"{failures} problem(s) above."))
     return 1 if failures else 0

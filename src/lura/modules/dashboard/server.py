@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ...shared import paths
-from ...shared.errors import NeedsSetup, ProRequired
+from ...shared.errors import NeedsSetup
 from ...shared.http import HttpError
 
 log = logging.getLogger(__name__)
@@ -133,8 +133,6 @@ class DashboardServer:
                             return self._json(200, handler(body, match))
                         except ApiError as exc:
                             return self._json(exc.status, {"error": str(exc), **exc.extra})
-                        except ProRequired as exc:
-                            return self._json(402, {"error": str(exc), "pro_required": True})
                         except (ValueError, KeyError, HttpError, NeedsSetup) as exc:
                             msg = str(exc) if not isinstance(exc, KeyError) else f"unknown: {exc.args[0]}"
                             return self._json(400, {"error": msg})

@@ -11,7 +11,7 @@ There is no OAuth "sign in with…" connector flow. That needs a hosted
 redirect endpoint and per-vendor app registrations; a token the user pastes
 needs neither.
 
-Three connectors ship with the app and are free. Adding any other is Pro.
+Three connectors ship with the app; any other MCP server can be added.
 """
 
 from __future__ import annotations
@@ -95,11 +95,6 @@ def builtin_connectors(home: Path | None = None) -> list[Connector]:
 
 
 BUILTIN_NAMES = frozenset(c.name for c in builtin_connectors(Path("~")))
-
-
-def may_add(connector: Connector, is_pro: bool) -> bool:
-    """The plan rule, in one place: the built-ins are free; the rest is Pro."""
-    return connector.builtin or is_pro
 
 
 def from_entry(name: str, entry: dict[str, Any]) -> Connector:

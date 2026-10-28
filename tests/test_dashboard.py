@@ -20,7 +20,7 @@ def start():
     from lura.modules.dashboard import DashboardApi, DashboardServer
 
     c = build()
-    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
+    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: "ready", c.memory, c.skills), free_port())
     server.start()
     return c, server
@@ -60,7 +60,7 @@ def main() -> int:
 
         status, state, _ = call(server, "GET", "/api/state")
         assert status == 200 and state["capabilities"]["can_talk"] is False
-        assert set(state["i18n"]) == {"en", "ar"} and state["plan"]["plan"] == "free"
+        assert set(state["i18n"]) == {"en", "ar"} and "plan" not in state
         assert [x["name"] for x in state["connectors"]][:3] == ["chrome", "web", "files"]
 
         status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"language": "ar", "voice_gender": "male"}})
@@ -76,9 +76,11 @@ def main() -> int:
         status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"assistant_name": "Zzqx"}})
         assert res["settings"]["wake_word"] == "nour" and "nour" in res["notes"][0], "kept, and said so"
 
+        # Open source: anyone can add a connector (this one points nowhere, so nothing is reached).
         status, res, _ = call(server, "POST", "/api/connectors",
-                              {"kind": "url", "name": "github", "url": "https://api.githubcopilot.com/mcp/", "token": "x"})
-        assert status == 402 and res["pro_required"]
+                              {"kind": "url", "name": "mine", "url": "http://127.0.0.1:9/mcp", "token": "x"})
+        assert status == 200 and res["added"] == ["mine"], res
+        assert call(server, "DELETE", "/api/connectors/mine")[0] == 200
         assert call(server, "PUT", "/api/keys/gemini", {"key": ""})[0] == 400
         assert call(server, "PUT", "/api/keys/nobody", {"key": "x"})[0] == 404
         assert call(server, "GET", "/api/nothing")[0] == 404

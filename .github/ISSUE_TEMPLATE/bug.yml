@@ -1,0 +1,23 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lura version and OS
+      placeholder: "2.2.0 on Ubuntu 24.04 / macOS 15 / Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: The end of the log
+      description: "Linux: journalctl --user -u lura -n 200. Never paste API keys."
+      render: text

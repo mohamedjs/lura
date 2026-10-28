@@ -20,7 +20,6 @@ Handler = Callable[[dict[str, Any]], None]
 SETTINGS_CHANGED = "settings.changed"
 KEYS_CHANGED = "keys.changed"
 CONNECTORS_CHANGED = "connectors.changed"
-PLAN_CHANGED = "plan.changed"
 TALK_REQUESTED = "assistant.talk"
 STOP_REQUESTED = "assistant.stop"
 STATUS = "assistant.status"

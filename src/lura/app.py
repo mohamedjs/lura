@@ -71,7 +71,7 @@ def cmd_run(args) -> int:
     c = _container()
     s = c.settings.current
     stop = threading.Event()
-    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
+    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: c.assistant.status, c.memory, c.skills), s.dashboard_port)
     try:
         server.start()
@@ -120,13 +120,6 @@ def cmd_run(args) -> int:
 
     c.bus.subscribe(events.RESTART_REQUESTED, on_restart)
     c.connectors.start_all()
-
-    def keep_licence_fresh():
-        c.billing.revalidate()
-        while not stop.wait(3600):
-            c.billing.revalidate()
-
-    threading.Thread(target=keep_licence_fresh, daemon=True, name="licence").start()
 
     # First run, or nothing works yet: the dashboard is where that gets fixed.
     if not s.onboarded or not c.settings.capabilities().can_talk:
@@ -213,7 +206,7 @@ def cmd_dashboard(args) -> int:
         run_window(url)
         return 0
     c = _container()
-    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
+    server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: "offline", c.memory, c.skills, can_restart=False),
                              c.settings.current.dashboard_port)
     server.start()
@@ -354,11 +347,9 @@ def cmd_briefing(args) -> int:
     return _talk(initial=True)
 
 
-# ── connectors, plan, autostart ─────────────────────────────────────────────
+# ── connectors, autostart ─────────────────────────────────────────────
 
 def cmd_mcp(args) -> int:
-    from .shared.errors import ProRequired
-
     c = _container()
     try:
         if args.action == "add-url":
@@ -373,7 +364,7 @@ def cmd_mcp(args) -> int:
         elif args.action == "path":
             print(c.connectors.config_path)
             return 0
-    except (ProRequired, ValueError, KeyError, OSError) as exc:
+    except (ValueError, KeyError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 1
     if args.action != "list":
@@ -387,27 +378,6 @@ def cmd_mcp(args) -> int:
         print(f"  {x['name']:12} {x['status']:9} {len(x['tools']):3} tools  "
               f"{'(built-in) ' if x['builtin'] else ''}{x['error']}")
     c.connectors.stop_all()
-    return 0
-
-
-def cmd_pro(args) -> int:
-    from .modules.billing import LicenseError
-    from .shared.http import HttpError
-
-    c = _container()
-    try:
-        if args.action == "activate":
-            c.billing.activate(args.key or getpass.getpass("Licence key: "))
-        elif args.action == "deactivate":
-            c.billing.deactivate()
-        elif args.action == "refresh":
-            c.billing.revalidate(force=True)
-    except (LicenseError, HttpError) as exc:
-        print(exc, file=sys.stderr)
-        return 1
-    plan = c.billing.plan()
-    print(f"plan: {plan['plan']}  status: {plan['status'] or '-'}  {plan['email']}\n"
-          f"subscribe: {plan['checkout_url']}")
     return 0
 
 
@@ -467,9 +437,6 @@ def main(argv=None) -> int:
                      choices=["list", "add-url", "import", "remove", "on", "off", "path"])
     mcp.add_argument("name", nargs="?", help="connector name (or the mcp.json path for import)")
     mcp.add_argument("target", nargs="?", help="URL for add-url")
-    pro = subs.add_parser("pro", help="plan: status, activate, deactivate, refresh")
-    pro.add_argument("action", nargs="?", default="status", choices=["status", "activate", "deactivate", "refresh"])
-    pro.add_argument("key", nargs="?")
     auto = subs.add_parser("autostart", help="start Lura at login: on or off")
     auto.add_argument("state", choices=["on", "off"])
 
@@ -482,7 +449,7 @@ def main(argv=None) -> int:
     handlers = {
         "run": cmd_run, "dashboard": cmd_dashboard, "window": cmd_window, "login": cmd_login, "logout": cmd_logout,
         "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest, "say": cmd_say,
-        "briefing": cmd_briefing, "mcp": cmd_mcp, "pro": cmd_pro, "autostart": cmd_autostart,
+        "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart,
     }
     return handlers[args.command](args)
 

@@ -19,7 +19,6 @@ ICON_PNG = ROOT / "packaging" / "icons" / "lura.png"
 
 datas = [
     (str(LURA / "shared" / "i18n" / "*.json"), "lura/shared/i18n"),
-    (str(LURA / "modules" / "billing" / "store.json"), "lura/modules/billing"),
     (str(LURA / "modules" / "dashboard" / "static"), "lura/modules/dashboard/static"),
 ]
 binaries = []

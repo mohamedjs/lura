@@ -6,7 +6,6 @@
 # version) publishes the release too, creating the tag on the built commit.
 #
 # Optional configuration (Settings → Secrets and variables → Actions):
-#   vars.LS_STORE_ID, vars.LS_PRODUCT_ID, vars.CHECKOUT_URL  Lemon Squeezy store for Pro
 #   secrets.HOMEBREW_TAP_TOKEN  a token that can push to mohamedjs/homebrew-lura
 name: Release
 
@@ -84,22 +83,6 @@ jobs:
       - name: System libraries (macOS)
         if: runner.os == 'macOS'
         run: brew install cairo pkg-config
-
-      - name: Pro store configuration
-        shell: python
-        env:
-          LS_STORE_ID: ${{ vars.LS_STORE_ID }}
-          LS_PRODUCT_ID: ${{ vars.LS_PRODUCT_ID }}
-          CHECKOUT_URL: ${{ vars.CHECKOUT_URL }}
-        run: |
-          import json, os, pathlib
-          p = pathlib.Path("src/lura/modules/billing/store.json")
-          data = json.loads(p.read_text())
-          if os.environ.get("LS_STORE_ID"): data["store_id"] = int(os.environ["LS_STORE_ID"])
-          if os.environ.get("LS_PRODUCT_ID"): data["product_id"] = int(os.environ["LS_PRODUCT_ID"])
-          if os.environ.get("CHECKOUT_URL"): data["checkout_url"] = os.environ["CHECKOUT_URL"]
-          p.write_text(json.dumps(data, indent=2) + "\n")
-          print("store_id set" if data["store_id"] else "WARNING: no store_id — any Lemon Squeezy key unlocks Pro")
 
       - name: Python dependencies
         run: |

@@ -11,7 +11,6 @@ from ...shared import events
 from ...shared.events import EventBus
 from ...shared.i18n import LANGUAGES, catalog, t
 from ...shared.platform import os_name
-from ..billing import BillingService
 from ..brain import BrainService
 from ..connectors import ConnectorService
 from ..memory import MemoryService
@@ -34,7 +33,6 @@ class DashboardApi:
     brain: BrainService
     voice: VoiceService
     connectors: ConnectorService
-    billing: BillingService
     bus: EventBus
     status: Callable[[], str]
     memory: MemoryService | None = None
@@ -61,7 +59,6 @@ class DashboardApi:
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
                                               "connectors": self.connectors.list(),
-                                              "plan": self.billing.plan(),
                                               "restart_pending": self.restart_pending})
         r("GET", "/api/catalog", lambda b, m: {"catalog": self.brain.full_catalog(
             self.settings.capabilities().keys)})
@@ -92,9 +89,6 @@ class DashboardApi:
         r("PATCH", r"/api/skills/([\w-]+)", lambda b, m: (self._skills().set_enabled(m[1], bool(b.get("enabled"))),
                                                           {"skills": self._skills().list()})[1])
         r("DELETE", r"/api/skills/([\w-]+)", lambda b, m: self.remove_skill(m[1]))
-        r("POST", "/api/billing/activate", lambda b, m: self.billing.activate(str(b.get("key", ""))))
-        r("POST", "/api/billing/deactivate", lambda b, m: self.billing.deactivate())
-        r("POST", "/api/billing/refresh", lambda b, m: (self.billing.revalidate(force=True), self.billing.plan())[1])
 
     def _publish(self, name: str) -> dict:
         self.bus.publish(name)
@@ -109,7 +103,7 @@ class DashboardApi:
             "providers": list(PROVIDERS), "voice_providers": list(VOICE_PROVIDERS),
             "suggested_models": {k: list(v) for k, v in SUGGESTED_MODELS.items()},
             "voices": {k: list(v) for k, v in VOICES.items()},
-            "plan": self.billing.plan(), "connectors": self.connectors.list(),
+            "connectors": self.connectors.list(),
             "languages": LANGUAGES, "i18n": {lang: catalog(lang) for lang in LANGUAGES},
             "paths": {"config": str(self.settings.settings_path.parent)},
             "restart_pending": self.restart_pending, "can_restart": self.can_restart,
