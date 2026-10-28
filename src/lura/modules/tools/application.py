@@ -20,6 +20,14 @@ class ConnectorTools(Protocol):
     def call(self, name: str, arguments: dict[str, Any]) -> str: ...
 
 
+class ToolProvider(Protocol):
+    """Tools another module offers (memory, skills), declared every round."""
+
+    def tool_specs(self) -> list[ToolSpec]: ...
+    def owns(self, name: str) -> bool: ...
+    def call(self, name: str, arguments: dict[str, Any]) -> str: ...
+
+
 class ToolSession:
     """Per conversation: which connector tools ``find_tools`` has pulled in."""
 
@@ -35,16 +43,23 @@ class ToolService:
     def __init__(self, connectors: ConnectorTools | None = None, language=lambda: "en"):
         self._connectors = connectors
         self._language = language
+        self._providers: list[ToolProvider] = []
+
+    def add_provider(self, provider: ToolProvider) -> None:
+        self._providers.append(provider)
+
+    def _provided(self) -> list[ToolSpec]:
+        return [spec for p in self._providers for spec in p.tool_specs()]
 
     def specs(self, session: ToolSession) -> list[ToolSpec]:
         """Built-ins plus what this conversation asked for. Rebuilt every round:
         a stale list makes the model call tools it was just told it lacks."""
-        return list(BUILTIN_TOOLS) + session.found
+        return list(BUILTIN_TOOLS) + self._provided() + session.found
 
     def realtime_specs(self) -> list[ToolSpec]:
         """Gemini Live declares everything up front; it has no second round."""
         extra = self._connectors.all_tools() if self._connectors else []
-        return [t for t in BUILTIN_TOOLS if t.name != FIND_TOOLS] + extra
+        return [t for t in BUILTIN_TOOLS if t.name != FIND_TOOLS] + self._provided() + extra
 
     def dispatch(self, name: str, args: dict[str, Any] | None,
                  session: ToolSession | None = None) -> tuple[str, bool]:
@@ -81,6 +96,9 @@ class ToolService:
                     session.add(found)
                 listing = "\n".join(f"- {t.name}: {t.description[:120]}" for t in found)
                 return f"These tools are now available to call:\n{listing}", False
+            for provider in self._providers:
+                if provider.owns(name):
+                    return provider.call(name, args), False
             if self._connectors and self._connectors.owns(name):
                 return self._connectors.call(name, args), False
             return f"Error: unknown tool {name}.", False

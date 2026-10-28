@@ -17,11 +17,184 @@ import wave
 
 import numpy as np
 
-from ..domain import CHANNELS, INPUT_RATE, OUTPUT_RATE
+from ..domain import CHANNELS, INPUT_RATE, OUTPUT_RATE, EndOfTurn, pick_device
 
 log = logging.getLogger(__name__)
 
-BLOCK_FRAMES = 4000   # ~0.25 s at 16 kHz; what Vosk reads best
+BLOCK_SECONDS = 0.1   # end-of-turn resolution; Vosk reads any block size
+#: After Lura stops talking, the room still rings for a moment; listening
+#: right away hears her own tail as the user's turn.
+REVERB_SECONDS = 0.15
+
+
+# ── devices ─────────────────────────────────────────────────────────────────
+# ponytail: PortAudio enumerates devices once per process, so a device
+# plugged in after Lura started shows up after a restart.
+
+def _devices(sd) -> tuple[list[dict], int]:
+    return [dict(d) for d in sd.query_devices()], int(sd.default.hostapi)
+
+
+def resolve(device, kind: str):
+    """The stored name → an index PortAudio takes (None = system default)."""
+    if device is None or not str(device).strip():
+        return None
+    import sounddevice as sd
+
+    devices, hostapi = _devices(sd)
+    index = pick_device(devices, device, kind, hostapi)
+    if index is None:
+        log.warning("%s device %r is not connected; using the system default.", kind.title(), device)
+    return index
+
+
+def list_devices() -> dict[str, list[dict]]:
+    """Inputs and outputs of the default host API, for the dashboard picker."""
+    import sounddevice as sd
+
+    devices, hostapi = _devices(sd)
+    defaults = list(sd.default.device)
+    out: dict[str, list[dict]] = {"inputs": [], "outputs": []}
+    for index, d in enumerate(devices):
+        if d.get("hostapi") != hostapi:
+            continue
+        for kind, key, slot in (("inputs", "max_input_channels", 0), ("outputs", "max_output_channels", 1)):
+            if d.get(key, 0) > 0:
+                out[kind].append({"name": d["name"], "index": index, "channels": d[key],
+                                  "default_samplerate": d.get("default_samplerate"),
+                                  "is_default": index == defaults[slot]})
+    return out
+
+
+def _format(sd, index, kind: str, rate: int) -> tuple[int, int]:
+    """A (rate, channels) the device accepts, closest to what we want.
+
+    Pulse/PipeWire "default" resamples anything; a raw ALSA hw device takes
+    only its own rates and sometimes refuses mono.
+    """
+    check = sd.check_input_settings if kind == "input" else sd.check_output_settings
+    info = sd.query_devices(index if index is not None else sd.default.device[0 if kind == "input" else 1])
+    native = int(info["default_samplerate"])
+    most = int(info["max_input_channels" if kind == "input" else "max_output_channels"]) or 1
+    for candidate in ((rate, 1), (native, 1), (rate, min(2, most)), (native, min(2, most))):
+        try:
+            check(device=index, samplerate=candidate[0], channels=candidate[1], dtype="int16")
+            return candidate
+        except Exception:
+            continue
+    return native, most
+
+
+def _open(sd, device, kind: str, rate: int, factory):
+    """Open ``factory(index, rate, channels)`` on the named device, or on the
+    default if it is busy or refuses every format: an exception here inside
+    the wake loop would retry every two seconds forever."""
+    index = resolve(device, kind)
+    try:
+        fmt = _format(sd, index, kind, rate)
+        return factory(index, *fmt), fmt
+    except Exception as exc:
+        if index is None:
+            raise
+        log.warning("%s device %r would not open (%s); using the system default.", kind.title(), device, exc)
+        fmt = _format(sd, None, kind, rate)
+        return factory(None, *fmt), fmt
+
+
+def _to_mono(pcm: bytes, channels: int) -> bytes:
+    if channels == 1:
+        return pcm
+    return np.frombuffer(pcm, np.int16).reshape(-1, channels).mean(1).astype(np.int16).tobytes()
+
+
+class MicStream:
+    """The microphone as 16 kHz mono int16 blocks, whatever the device wants.
+
+    Every input in Lura goes through here (the wake word, the recorder,
+    Gemini Live), so a device that refuses 16 kHz works everywhere or nowhere.
+    With ``on_block``, blocks are handed over from the audio thread instead
+    of queued for ``read``.
+    """
+
+    def __init__(self, device=None, block_seconds: float = BLOCK_SECONDS, on_block=None):
+        import sounddevice as sd
+
+        self._blocks: queue.Queue[bytes] = queue.Queue()
+        self._on_block = on_block or self._blocks.put
+        self._stream, (self.rate, self.channels) = _open(
+            sd, device, "input", INPUT_RATE,
+            lambda index, rate, channels: sd.RawInputStream(
+                samplerate=rate, blocksize=int(rate * block_seconds), device=index, dtype="int16",
+                channels=channels, callback=self._callback))
+        if self.rate != INPUT_RATE:
+            log.info("Microphone runs at %d Hz; resampling to %d.", self.rate, INPUT_RATE)
+
+    def _callback(self, indata, frames, time_info, status):
+        self._on_block(resample(_to_mono(bytes(indata), self.channels), self.rate, INPUT_RATE))
+
+    def read(self, timeout: float) -> bytes | None:
+        try:
+            return self._blocks.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def __enter__(self) -> "MicStream":
+        self._stream.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stream.stop()
+        self._stream.close()
+
+
+class OutputStream:
+    """A speaker stream fed 24 kHz mono, resampled if the device wants otherwise."""
+
+    def __init__(self, device=None, rate: int = OUTPUT_RATE, block_seconds: float = 0.05):
+        import sounddevice as sd
+
+        self._src = rate
+        self._stream, (self.rate, self.channels) = _open(
+            sd, device, "output", rate,
+            lambda index, out_rate, channels: sd.RawOutputStream(
+                samplerate=out_rate, blocksize=int(out_rate * block_seconds), device=index, dtype="int16",
+                channels=channels))
+        self._stream.start()
+
+    def write(self, pcm: bytes) -> None:
+        pcm = resample(pcm, self._src, self.rate)
+        if self.channels > 1:
+            pcm = np.repeat(np.frombuffer(pcm, np.int16), self.channels).tobytes()
+        self._stream.write(pcm)
+
+    def close(self) -> None:
+        self._stream.stop()
+        self._stream.close()
+
+
+def mic_test(device=None, seconds: float = 3.0) -> dict:
+    """Listen for a few seconds and report levels — the dashboard's Test button.
+
+    ponytail: if the wake listener holds a raw hw device, this one reports
+    "busy"; the error is passed through verbatim so that is obvious.
+    """
+    try:
+        levels = []
+        with MicStream(device) as mic:
+            for _ in range(int(seconds / BLOCK_SECONDS)):
+                block = mic.read(timeout=1.0)
+                if block is None:
+                    break
+                levels.append(rms_of(block))
+            rate = mic.rate
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if not levels:
+        return {"ok": False, "error": "no audio arrived from the microphone"}
+    ranked = sorted(levels)
+    peak, floor = ranked[-1], ranked[len(ranked) // 10]
+    return {"ok": peak >= 0.003, "peak": round(peak, 4), "floor": round(floor, 4), "rate": rate,
+            "levels": [round(v, 4) for v in levels]}
 
 
 def rms_of(pcm: bytes) -> float:
@@ -34,16 +207,17 @@ def rms_of(pcm: bytes) -> float:
 
 def chime(rate: int = OUTPUT_RATE, device=None, up: bool = True) -> None:
     """A short two-tone beep, so a false trigger is obvious. Generated, not shipped."""
-    import sounddevice as sd
-
     parts = []
     for freq in ((660, 990) if up else (990, 660)):
         t = np.linspace(0, 0.09, int(rate * 0.09), endpoint=False)
         fade = np.minimum(1.0, np.minimum(np.arange(len(t)), len(t) - np.arange(len(t))) / 200.0)
         parts.append(np.sin(2 * np.pi * freq * t) * fade * 0.25)
     try:
-        sd.play((np.concatenate(parts) * 32767).astype(np.int16), samplerate=rate,
-                device=device, blocking=True)
+        out = OutputStream(device, rate)
+        try:
+            out.write((np.concatenate(parts) * 32767).astype(np.int16).tobytes())
+        finally:
+            out.close()
     except Exception as exc:  # a missing sink must not kill the assistant
         log.warning("Could not play chime: %s", exc)
 
@@ -57,13 +231,9 @@ class Speaker:
     """
 
     def __init__(self, device=None, rate: int = OUTPUT_RATE, on_level=None):
-        import sounddevice as sd
-
         self._rate = rate
         self._on_level = on_level
-        self._stream = sd.RawOutputStream(samplerate=rate, blocksize=int(rate * 0.05),
-                                          device=device, dtype="int16", channels=CHANNELS)
-        self._stream.start()
+        self._stream = OutputStream(device, rate)
 
     def write(self, pcm: bytes, cancelled=lambda: False) -> None:
         block = int(self._rate * 0.05) * 2
@@ -77,7 +247,6 @@ class Speaker:
 
     def close(self) -> None:
         try:
-            self._stream.stop()
             self._stream.close()
         finally:
             if self._on_level:
@@ -87,57 +256,31 @@ class Speaker:
 def record_utterance(settings, should_stop=lambda: False) -> bytes:
     """Record until the speaker stops; return 16 kHz mono PCM, or b"" for nothing.
 
-    The noise floor is *measured* over the first half second, never assumed:
-    a quiet room and a laptop fan differ by more than tenfold, and a fixed
-    threshold either cuts people off or never ends. ``silence_factor`` and
-    ``silence_ms`` stay settings because no measurement survives every room.
+    ``follow_up_seconds`` is how long to wait for the user to start; then
+    ``silence_ms`` of quiet ends the turn. The noise floor is measured as it
+    goes (see ``EndOfTurn``): a quiet room and a laptop fan differ by more
+    than tenfold. Leading silence is trimmed to a short pre-roll, so seconds
+    of nothing are not sent to the brain as audio.
     """
-    import sounddevice as sd
-
-    blocks: queue.Queue[bytes] = queue.Queue()
-
-    def on_audio(indata, frames, time_info, status):
-        blocks.put(bytes(indata))
-
+    turn = EndOfTurn(BLOCK_SECONDS, settings.silence_ms, settings.silence_factor,
+                     settings.follow_up_seconds, settings.max_utterance_seconds)
     captured: list[bytes] = []
-    floor: list[float] = []
-    quiet_for = 0.0
-    speech_seen = False
-    started = time.monotonic()
-    block_seconds = BLOCK_FRAMES / INPUT_RATE
-    calibration = int(0.5 / block_seconds) + 1
-
-    with sd.RawInputStream(samplerate=INPUT_RATE, blocksize=BLOCK_FRAMES,
-                           device=settings.input_device, dtype="int16",
-                           channels=CHANNELS, callback=on_audio):
-        while not should_stop():
-            try:
-                block = blocks.get(timeout=1.0)
-            except queue.Empty:
+    verdict = "wait"
+    time.sleep(REVERB_SECONDS)
+    with MicStream(settings.input_device) as mic:
+        while verdict == "wait" and not should_stop():
+            block = mic.read(timeout=1.0)
+            if block is None:
+                log.warning("The microphone stopped sending audio.")
                 break
-            elapsed = time.monotonic() - started
-            if elapsed > settings.max_utterance_seconds:
-                log.info("Utterance hit the %.0fs cap.", settings.max_utterance_seconds)
-                break
-            level = rms_of(block)
             captured.append(block)
-            if len(floor) < calibration:   # calibration: listen, do not judge
-                floor.append(level)
-                continue
-            noise = max(sorted(floor)[len(floor) // 2], 0.0005)
-            if level > noise * settings.silence_factor:
-                speech_seen, quiet_for = True, 0.0
-                continue
-            quiet_for += block_seconds
-            if speech_seen and quiet_for * 1000 >= settings.silence_ms:
-                break
-            if not speech_seen and elapsed > settings.idle_timeout:
-                return b""
-
-    audio = b"".join(captured)
-    if not speech_seen or len(audio) < int(settings.min_utterance_seconds * INPUT_RATE * 2):
+            verdict = turn.feed(rms_of(block))
+    # One block of slack: 100 ms blocks quantise a short "no" down to 0.3 s.
+    if turn.start is None or turn.spoken_seconds < settings.min_utterance_seconds - BLOCK_SECONDS:
+        if turn.start is not None:
+            log.info("Ignored %.1fs of sound: too short to be speech.", turn.spoken_seconds)
         return b""
-    return audio
+    return b"".join(captured[turn.start:])
 
 
 def pcm_to_wav(pcm: bytes, rate: int = INPUT_RATE) -> bytes:

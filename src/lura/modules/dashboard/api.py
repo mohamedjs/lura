@@ -14,12 +14,16 @@ from ...shared.platform import os_name
 from ..billing import BillingService
 from ..brain import BrainService
 from ..connectors import ConnectorService
+from ..memory import MemoryService
 from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, SettingsService
+from ..skills import SkillsService
 from ..voice import VoiceService
 from .server import ApiError
 
 #: Settings that apply the moment they change, so they never ask for a restart.
-LIVE = {"onboarded", "subtitles", "ui_language"}
+#: The rest is read again at the start of every conversation.
+LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device", "silence_ms",
+        "silence_factor", "follow_up_seconds", "memory_enabled", "context_budget_tokens"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
@@ -33,6 +37,8 @@ class DashboardApi:
     billing: BillingService
     bus: EventBus
     status: Callable[[], str]
+    memory: MemoryService | None = None
+    skills: SkillsService | None = None
     #: Whether a restart applies the changes made since Lura started. False
     #: for the standalone dashboard, which has no assistant to restart.
     can_restart: bool = True
@@ -65,12 +71,27 @@ class DashboardApi:
         r("DELETE", r"/api/keys/(\w+)", lambda b, m: self.remove_key(m[1]))
         r("GET", r"/api/models/(\w+)", lambda b, m: {"models": self.brain.list_models(m[1])})
         r("POST", "/api/voice/preview", lambda b, m: self.preview(b))
+        r("GET", "/api/audio/devices", lambda b, m: self.voice.devices())
+        r("POST", "/api/audio/test-mic", lambda b, m: self.voice.mic_test(b.get("device")))
+        r("POST", "/api/audio/test-speaker", lambda b, m: self.test_speaker(b))
         r("POST", "/api/talk", lambda b, m: self._publish(events.TALK_REQUESTED))
         r("POST", "/api/stop", lambda b, m: self._publish(events.STOP_REQUESTED))
         r("GET", "/api/connectors", lambda b, m: {"connectors": self.connectors.list()})
         r("POST", "/api/connectors", lambda b, m: self.add_connector(b))
         r("PATCH", r"/api/connectors/([\w-]+)", lambda b, m: self.toggle_connector(m[1], b))
         r("DELETE", r"/api/connectors/([\w-]+)", lambda b, m: self.remove_connector(m[1]))
+        r("GET", "/api/memory", lambda b, m: self._memory_state())
+        r("PUT", "/api/memory", lambda b, m: self.put_memory(b))
+        r("POST", "/api/memory/reset", lambda b, m: (self._mem().reset(), self._memory_state())[1])
+        r("GET", "/api/history", lambda b, m: {"conversations": self._mem().conversations(b.get("q", ""))})
+        r("GET", r"/api/history/(\d+)", lambda b, m: {"messages": self._mem().transcript(int(m[1]))})
+        r("DELETE", r"/api/history/(\d+)", lambda b, m: self.delete_history(int(m[1])))
+        r("DELETE", "/api/history", lambda b, m: (self._mem().delete_all(), {"conversations": []})[1])
+        r("GET", "/api/skills", lambda b, m: {"skills": self._skills().list()})
+        r("POST", "/api/skills", lambda b, m: self.add_skill(b))
+        r("PATCH", r"/api/skills/([\w-]+)", lambda b, m: (self._skills().set_enabled(m[1], bool(b.get("enabled"))),
+                                                          {"skills": self._skills().list()})[1])
+        r("DELETE", r"/api/skills/([\w-]+)", lambda b, m: self.remove_skill(m[1]))
         r("POST", "/api/billing/activate", lambda b, m: self.billing.activate(str(b.get("key", ""))))
         r("POST", "/api/billing/deactivate", lambda b, m: self.billing.deactivate())
         r("POST", "/api/billing/refresh", lambda b, m: (self.billing.revalidate(force=True), self.billing.plan())[1])
@@ -139,6 +160,49 @@ class DashboardApi:
         # Spoken in the background: synthesis takes a second or two and the
         # browser should not sit on a pending request meanwhile.
         threading.Thread(target=self.voice.preview, args=(s, voice, text), daemon=True).start()
+        return {"ok": True}
+
+    def _mem(self) -> MemoryService:
+        if self.memory is None:
+            raise ApiError(404, "memory is not available here")
+        return self.memory
+
+    def _memory_state(self) -> dict:
+        mem = self._mem()
+        return {"facts": mem.facts(), "summary": mem.summary(), "path": str(mem.store.root)}
+
+    def put_memory(self, body: dict) -> dict:
+        facts = body.get("facts")
+        if not isinstance(facts, str) or len(facts) > 100_000:
+            raise ApiError(400, "facts must be text")
+        # Lura may have remembered something since the page loaded; saving
+        # the stale text over it would silently lose it.
+        if "base" in body and body["base"] != self._mem().facts():
+            raise ApiError(409, t("mem.changed", self.settings.current.ui_language), **self._memory_state())
+        self._mem().set_facts(facts)
+        return self._memory_state()
+
+    def delete_history(self, conv_id: int) -> dict:
+        if not self._mem().delete(conv_id):
+            raise ApiError(404, f"no conversation {conv_id}")
+        return {"conversations": self._mem().conversations()}
+
+    def _skills(self) -> SkillsService:
+        if self.skills is None:
+            raise ApiError(404, "skills are not available here")
+        return self.skills
+
+    def add_skill(self, body: dict) -> dict:
+        name = self._skills().add(str(body.get("kind", "")), body)
+        return {"added": name, "skills": self._skills().list()}
+
+    def remove_skill(self, name: str) -> dict:
+        if not self._skills().remove(name):
+            raise ApiError(404, f"no skill {name}")
+        return {"skills": self._skills().list()}
+
+    def test_speaker(self, body: dict) -> dict:
+        threading.Thread(target=self.voice.speaker_test, args=(body.get("device"),), daemon=True).start()
         return {"ok": True}
 
     def add_connector(self, body: dict) -> dict:

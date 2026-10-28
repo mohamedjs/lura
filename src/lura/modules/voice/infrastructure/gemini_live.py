@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 
-from ..domain import CHANNELS, INPUT_RATE, OUTPUT_RATE
+from ..domain import INPUT_RATE, OUTPUT_RATE
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,12 @@ class LiveConversation:
     def stop(self) -> None:
         self._ending = True
 
+    @property
+    def transcript(self) -> list[tuple[str, str]]:
+        """What was said, as (role, text) turns, for the history."""
+        return [("user" if line.startswith("User: ") else "assistant", line.split(": ", 1)[1])
+                for line in self._transcript]
+
     def _config(self):
         t = self._types
         system = self._system
@@ -100,20 +106,19 @@ class LiveConversation:
         self._buffers[who].clear()
 
     async def _pump_mic(self, session, loop) -> None:
-        import sounddevice as sd
+        from .audio import MicStream
 
         blocks: asyncio.Queue[bytes] = asyncio.Queue(maxsize=50)
 
-        def on_audio(indata, frames, time_info, status):
+        def on_audio(block: bytes):
             if (self.settings.gate_mic_while_speaking and self._speaking.is_set()) or self._tool_active.is_set():
                 return
             try:
-                loop.call_soon_threadsafe(blocks.put_nowait, bytes(indata))
+                loop.call_soon_threadsafe(blocks.put_nowait, block)
             except (asyncio.QueueFull, RuntimeError):
                 pass
 
-        with sd.RawInputStream(samplerate=INPUT_RATE, blocksize=IN_BLOCK, device=self.settings.input_device,
-                               dtype="int16", channels=CHANNELS, callback=on_audio):
+        with MicStream(self.settings.input_device, IN_BLOCK / INPUT_RATE, on_block=on_audio):
             while True:
                 block = await blocks.get()
                 if not self._tool_active.is_set():
@@ -121,12 +126,9 @@ class LiveConversation:
                         audio=self._types.Blob(data=block, mime_type=f"audio/pcm;rate={INPUT_RATE}"))
 
     async def _play(self, chunks: asyncio.Queue) -> None:
-        import sounddevice as sd
-        from .audio import rms_of
+        from .audio import OutputStream, rms_of
 
-        stream = sd.RawOutputStream(samplerate=OUTPUT_RATE, blocksize=OUT_BLOCK,
-                                    device=self.settings.output_device, dtype="int16", channels=CHANNELS)
-        stream.start()
+        stream = OutputStream(self.settings.output_device, OUTPUT_RATE, OUT_BLOCK / OUTPUT_RATE)
         try:
             while True:
                 chunk = await chunks.get()
@@ -143,7 +145,6 @@ class LiveConversation:
                     self._presence.set_amplitude(min(1.0, rms_of(part) * 4.0))
                     await asyncio.to_thread(stream.write, part)
         finally:
-            stream.stop()
             stream.close()
 
     async def _answer_tools(self, session, tool_call) -> None:

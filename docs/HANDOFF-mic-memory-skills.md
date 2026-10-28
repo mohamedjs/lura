@@ -1,7 +1,7 @@
 # Handoff: microphone picker, turn-taking, memory/history, skills
 
-Status (2026-10-28): **design done, no code written yet.** The previous session read
-the code and planned the work below, then stopped before implementing it. Start here.
+Status (2026-10-28): **implemented** on `claude/vibrant-darwin-cvzalg` (sections 1–3). The
+plan below is kept as the design record; CLAUDE.md → Current behaviour has what shipped.
 
 Mohamed's request, in his words: "voice not working with Lura, I mean about my mic,
 so in the dashboard I can select the mic… once I'm silent for one second Lura speaks,

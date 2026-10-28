@@ -28,6 +28,8 @@ _EFFORT_MODELS = re.compile(r"claude-(opus|sonnet|haiku|fable|mythos)-5|claude-o
 _FALLBACK_MODELS = re.compile(r"claude-(opus-5-5|opus-5|fable-5-1|sonnet-5-5)$")
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
+CACHE = {"type": "ephemeral"}
+
 #: Voice wants speed. "minimal" is not an Anthropic effort level; "low" is the floor.
 _EFFORT = {"minimal": "low", "low": "low", "medium": "medium", "high": "high"}
 
@@ -76,9 +78,18 @@ class AnthropicChat:
         return out
 
     def _kwargs(self, system: str, history: list[Message], tools: list[ToolSpec]) -> dict[str, Any]:
+        messages = self._messages(history)
+        # Two cache breakpoints: the system prompt (with the tools before it)
+        # and the newest turn, so the next request reads the whole replayed
+        # thread from cache. Without them a long memory is slow and expensive.
+        if messages and messages[-1]["role"] == "user":   # never edit a replayed native turn
+            last = messages[-1]
+            if isinstance(last["content"], str):
+                last["content"] = [{"type": "text", "text": last["content"]}]
+            last["content"][-1] = {**last["content"][-1], "cache_control": CACHE}
         kwargs: dict[str, Any] = {
             "model": self.model, "max_tokens": MAX_TOKENS,
-            "system": system, "messages": self._messages(history),
+            "system": [{"type": "text", "text": system, "cache_control": CACHE}], "messages": messages,
         }
         if tools:
             # eager_input_streaming is left off on purpose: these inputs are a

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import shutil
 import tempfile
 import time
@@ -22,8 +21,8 @@ import zipfile
 from pathlib import Path
 
 from ....shared import paths
-from ..domain import CHANNELS, INPUT_RATE
-from .audio import BLOCK_FRAMES
+from ..domain import INPUT_RATE
+from .audio import MicStream
 
 log = logging.getLogger(__name__)
 
@@ -88,26 +87,20 @@ class WakeListener:
             return False
         return bool(set(text.lower().split()) & self._accepted)
 
-    def listen(self, stop, interrupt=None) -> bool:
-        """Wait for the wake word. False if ``stop`` is set; True if heard or
-        ``interrupt`` (an Event, e.g. "talk now" from the dashboard) is set."""
-        import sounddevice as sd
-
-        blocks: queue.Queue[bytes] = queue.Queue()
-
-        def on_audio(indata, frames, time_info, status):
-            blocks.put(bytes(indata))
-
-        with sd.RawInputStream(samplerate=INPUT_RATE, blocksize=BLOCK_FRAMES, device=self._device,
-                               dtype="int16", channels=CHANNELS, callback=on_audio):
+    def listen(self, stop, interrupt=None, reload=None) -> bool:
+        """Wait for the wake word. True if heard or ``interrupt`` (an Event,
+        e.g. "talk now" from the dashboard) is set; False if ``stop`` or
+        ``reload`` (the microphone changed) is set."""
+        with MicStream(self._device, block_seconds=0.25) as mic:
             log.info("Listening for %r…", self._word)
             while not stop.is_set():
+                if reload is not None and reload.is_set():
+                    return False
                 if interrupt is not None and interrupt.is_set():
                     interrupt.clear()
                     return True
-                try:
-                    block = blocks.get(timeout=0.3)
-                except queue.Empty:
+                block = mic.read(timeout=0.3)
+                if block is None:
                     continue
                 if self._recognizer.AcceptWaveform(block):
                     if self._heard(self._recognizer.Result()):

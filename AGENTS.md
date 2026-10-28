@@ -58,8 +58,15 @@ interface would hide exactly that.
 - Gemini Live: input **16 kHz**, output **24 kHz**, as separate streams.
 - The mic is gated while Lura speaks in realtime mode. Without it she hears herself and
   interrupts herself in a loop. The cost is no barge-in.
-- Pipeline end-of-turn: the noise floor is **measured** over the first ~0.5 s of each
-  utterance, never hardcoded (a quiet room vs a laptop fan differ by >10×).
+- Pipeline end-of-turn (`voice/domain.py: EndOfTurn`): the noise floor is the 10th
+  percentile of the last 5 s, **measured continuously**, never hardcoded (a quiet room vs a
+  laptop fan differ by >10×). The old one-shot 0.5 s calibration took someone who spoke
+  right after the chime for noise, and the turn hung until the idle timeout.
+- **Every mic stream goes through `MicStream`** (recorder, wake word, Gemini Live), every
+  speaker through `OutputStream`. Raw ALSA `hw:` devices refuse 16 kHz/24 kHz (and some
+  refuse mono): the stream opens at a rate the device accepts and resamples. Devices are
+  stored by **name**, matched without the `(hw:N,M)` suffix (card numbers move on replug);
+  a device that is gone falls back to the default, never raises (it would spin the wake loop).
 - One output stream per reply, written in 50 ms slices. Opening per sentence clicks on
   PipeWire and clips sentence tails.
 

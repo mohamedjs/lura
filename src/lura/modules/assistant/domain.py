@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from ..brain import Message
+from ..memory import tokens
 
 #: A tool-calling model can ask for tools forever. It gets this many rounds,
 #: then it has to answer in words.
 MAX_TOOL_ROUNDS = 6
-#: Turns of history sent each time. Audio turns are large; a voice chat that
-#: has drifted ten exchanges on rarely needs the first.
-MAX_HISTORY_TURNS = 10
+#: Gemini counts audio at 32 tokens a second; 16 kHz 16-bit WAV is 32 000
+#: bytes a second.
+AUDIO_BYTES_PER_TOKEN = 1000
+#: Room left in the context for the reply itself.
+REPLY_RESERVE = 8000
 
 LANGUAGE_RULES = {
     "ar": ("Always answer in Egyptian Arabic (عامية مصرية), written in Arabic script, even if the "
@@ -23,9 +26,9 @@ def language_rule(language: str) -> str:
 
 
 def system_prompt(persona: str, assistant_name: str, user_name: str, language: str,
-                  machine_context: str, realtime: bool = False) -> str:
-    """The system prompt. Byte-stable for a given settings snapshot: it is the
-    cached prefix of every request."""
+                  machine_context: str, realtime: bool = False, extra: str = "") -> str:
+    """The system prompt. Byte-stable for one conversation: it is the cached
+    prefix of every request. ``extra`` is memory and skills."""
     parts = [persona.format(name=assistant_name or "Lura")]
     if user_name:
         parts.append(f"The user's name is {user_name}.")
@@ -33,19 +36,58 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
     if not realtime:
         parts.append("Connected services (Chrome, live web pages, files, and any the user added) "
                      "are reachable through find_tools.")
+    if extra.strip():
+        parts.append(extra.strip())
     # Repeated last on purpose: buried in the middle of a long system message
     # the language rule gets ignored.
     parts.append(f"IMPORTANT: {language_rule(language)}")
     return "\n".join(parts)
 
 
-def trim_history(history: list[Message], max_turns: int = MAX_HISTORY_TURNS) -> list[Message]:
-    """Keep the last ``max_turns`` user turns, starting cleanly at a user turn
-    so no tool result is left without the call it answers."""
-    starts = [i for i, m in enumerate(history) if m.role == "user" and not m.tool_call_id]
-    if len(starts) <= max_turns:
-        return history
-    return history[starts[-max_turns]:]
+def message_tokens(message: Message) -> int:
+    cost = tokens(message.text) + 4
+    if message.audio_wav:
+        cost += len(message.audio_wav) // AUDIO_BYTES_PER_TOKEN
+    for call in message.tool_calls:
+        cost += tokens(call.name + str(call.arguments))
+    return cost
+
+
+def fit_history(history: list[Message], budget: int) -> list[Message]:
+    """The newest part of the conversation that fits in ``budget`` tokens.
+
+    It starts cleanly at a user turn, so no tool result is left without the
+    call it answers; the last user turn is always kept. Only the newest
+    recording goes as sound: older ones whose transcript has arrived go as
+    text, and the newest goes without its transcript, or the brain reads it twice.
+    """
+    last_audio = max((i for i, m in enumerate(history) if m.audio_wav), default=-1)
+    view = []
+    for i, m in enumerate(history):
+        if m.audio_wav and i != last_audio and m.text:
+            m = Message("user", m.text)
+        elif m.audio_wav and i == last_audio and m.text:
+            m = Message("user", audio_wav=m.audio_wav)
+        view.append(m)
+    starts = [i for i, m in enumerate(view) if m.role == "user" and not m.tool_call_id]
+    if not starts:
+        return view
+    total, cut = 0, starts[-1]
+    suffix = [0] * (len(view) + 1)
+    for i in range(len(view) - 1, -1, -1):
+        total += message_tokens(view[i])
+        suffix[i] = total
+    for start in starts:
+        if suffix[start] <= budget:
+            cut = start
+            break
+    return view[cut:]
+
+
+def recent_lines(turns: list[tuple[str, str]], limit: int = 2000) -> str:
+    """Earlier turns as plain lines, for Gemini Live, which takes no text turns."""
+    text = "\n".join(f"{'User' if role == 'user' else 'You'}: {said}" for role, said in turns)
+    return f"The conversation so far:\n{text[-limit:]}" if text else ""
 
 
 def briefing_prompt(data: dict[str, str], language: str, user_name: str) -> str:

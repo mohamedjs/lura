@@ -128,11 +128,20 @@ class Settings:
     min_utterance_seconds: float = 0.4
 
     # ── session ──
-    idle_timeout: float = 180.0
+    #: After Lura answers (or hears her name), how long she waits for you to
+    #: start talking before she goes back to waiting for the wake word.
+    follow_up_seconds: float = 8.0
     max_session_seconds: float = 3600.0
     gate_mic_while_speaking: bool = True
     input_device: str | None = None
     output_device: str | None = None
+
+    # ── memory ──
+    #: Keep every conversation (locally) and start the next one from it.
+    memory_enabled: bool = True
+    #: How much of the thread a request may carry. Once earlier conversations
+    #: outgrow 60 % of it, their older part is folded into a summary.
+    context_budget_tokens: int = 200_000
 
     # ── desktop ──
     briefing_on_boot: bool = True
@@ -160,6 +169,7 @@ _CHOICES: dict[str, tuple[str, ...]] = {
     "language": LANGUAGES, "ui_language": LANGUAGES, "mode": MODES,
     "brain_provider": PROVIDERS, "voice_provider": ("auto", *VOICE_PROVIDERS),
     "voice_gender": tuple(VOICES), "reasoning_effort": EFFORTS,
+    "context_budget_tokens": (32_000, 64_000, 128_000, 200_000),
 }
 
 

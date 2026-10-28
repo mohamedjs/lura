@@ -8,7 +8,7 @@ import time
 
 from ...shared.http import HttpError
 from ..settings import ANTHROPIC, PROVIDERS, SUGGESTED_MODELS, Settings
-from .domain import ChatModel, brain_candidate
+from .domain import ChatModel, Done, Message, brain_candidate
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,14 @@ class BrainService:
         from .infrastructure.openai_compat import OpenAICompatChat
         return OpenAICompatChat(provider, key, model, reasoning_effort=settings.reasoning_effort,
                                 provider_order=settings.openrouter_provider_order)
+
+    def complete(self, settings: Settings, prompt: str, system: str = "") -> str:
+        """One plain answer, no tools: summarising the memory, for instance."""
+        text = ""
+        for event in self.model(settings).stream(system, [Message("user", prompt)], []):
+            if isinstance(event, Done):
+                text = event.message.text
+        return text
 
     def list_models(self, provider: str) -> list[str]:
         """Live list from the provider, or the suggestions if it can't be had."""

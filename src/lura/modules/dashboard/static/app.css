@@ -209,3 +209,33 @@ details summary h3::after { content: " ▾"; font-size: .7em; color: var(--muted
 #restart-btn .spin { display: inline-block; }
 #restart-btn.busy .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* Microphone level */
+.meter { flex: 1; height: 12px; align-self: center; border-radius: 8px; box-shadow: var(--inset); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--teal), var(--indigo)); transition: width .04s linear; }
+input[type="range"] { padding: 0; box-shadow: none; accent-color: var(--teal); width: 100%; }
+
+/* Memory & history */
+.mem-top { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+.mem-top .field { margin: 0; }
+.mem-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+@media (max-width: 760px) { .mem-cols { grid-template-columns: 1fr; } }
+.summary-box { margin-top: 14px; }
+.summary-box p { white-space: pre-wrap; color: var(--muted); font-size: .92em; max-height: 220px; overflow: auto; }
+.history { max-height: 260px; overflow: auto; padding: 4px; border-radius: 14px; box-shadow: var(--inset); }
+.conv { display: flex; align-items: center; gap: 6px; border-bottom: 1px dashed var(--line-strong); }
+.conv:last-child { border-bottom: 0; }
+.conv-open { flex: 1; min-width: 0; display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: baseline; text-align: start;
+             font: inherit; color: var(--ink); background: transparent; border: 0; padding: 8px 6px; cursor: pointer; }
+.conv-open span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-open small { color: var(--muted); }
+.conv-open:hover span { color: var(--indigo); }
+.transcript { margin: 12px 0; max-height: 300px; overflow: auto; padding: 10px 14px; border-radius: 14px; box-shadow: var(--inset); }
+.transcript p { margin: .4em 0; white-space: pre-wrap; }
+.transcript p.assistant b { color: var(--teal); }
+.transcript p.user b { color: var(--indigo); }
+
+/* Skills */
+#skill-form [data-kind] { display: none; }
+#skill-form [data-kind].show { display: block; }
+.warn-text { color: var(--warn); }

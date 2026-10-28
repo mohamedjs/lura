@@ -7,7 +7,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CHECKS = ["test_architecture.py", "test_command_guard.py", "test_domain.py",
-          "test_integration.py", "test_dashboard.py"]
+          "test_integration.py", "test_dashboard.py", "test_audio.py", "test_memory.py", "test_skills.py"]
 
 
 def main() -> int:

@@ -54,6 +54,8 @@ src/lura/
     tools/      built-in tools + command guard (check_command), per-OS impl, briefing
     connectors/ MCP stdio + Streamable HTTP, mcp.json, 3 built-ins (chrome, web, files), Pro rule
     billing/    Free/Pro, Lemon Squeezy licence API (store.json filled at release)
+    memory/     history.db (SQLite, LIKE search), memory.md, running summary → summaries/<date>.md
+    skills/     <config>/skills/<name>/SKILL.md + skills.json; prompt lists them, use_skill reads one
     assistant/  wake loop, PipelineConversation (streams brain → TTS), realtime, briefing
     overlay/    face_mp.py mesh, render.py (cairo), gtk_backend (Linux source), qt_backend (+tray)
     dashboard/  server.py (127.0.0.1 + token), api.py, static/ (index.html, app.css, app.js, fonts)
@@ -69,7 +71,7 @@ mcp.json, license.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.0.2, Oct 2026)
+## Current behaviour (2.1.0, Oct 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
@@ -100,6 +102,20 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Subtitles** under the face (`overlay/captions.py`, drawn by Qt/Pango so Arabic shapes):
   what you said + Lura's streamed reply; toggle live from dashboard, tray, or right-click on
   the face. When the brain hears audio directly, a parallel transcription fills "You".
+- **Microphone & speaker card:** pick devices by name (`/api/audio/devices`), test mic
+  (level meter) and speaker; "pause before Lura answers" = `silence_ms` (500–2500);
+  `follow_up_seconds` (default 8, replaced `idle_timeout`) = how long she waits for your
+  next sentence. Device/turn settings are live (no restart); the wake listener is rebuilt
+  when the mic changes. `tests/test_audio.py` fakes a 48 kHz-stereo-only USB mic.
+- **Memory:** one endless thread. Each conversation starts with memory.md + running summary
+  + the newest turns that fit 60 % of `context_budget_tokens` (default 200k). When they no
+  longer fit, the older part is summarised by the current brain after the conversation (background) and
+  written to `<data>/memory/summaries/<date>.md`. Tools: remember / forget / search_history.
+  Only text is stored; for brains that hear audio the caption transcription now runs
+  whenever memory is on. Anthropic gets cache breakpoints on system + newest turn.
+- **Skills** (Free): paste / zip / https URL in the dashboard; listed in the prompt, body via
+  `use_skill`, files via `read_skill_file` (confined to the folder); scripts only through
+  the guarded `run_command`.
 - **Briefing** once per boot, in the conversation language; GitHub line only if a
   connector named `github` is connected (it is custom → needs Pro).
 

@@ -24,6 +24,8 @@ src/lura/
     ├── tools/        built-in tools + command guard; per-OS implementations; briefing
     ├── connectors/   MCP: stdio and Streamable HTTP clients, mcp.json repository, plan rule
     ├── billing/      Free/Pro, licence entitlement rule, Lemon Squeezy licence API
+    ├── memory/       history (SQLite), memory.md facts, running summary + compaction, memory tools
+    ├── skills/       Agent Skills folders (SKILL.md), prompt listing, use_skill / read_skill_file
     ├── assistant/    orchestration: wake loop, pipeline conversation, realtime, briefing
     ├── overlay/      presentation: the hologram face (cairo), GTK and Qt backends, tray
     └── dashboard/    presentation: local HTTP API + static neumorphic page
@@ -50,7 +52,7 @@ src/lura/
 ## A conversation, pipeline mode
 
 ```
-wake word (Vosk, offline) ─► record until silence (noise floor measured per turn)
+wake word (Vosk, offline) ─► record until silence (noise floor measured continuously)
    │
    ├─ brain hears audio? (Gemini, OpenRouter+Gemini) ─► WAV goes to the brain as input_audio
    └─ otherwise (Claude, GPT) ─► Gemini 3.8 Flash transcribes ─► text to the brain

@@ -149,6 +149,21 @@ class VoiceService:
         return pcm_to_wav(pcm)
 
     @staticmethod
+    def devices() -> dict[str, list[dict]]:
+        from .infrastructure.audio import list_devices
+        return list_devices()
+
+    @staticmethod
+    def mic_test(device) -> dict:
+        from .infrastructure.audio import mic_test
+        return mic_test(device)
+
+    @staticmethod
+    def speaker_test(device) -> None:
+        from .infrastructure.audio import chime
+        chime(device=device)
+
+    @staticmethod
     def chime(settings: Settings, up: bool = True) -> None:
         from .infrastructure.audio import chime
         chime(device=settings.output_device, up=up)

@@ -155,6 +155,10 @@ def check_anthropic_stream():
     # Both tool results of one turn travel in one user message.
     assert [m["role"] for m in req["messages"]] == ["user", "assistant", "user"]
     assert [b["tool_use_id"] for b in req["messages"][2]["content"]] == ["c1", "c2"]
+    # Cached: the system prompt, and the thread up to the newest turn.
+    assert req["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert req["messages"][2]["content"][-1]["cache_control"] == {"type": "ephemeral"}
+    assert "cache_control" not in req["messages"][2]["content"][0]
     # The native turn replays unchanged next time.
     assert model._messages([done.message])[0]["content"] == done.message.native[1]
     del os.environ["ANTHROPIC_BASE_URL"]

@@ -7,6 +7,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="app.css">
 <script src="app.js" defer></script>
+<script src="cards.js" defer></script>
 </head>
 <body>
 <div class="paper">
@@ -105,6 +106,21 @@
       </label>
     </section>
 
+    <!-- Microphone & speaker -->
+    <section class="card" id="audio-card">
+      <h3 data-i18n="audio.title"></h3>
+      <label class="field"><span data-i18n="audio.mic"></span><select id="input-device"></select></label>
+      <div class="inline"><button class="btn" id="mic-test" data-i18n="audio.test_mic"></button><div class="meter" id="mic-meter"><i></i></div></div>
+      <p class="hint" id="mic-result"></p>
+      <label class="field"><span data-i18n="audio.speaker"></span><select id="output-device"></select></label>
+      <button class="btn" id="speaker-test" data-i18n="audio.test_speaker"></button>
+      <label class="field"><span><span data-i18n="audio.pause"></span> <b id="pause-value"></b></span>
+        <input id="silence-ms" type="range" min="500" max="2500" step="100"></label>
+      <label class="field"><span data-i18n="audio.follow_up"></span>
+        <select id="follow-up"><option value="4">4 s</option><option value="8">8 s</option><option value="15">15 s</option><option value="30">30 s</option></select></label>
+      <p class="hint" data-i18n="audio.hint"></p>
+    </section>
+
     <!-- Language & you -->
     <section class="card">
       <h3 data-i18n="lang.title"></h3>
@@ -178,6 +194,50 @@
       </div>
     </section>
 
+    <!-- Memory & history -->
+    <section class="card span-all" id="memory-card">
+      <h3 data-i18n="mem.title"></h3>
+      <p class="hint" id="mem-hint"></p>
+      <div class="mem-top">
+        <label class="switch"><input type="checkbox" id="memory-enabled"><span></span><b data-i18n="mem.enabled"></b></label>
+        <label class="field"><span data-i18n="mem.budget"></span>
+          <select id="context-budget"><option value="32000">32k</option><option value="64000">64k</option><option value="128000">128k</option><option value="200000">200k</option></select></label>
+      </div>
+      <div class="mem-cols">
+        <div>
+          <label class="field"><span data-i18n="mem.facts"></span><textarea id="memory-facts" rows="8" data-i18n-placeholder="mem.facts_placeholder"></textarea></label>
+          <div class="row"><button class="btn primary" id="facts-save" data-i18n="mem.save"></button><button class="btn ghost" id="mem-reset" data-i18n="mem.reset"></button></div>
+          <details class="summary-box"><summary data-i18n="mem.summary"></summary><p id="mem-summary"></p></details>
+        </div>
+        <div>
+          <label class="field"><span data-i18n="mem.history"></span><input id="history-search" type="search" data-i18n-placeholder="mem.search"></label>
+          <div class="history" id="history"></div>
+          <div class="transcript" id="transcript" hidden></div>
+          <button class="btn ghost danger" id="history-clear" data-i18n="mem.delete_all"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Skills -->
+    <section class="card span-all" id="skills-card">
+      <h3 data-i18n="skills.title"></h3>
+      <p class="hint" data-i18n="skills.hint"></p>
+      <div id="skills"></div>
+      <h4 data-i18n="skills.add"></h4>
+      <div class="seg" id="skill-kind" role="group">
+        <button data-value="paste" data-i18n="skills.kind.paste"></button>
+        <button data-value="zip" data-i18n="skills.kind.zip"></button>
+        <button data-value="url" data-i18n="skills.kind.url"></button>
+      </div>
+      <form id="skill-form" autocomplete="off">
+        <div data-kind="paste"><label class="field"><span>SKILL.md</span><textarea name="text" rows="8" spellcheck="false" placeholder="---&#10;name: release-notes&#10;description: Write release notes from the git log.&#10;---&#10;# Steps&#10;…"></textarea></label></div>
+        <div data-kind="zip"><label class="field"><span data-i18n="skills.zip"></span><input name="zip" type="file" accept=".zip,application/zip"></label></div>
+        <div data-kind="url"><label class="field"><span data-i18n="skills.url"></span><input name="url" placeholder="https://raw.githubusercontent.com/…/SKILL.md" spellcheck="false"></label></div>
+        <button class="btn primary" type="submit" data-i18n="skills.add_button"></button>
+      </form>
+      <p class="hint warn-text" data-i18n="skills.warning"></p>
+    </section>
+
     <!-- Advanced -->
     <section class="card span-all">
       <details>
@@ -187,10 +247,7 @@
           <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
           <label class="switch"><input type="checkbox" id="overlay"><span></span><b data-i18n="adv.overlay"></b></label>
           <label class="switch"><input type="checkbox" id="subtitles"><span></span><b data-i18n="adv.subtitles"></b></label>
-          <label class="field"><span data-i18n="adv.silence_ms"></span><input id="silence-ms" type="number" min="300" max="4000" step="50"></label>
           <label class="field"><span data-i18n="adv.silence_factor"></span><input id="silence-factor" type="number" min="1.2" max="6" step="0.1"></label>
-          <label class="field"><span data-i18n="adv.input_device"></span><input id="input-device" data-i18n-placeholder="adv.default_device"></label>
-          <label class="field"><span data-i18n="adv.output_device"></span><input id="output-device" data-i18n-placeholder="adv.default_device"></label>
         </div>
         <p class="hint" id="config-path"></p>
       </details>

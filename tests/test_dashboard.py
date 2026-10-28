@@ -5,6 +5,7 @@ import json
 import socket
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -20,7 +21,7 @@ def start():
 
     c = build()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
-                                          c.bus, lambda: "ready"), free_port())
+                                          c.bus, lambda: "ready", c.memory, c.skills), free_port())
     server.start()
     return c, server
 
@@ -83,6 +84,33 @@ def main() -> int:
         # The token survives a restart, so an open dashboard window keeps working.
         from lura.modules.dashboard.server import _stable_token
         assert _stable_token() == server.token
+        # Memory & history
+        status, res, _ = call(server, "PUT", "/api/memory", {"facts": "- Likes tea\n"})
+        assert status == 200 and res["facts"] == "- Likes tea\n"
+        assert call(server, "PUT", "/api/memory", {"facts": 3})[0] == 400
+        c.memory.call("remember", {"fact": "Has a cat"})   # Lura, while the page was open
+        status, res, _ = call(server, "PUT", "/api/memory", {"facts": "- Likes coffee\n", "base": "- Likes tea\n"})
+        assert status == 409 and "Has a cat" in res["facts"] and "Has a cat" in c.memory.facts()
+        conv = c.memory.start()
+        c.memory.add(conv, "user", "عايز شاي")
+        c.memory.end(conv)
+        status, res, _ = call(server, "GET", "/api/history?q=" + urllib.parse.quote("شاي"))
+        assert status == 200 and [x["id"] for x in res["conversations"]] == [conv]
+        assert call(server, "GET", "/api/history?q=coffee")[1]["conversations"] == []
+        assert call(server, "GET", f"/api/history/{conv}")[1]["messages"][0]["text"] == "عايز شاي"
+        assert call(server, "POST", "/api/memory/reset", {})[0] == 200
+        assert call(server, "DELETE", f"/api/history/{conv}")[0] == 200
+        assert call(server, "DELETE", f"/api/history/{conv}")[0] == 404
+
+        # Skills
+        status, res, _ = call(server, "POST", "/api/skills",
+                              {"kind": "paste", "text": "---\nname: tea\ndescription: Make tea\n---\nBoil water."})
+        assert status == 200 and res["added"] == "tea" and res["skills"][0]["enabled"]
+        assert call(server, "POST", "/api/skills", {"kind": "paste", "text": "no front matter"})[0] == 400
+        assert call(server, "PATCH", "/api/skills/tea", {"enabled": False})[1]["skills"][0]["enabled"] is False
+        assert call(server, "DELETE", "/api/skills/tea")[0] == 200
+        assert call(server, "DELETE", "/api/skills/tea")[0] == 404
+
         status, res, _ = call(server, "GET", "/api/catalog")
         assert status == 200 and res["catalog"] == {}, "no keys → no providers in the picker"
     finally:

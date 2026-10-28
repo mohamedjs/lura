@@ -34,12 +34,13 @@ def run(c) -> int:
     try:
         import sounddevice as sd
         print(sd.query_devices())
-        rec = sd.rec(int(2 * 16000), samplerate=16000, channels=1, dtype="int16", device=s.input_device)
-        print("Say something (2 s)…")
-        sd.wait()
-        level = c.voice.level(rec.tobytes())
-        (ok if level >= 0.001 else bad)(f"microphone level {level:.4f}"
-                                         + ("" if level >= 0.001 else " — muted or wrong device (lura config input_device <n>)"))
+        print("Say something (3 s)…")
+        mic = c.voice.mic_test(s.input_device)
+        if "error" in mic:
+            bad(f"microphone: {mic['error']}")
+        else:
+            (ok if mic["ok"] else bad)(f"microphone peak {mic['peak']:.4f}, room {mic['floor']:.4f}, {mic['rate']} Hz"
+                                       + ("" if mic["ok"] else " — muted or wrong device (pick it in the dashboard)"))
         c.voice.chime(s)
         ok("speaker (you should have heard two tones)")
     except Exception as exc:

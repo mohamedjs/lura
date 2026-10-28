@@ -407,10 +407,7 @@ function renderAdvanced() {
   bindCheck("#overlay", "overlay_enabled");
   bindCheck("#subtitles", "subtitles");
   bindCheck("#subtitles-voice", "subtitles");
-  bindText("#silence-ms", "silence_ms", Number);
   bindText("#silence-factor", "silence_factor", Number);
-  bindText("#input-device", "input_device", (v) => v.trim() || null);
-  bindText("#output-device", "output_device", (v) => v.trim() || null);
   $("#config-path").textContent = t("adv.config_path", { path: S.paths.config });
   $("#version").textContent = `Lura ${S.version} · ${S.os}`;
 }
@@ -425,6 +422,7 @@ function render() {
   renderPlan();
   renderConnectors();
   renderAdvanced();
+  renderCards();   // cards.js
 }
 
 async function refresh() {

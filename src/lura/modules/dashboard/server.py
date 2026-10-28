@@ -14,6 +14,7 @@ import mimetypes
 import re
 import secrets
 import threading
+import urllib.parse
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -118,12 +119,14 @@ class DashboardServer:
                 if not secrets.compare_digest(self.headers.get("X-Lura-Token", ""), server.token):
                     return self._json(401, {"error": "bad token — reopen the dashboard from Lura"})
                 length = int(self.headers.get("Content-Length") or 0)
-                if length > 256_000:
+                if length > 8_000_000:   # a zipped skill arrives base64 in JSON
                     return self._json(413, {"error": "too large"})
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}") if length else {}
                 except json.JSONDecodeError:
                     return self._json(400, {"error": "invalid JSON"})
+                if method == "GET" and "?" in self.path:   # GET carries its arguments in the query
+                    body = dict(urllib.parse.parse_qsl(self.path.split("?", 1)[1]))
                 for m, pattern, handler in server._routes:
                     if m == method and (match := pattern.match(path)):
                         try:

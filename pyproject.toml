@@ -1,6 +1,6 @@
 [project]
 name = "lura"
-version = "2.0.2"
+version = "2.1.0"
 description = "Lura — a voice-first desktop assistant: Gemini, OpenAI, Claude or OpenRouter thinks, Gemini 3.8 speaks"
 readme = "README.md"
 requires-python = ">=3.10"

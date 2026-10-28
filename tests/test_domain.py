@@ -5,7 +5,7 @@ import json
 import sys
 import time
 
-from lura.modules.assistant import system_prompt, trim_history
+from lura.modules.assistant import fit_history, system_prompt
 from lura.modules.billing import License, entitled
 from lura.modules.brain import Message
 from lura.modules.connectors import Connector, may_add, parse_mcp_json, tool_name
@@ -147,8 +147,67 @@ def check_assistant_rules():
     for i in range(14):
         history += [Message("user", f"q{i}"), Message("assistant", "", tool_calls=[]),
                     Message("tool", "r", tool_call_id=f"c{i}"), Message("assistant", f"a{i}")]
-    trimmed = trim_history(history, 10)
+    from lura.modules.assistant.domain import message_tokens
+    trimmed = fit_history(history, sum(message_tokens(m) for m in history[16:]))   # exactly ten turns
     assert trimmed[0].role == "user" and trimmed[0].text == "q4" and len(trimmed) == 40
+    assert fit_history(history, 1)[0].text == "q13", "the last user turn always goes"
+    assert "[mem]" in system_prompt("You are {name}.", "Lura", "", "en", "", extra="[mem]")
+    # Only the newest recording goes as sound; older ones as their transcript.
+    wav = b"RIFF" + b"\0" * 3000
+    talk = [Message("user", "first words", audio_wav=wav), Message("assistant", "a"),
+            Message("user", "second words", audio_wav=wav)]
+    sent = fit_history(talk, 10_000)
+    assert sent[0].audio_wav is None and sent[0].text == "first words"
+    assert sent[2].audio_wav == wav and sent[2].text == "", "not read twice"
+    assert talk[0].audio_wav == wav, "the history itself is untouched"
+
+
+def check_devices():
+    from lura.modules.voice.domain import pick_device
+    devices = [{"name": "HDA Intel PCH: ALC257 Analog (hw:0,0)", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 2},
+               {"name": "USB Mic: Audio (hw:2,0)", "hostapi": 0, "max_input_channels": 1, "max_output_channels": 0},
+               {"name": "pulse", "hostapi": 0, "max_input_channels": 32, "max_output_channels": 32},
+               {"name": "USB Mic: Audio", "hostapi": 1, "max_input_channels": 1, "max_output_channels": 0}]
+    assert pick_device(devices, None, "input") is None and pick_device(devices, " ", "input") is None
+    assert pick_device(devices, "USB Mic: Audio (hw:1,0)", "input") == 1, "card number moved after a replug"
+    assert pick_device(devices, "USB Mic: Audio", "input", hostapi=1) == 3, "default host API wins"
+    assert pick_device(devices, "USB Mic: Audio", "output") is None, "an input-only device is not a speaker"
+    assert pick_device(devices, "2", "input") == 2, "a legacy index still works"
+    assert pick_device(devices, "9", "input") is None and pick_device(devices, "Gone", "input") is None
+
+
+def check_end_of_turn():
+    import random
+    from lura.modules.voice.domain import EndOfTurn
+    random.seed(7)
+
+    def run(levels, silence_ms=1000):
+        turn = EndOfTurn(0.1, silence_ms, 2.0, 8.0, 30.0)
+        for i, level in enumerate(levels):
+            if (verdict := turn.feed(level)) != "wait":
+                return verdict, i, turn.start
+        return "wait", len(levels), turn.start
+
+    words = lambda n: [0.002 if i % 5 == 4 else random.uniform(0.05, 0.2) for i in range(n)]
+    # Talking the instant the mic opens: the old 0.5 s calibration took this for noise.
+    assert run(words(20) + [0.002] * 15) == ("done", 28, 0)
+    assert run([0.01] * 100) == ("nothing", 79, None), "a steady fan is not speech"
+    verdict, at, start = run([0.01] * 40 + [0.1] * 10 + [0.01] * 15)
+    assert verdict == "done" and start == 37 and at == 59, "leading quiet trimmed to the pre-roll"
+    assert run(words(20) + [0.002] * 15, silence_ms=500)[1] == 23
+    blip = EndOfTurn(0.1, 1000, 2.0, 8.0, 30.0)
+    for level in [0.005] * 10 + [0.2] + [0.005] * 10:
+        blip.feed(level)
+    assert blip.start is not None and abs(blip.spoken_seconds - 0.1) < 1e-9, "a click is one block"
+
+
+def check_resample():
+    import numpy as np
+    from lura.modules.voice.infrastructure.audio import resample
+    tone = (np.sin(np.arange(4800) * 2 * np.pi * 440 / 48000) * 8000).astype(np.int16).tobytes()
+    out = np.frombuffer(resample(tone, 48000, 16000), np.int16)
+    assert len(out) == 1600 and 7000 < np.abs(out).max() <= 8000
+    assert resample(tone, 16000, 16000) is tone
 
 
 def check_brain_catalog():

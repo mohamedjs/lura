@@ -71,7 +71,7 @@ def cmd_run(args) -> int:
     s = c.settings.current
     stop = threading.Event()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
-                                          c.bus, lambda: c.assistant.status), s.dashboard_port)
+                                          c.bus, lambda: c.assistant.status, c.memory, c.skills), s.dashboard_port)
     try:
         server.start()
     except OSError as exc:
@@ -188,7 +188,7 @@ def cmd_dashboard(args) -> int:
         return 0
     c = _container()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors, c.billing,
-                                          c.bus, lambda: "offline", can_restart=False),
+                                          c.bus, lambda: "offline", c.memory, c.skills, can_restart=False),
                              c.settings.current.dashboard_port)
     server.start()
     log.info("Lura is not running; this dashboard is standalone until its window closes.")
