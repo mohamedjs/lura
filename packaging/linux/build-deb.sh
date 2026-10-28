@@ -46,11 +46,28 @@ cat > "$PKG/DEBIAN/postinst" <<'POSTINST'
 set -e
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
+# Start Lura again for everyone it was running for before the upgrade (prerm
+# stopped them, so systemd did not crash-loop on a half-unpacked /opt/lura).
+if [ -f /run/lura-was-running ]; then
+  for u in $(sort -u /run/lura-was-running); do
+    systemctl --user -M "$u@" daemon-reload 2>/dev/null || true
+    systemctl --user -M "$u@" start lura.service 2>/dev/null || true
+  done
+  rm -f /run/lura-was-running
+fi
 echo "Lura is installed. Open it from your applications menu, or run: lura"
 POSTINST
 cat > "$PKG/DEBIAN/prerm" <<'PRERM'
 #!/bin/sh
-# Per-user services are stopped by each user's session; nothing system-wide to stop.
+# Stop each user's running Lura before the files go away; postinst starts it
+# again. Without this the service restarts every few seconds mid-upgrade and
+# fails with 203/EXEC until the new files land.
+for u in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
+  if systemctl --user -M "$u@" is-active -q lura.service 2>/dev/null; then
+    echo "$u" >> /run/lura-was-running
+    systemctl --user -M "$u@" stop lura.service 2>/dev/null || true
+  fi
+done
 exit 0
 PRERM
 chmod 755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/prerm"

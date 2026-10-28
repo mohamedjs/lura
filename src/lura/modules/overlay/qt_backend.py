@@ -202,7 +202,7 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
         subs.triggered.connect(lambda _=False: actions["subtitles"]())
         menu.aboutToShow.connect(lambda: subs.setChecked(shared.subtitles_enabled))
     menu.addSeparator()
-    menu.addAction(labels.get("quit", "Quit")).triggered.connect(lambda: stop.set())
+    menu.addAction(labels.get("quit", "Quit")).triggered.connect(actions.get("quit", stop.set))
     tray.setContextMenu(menu)
     tray.setToolTip("Lura")
     tray.activated.connect(lambda reason: actions.get("open", lambda: None)()

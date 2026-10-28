@@ -80,12 +80,17 @@ def cmd_run(args) -> int:
         return 1
 
     from .shared import events
+
+    def quit_from_tray():
+        log.info("Quit from the tray menu.")
+        stop.set()
+
     def toggle_subtitles():
         c.settings.update({"subtitles": not c.settings.current.subtitles})
 
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
                       actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
-                               "subtitles": toggle_subtitles},
+                               "subtitles": toggle_subtitles, "quit": quit_from_tray},
                       labels=_overlay_labels(s.ui_language))
     c.assistant.presence = overlay.state
     overlay.state.subtitles_enabled = s.subtitles
@@ -133,10 +138,28 @@ def cmd_run(args) -> int:
                 apply_autostart(True)
 
     log.info("Lura %s — say %r. Dashboard: lura dashboard", __version__, s.wake_word)
-    worker = threading.Thread(target=c.assistant.run_forever, args=(stop,), daemon=True, name="assistant")
+    failed = threading.Event()
+
+    def assistant_loop():
+        # If the assistant dies, the face must not stay up pretending to
+        # listen: stop with a failure code so systemd starts a fresh Lura.
+        try:
+            c.assistant.run_forever(stop)
+        except Exception:
+            log.exception("The assistant stopped unexpectedly.")
+            failed.set()
+        if not stop.is_set():
+            log.error("The assistant loop ended on its own; restarting.")
+            failed.set()
+            stop.set()
+
+    worker = threading.Thread(target=assistant_loop, daemon=True, name="assistant")
     worker.start()
     try:
         overlay.run(stop)        # owns the main thread (Qt needs it)
+        if not stop.is_set():
+            log.error("The face's window loop ended on its own; restarting.")
+            failed.set()
     finally:
         stop.set()
         c.assistant.interrupt()
@@ -145,6 +168,8 @@ def cmd_run(args) -> int:
         server.stop()
     if restart.is_set():
         return _restart_self()
+    if failed.is_set():
+        return 1   # Restart=on-failure brings it back; exit 0 would leave it dead
     log.info("Stopped.")
     return 0
 
