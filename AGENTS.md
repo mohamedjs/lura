@@ -108,6 +108,20 @@ lura selftest                           # devices, keys, real brain + TTS round 
 "model not found", not as a broken app. No pytest, on purpose: each test is a plain
 script.
 
+### Field facts (from Mohamed's logs, Oct 2026)
+- **The free Gemini tier runs out.** TTS 429 with "retry in 4h…", hearing 503s and
+  60 s timeouts made Lura silent or hang. With both keys the voice falls back to the
+  other provider; keep that path, and never retry an exhausted provider every minute.
+- **The second monitor can appear after Lura starts** (an HDMI output on the NVIDIA
+  GPU). Never build the faces once; follow `screenAdded`/`monitor-added`.
+- **Noise gets transcribed as words** ("مدرسه") and then answered. Hence the speech
+  band level, the transcriber's "output nothing" rule and `[[quiet]]`.
+- **A `.deb` upgrade crash-looped the service with 203/EXEC** while files were
+  missing: prerm stops running user instances and postinst starts them again. Do not
+  add `ConditionPathExists` — after an upgrade the service would stay dead.
+- **A free OpenRouter model as the brain answers badly** (rate limits, weak at
+  follow-ups). The dashboard warns; it does not switch it for the user.
+
 ## Things that will tempt you, and shouldn't
 
 - **Don't hold a Live session open between wake words.** Sessions are capped.

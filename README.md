@@ -21,11 +21,15 @@ lura:  "Opening it now… done, it's playing."
   is still writing the rest.
 - **Realtime mode:** Gemini Live, a full-duplex audio line for the fastest replies.
 - **Connectors:** Chrome DevTools, live web pages and your files are built in.
-  Add any other MCP server by URL + token or by pasting its `mcp.json` (**Pro**).
+  Add any other MCP server by URL + token or by pasting its `mcp.json`.
 - **The face:** an animated hologram floats top-right on every monitor while she
   listens, thinks and speaks.
-- **Dashboard:** a local, hand-drawn neumorphic page for keys, models, voice,
-  language, connectors and your plan, in Arabic or English.
+- **Memory:** every conversation is kept on your computer; each new one starts
+  from what she knows about you, a running summary and the recent turns.
+- **Skills:** add Agent Skills (`SKILL.md`) and use them with any model.
+- **Live captions:** what you say is written under the face while you speak.
+- **Dashboard:** a calm local page with tabs for keys, brain, voice, microphone,
+  memory, skills and connectors, in Arabic or English.
 
 ## Screenshots
 
@@ -77,17 +81,14 @@ Keys are tested before they are saved. They live in a file only you can read
 Environment variables override the file: `GEMINI_API_KEY`, `OPENAI_API_KEY`,
 `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`.
 
-## Plans
+## Open source
 
-| | Free | Pro, $5/month |
-|---|---|---|
-| Voice assistant, Arabic & English | ✓ | ✓ |
-| Gemini, OpenAI, Claude, OpenRouter | ✓ | ✓ |
-| Built-in connectors: Chrome, web, files | ✓ | ✓ |
-| Add your own MCP connectors | | ✓ |
+Lura is free and open source under the [MIT licence](LICENSE). Nothing is
+locked: every feature, including your own connectors and skills, is free. You
+bring your own AI keys and pay the provider directly.
 
-You subscribe through Lemon Squeezy and paste the licence key in the dashboard
-(or run `lura pro activate`).
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). The
+maintainer reviews and approves every pull request.
 
 ## Command line
 
@@ -101,7 +102,6 @@ lura login --provider gemini|openai|anthropic|openrouter
 lura config [name] [value]
 lura models [provider] [search]
 lura mcp [list|add-url|import|remove|on|off|path]
-lura pro [status|activate|deactivate|refresh]
 lura autostart on|off
 ```
 

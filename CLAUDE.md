@@ -6,9 +6,10 @@ Arabic or English and can act on the machine (open apps/URLs, find files, run gu
 commands, briefing, MCP connectors). Any of Gemini / OpenAI / Anthropic / OpenRouter
 can be the brain; the voice is always Gemini 3.8 Flash TTS (direct or via OpenRouter).
 A floating transparent hologram face shows on every monitor; a local dashboard
-(neumorphism + grid, handwritten fonts, AR/EN) configures everything. Free plan +
-Pro ($5/month, Lemon Squeezy licence) which unlocks custom connectors. On Mohamed's
-machine it runs as a `systemd --user` service from `/var/www/html/lura`.
+(calm, tabbed, AR/EN) configures everything. Free and open source (MIT), nothing
+locked; the maintainer approves every PR (CODEOWNERS). On Mohamed's machine it runs
+as a `systemd --user` service — since 2.1 from the installed .deb (`/opt/lura/LuraApp`),
+so source changes reach him only through a release.
 
 Repo: `git@github.com:mohamedjs/lura.git`, default branch `main`.
 
@@ -52,8 +53,7 @@ src/lura/
     brain/      OpenAI-compatible adapter (OpenAI, OpenRouter, Gemini) + Anthropic SDK adapter, streaming
     voice/      SentenceChunker, Gemini TTS direct/OpenRouter, transcriber, audio, Vosk wake, Gemini Live
     tools/      built-in tools + command guard (check_command), per-OS impl, briefing
-    connectors/ MCP stdio + Streamable HTTP, mcp.json, 3 built-ins (chrome, web, files), Pro rule
-    billing/    Free/Pro, Lemon Squeezy licence API (store.json filled at release)
+    connectors/ MCP stdio + Streamable HTTP, mcp.json, 3 built-ins (chrome, web, files)
     memory/     history.db (SQLite, LIKE search), memory.md, running summary → summaries/<date>.md
     skills/     <config>/skills/<name>/SKILL.md + skills.json; prompt lists them, use_skill reads one
     assistant/  wake loop, PipelineConversation (streams brain → TTS), realtime, briefing
@@ -67,7 +67,7 @@ video/          Node + Playwright promo-video renderer (separate from the app)
 ```
 
 Paths (Linux, unchanged from 1.x): config `~/.config/lura/` (settings.json, keys.json,
-mcp.json, license.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
+mcp.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
@@ -84,7 +84,7 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   `fallbacks: "default"`; turns replayed verbatim.
 - **Realtime:** Gemini Live `gemini-2.5-flash-native-audio-preview-12-2025`, mic gated.
 - **Connectors:** built-ins `chrome` (chrome-devtools-mcp), `web` (mcp-fetch-server),
-  `files` (server-filesystem ~) via `npx`; custom ones need Pro. Pipeline mode pulls MCP
+  `files` (server-filesystem ~) via `npx`; anyone can add more. Pipeline mode pulls MCP
   schemas only via `find_tools`.
 - **Settings migration:** a 1.x settings.json (`provider`, `openrouter_model`, …) is
   converted on load (`settings/domain.py: migrate_legacy`).
@@ -117,7 +117,23 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   `use_skill`, files via `read_skill_file` (confined to the folder); scripts only through
   the guarded `run_command`.
 - **Briefing** once per boot, in the conversation language; GitHub line only if a
-  connector named `github` is connected (it is custom → needs Pro).
+  connector named `github` is connected.
+- **2.2 (Oct 2026):**
+  - Voice falls back Gemini ⇄ OpenRouter on 429/5xx/timeouts (hearing gives up after
+    20 s) and skips an exhausted provider for as long as its "retry in 4h…" says.
+  - System prompt built in `assistant/domain.py: system_prompt` (date/time, imperfect
+    transcripts, ask-don't-guess, `[[quiet]]` for noise, memory/tool use, rename note).
+    The stored 1.x default persona is ignored; a custom one is appended.
+  - Noise: end of turn measures the 150–4000 Hz band (`audio.speech_level`); the
+    transcriber returns nothing for background/unclear audio; `[[quiet]]` turns are
+    dropped from history and memory; 2 in a row close the session.
+  - Live captions (`LiveCaption`): partial transcription every ~1.5 s of speech,
+    display only, max 8 per turn (`live_captions` setting).
+  - Overlay follows screens added later (screenAdded / monitor-added), renders once
+    per frame for all screens (half rate idle), sticky on X11 and all Spaces on macOS
+    (`overlay/workspaces.py`).
+  - A dead assistant/face loop exits 1 (systemd restarts it); tray Quit is logged.
+  - Wake word checked against the Vosk vocabulary on save; renaming moves it along.
 
 ## The overlay face (`modules/overlay/`)
 
@@ -159,7 +175,7 @@ State what you ran and what it printed; say plainly what wasn't verified
 His old unit (`ExecStart=/var/www/html/lura/.venv/bin/lura run`) keeps working; keys,
 settings (migrated), mcp.json and the Vosk model stay where they are. Re-run
 `./install.sh` once to get the new unit (`--no-browser`) and `anthropic`. His `github`
-MCP server is a custom connector → locked until Pro is activated.
+MCP server works as a normal connector (no plan any more).
 
 ## Git history worth knowing
 

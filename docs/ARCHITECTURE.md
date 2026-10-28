@@ -15,7 +15,7 @@ src/lura/
 │   ├── events.py       in-process event bus (dashboard ⇄ assistant)
 │   ├── presence.py     Presence protocol: what the face shows
 │   ├── desktop.py      start at login: systemd / XDG / LaunchAgent / Run key
-│   ├── errors.py       NeedsSetup (exit 78), ProRequired
+│   ├── errors.py       NeedsSetup (exit 78)
 │   └── i18n/           en.json, ar.json + t()
 └── modules/
     ├── settings/     Settings, providers, voices, capability rules; JSON + 0600 key file
@@ -23,7 +23,6 @@ src/lura/
     ├── voice/        sentence chunker, Gemini TTS (direct / OpenRouter), transcriber, mic/speaker, Vosk wake word, Gemini Live
     ├── tools/        built-in tools + command guard; per-OS implementations; briefing
     ├── connectors/   MCP: stdio and Streamable HTTP clients, mcp.json repository, plan rule
-    ├── billing/      Free/Pro, licence entitlement rule, Lemon Squeezy licence API
     ├── memory/       history (SQLite), memory.md facts, running summary + compaction, memory tools
     ├── skills/       Agent Skills folders (SKILL.md), prompt listing, use_skill / read_skill_file
     ├── assistant/    orchestration: wake loop, pipeline conversation, realtime, briefing

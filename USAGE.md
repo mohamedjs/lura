@@ -26,10 +26,12 @@ open the dashboard.**
   Press ▶ to hear one.
 - **Language & you:** conversation language (Arabic answers in Egyptian Arabic),
   your name, the assistant's name and the wake word.
-- **Connectors:** built-in Chrome, web and files; with Pro, add your own (below).
-- **Plan:** subscribe and activate your licence key.
-- **Advanced:** morning briefing, start at login, the face on/off, turn-end pause,
-  microphone and speaker.
+- **Microphone:** pick the microphone and speaker, test them, set the pause before
+  she answers and how long she waits for your next sentence.
+- **Memory:** what she knows about you (`memory.md`), past conversations, search,
+  start fresh.
+- **Skills** and **Connectors:** add your own (below); built-in Chrome, web and files.
+- **Settings:** morning briefing, start at login.
 
 ## Things to ask
 
@@ -42,7 +44,7 @@ open the dashboard.**
 She will not delete or overwrite anything; that is blocked in code. Ask her to
 look, then do the deleting yourself.
 
-## Adding a connector (Pro)
+## Adding a connector
 
 In **Connectors → Add a connector**, pick one of:
 
