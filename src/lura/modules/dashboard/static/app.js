@@ -25,7 +25,6 @@ async function api(method, path, body) {
   if (!res.ok) {
     const err = new Error(data.error || `HTTP ${res.status}`);
     err.status = res.status;
-    err.pro = data.pro_required;
     throw err;
   }
   return data;
@@ -63,6 +62,7 @@ const fail = (e) => toast(e.message, true);
 async function save(patch) {
   try {
     const res = await api("PUT", "/api/settings", { patch });
+    (res.notes || []).forEach((note) => toast(note));
     S.settings = res.settings;
     S.capabilities = res.capabilities;
     S.restart_pending = res.restart_pending;
@@ -304,39 +304,12 @@ function renderLanguage() {
   bindText("#wake-word", "wake_word", (v) => v.trim().toLowerCase());
 }
 
-function renderPlan() {
-  const plan = S.plan;
-  const pro = plan.plan === "pro";
-  $("#plan-free").classList.toggle("current", !pro);
-  $("#plan-pro").classList.toggle("current", pro);
-  $("#plan-free-actions").hidden = pro;
-  $("#plan-pro-actions").hidden = !pro;
-  $("#checkout").href = plan.checkout_url;
-  $("#manage").href = plan.manage_url;
-  $("#plan-pro-info").textContent = t("plan.pro_info", { email: plan.email || "—", status: plan.status || "active" });
-  $("#activate").onclick = async () => {
-    const btn = $("#activate");
-    btn.disabled = true;
-    try {
-      S.plan = await api("POST", "/api/billing/activate", { key: $("#license-key").value });
-      toast(t("plan.activated"));
-      await refresh();
-    } catch (e) { fail(e); } finally { btn.disabled = false; }
-  };
-  $("#deactivate").onclick = async () => {
-    if (!confirm(t("plan.deactivate_confirm"))) return;
-    try { S.plan = await api("POST", "/api/billing/deactivate"); await refresh(); } catch (e) { fail(e); }
-  };
-}
-
 function renderConnectors() {
-  const pro = S.plan.plan === "pro";
-  $("#add-connector").classList.toggle("locked", !pro);
   const box = $("#connectors");
   box.replaceChildren(...S.connectors.map((c) => {
     const row = Object.assign(document.createElement("div"), { className: "conn" });
     const dot = Object.assign(document.createElement("span"), {
-      className: "dot " + ({ ready: "ok", starting: "warn", error: "bad", locked: "bad" }[c.status] || ""),
+      className: "dot " + ({ ready: "ok", starting: "warn", error: "bad" }[c.status] || ""),
       title: t(`conn.status.${c.status}`),
     });
     const meta = Object.assign(document.createElement("div"), { className: "meta" });
@@ -351,7 +324,7 @@ function renderConnectors() {
 
     const sw = document.createElement("label");
     sw.className = "switch";
-    const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: c.enabled && c.status !== "locked" });
+    const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: c.enabled });
     cb.onchange = async () => {
       try { S.connectors = (await api("PATCH", `/api/connectors/${c.name}`, { enabled: cb.checked })).connectors; render(); }
       catch (e) { fail(e); render(); }
@@ -396,7 +369,6 @@ async function submitConnector(e) {
     render();
     setTimeout(refresh, 4000);   // the first `npx -y` takes a moment
   } catch (err) {
-    if (err.pro) location.hash = "plan-card";
     fail(err);
   }
 }
@@ -406,7 +378,6 @@ function renderAdvanced() {
   bindCheck("#start-login", "start_at_login");
   bindCheck("#overlay", "overlay_enabled");
   bindCheck("#subtitles", "subtitles");
-  bindCheck("#subtitles-voice", "subtitles");
   bindText("#silence-factor", "silence_factor", Number);
   $("#config-path").textContent = t("adv.config_path", { path: S.paths.config });
   $("#version").textContent = `Lura ${S.version} · ${S.os}`;
@@ -419,7 +390,6 @@ function render() {
   renderBrain();
   renderVoice();
   renderLanguage();
-  renderPlan();
   renderConnectors();
   renderAdvanced();
   renderCards();   // cards.js

@@ -10,12 +10,12 @@
 <script src="cards.js" defer></script>
 </head>
 <body>
-<div class="paper">
+<div class="shell">
   <header class="top">
     <div class="brand">
       <img src="favicon.svg" alt="" class="logo">
       <div>
-        <h1>Lura</h1>
+        <h1 id="brand-name">Lura</h1>
         <p class="tagline" data-i18n="app.tagline"></p>
       </div>
     </div>
@@ -28,232 +28,250 @@
     </div>
   </header>
 
-  <main class="grid">
-    <!-- Talk -->
-    <section class="card hero span-all">
-      <button class="talk" id="talk-btn" aria-label="Talk">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2Z"/></svg>
-      </button>
-      <div class="hero-text">
-        <h2 id="hero-title" data-i18n="hero.title"></h2>
-        <p id="hero-sub"></p>
-        <ul class="problems" id="problems"></ul>
-        <div class="row">
-          <button class="btn ghost" id="stop-btn" data-i18n="hero.stop"></button>
-          <button class="btn primary" id="restart-btn" hidden><span class="spin" aria-hidden="true">↻</span><span data-i18n="restart.button"></span></button>
-          <span class="hint" id="restart-hint" hidden data-i18n="restart.hint"></span>
-        </div>
-      </div>
-    </section>
+  <div class="layout">
+    <nav class="tabs" id="tabs" role="tablist">
+      <button data-tab="home" role="tab"><span class="ico" aria-hidden="true">◉</span><span data-i18n="tab.home"></span></button>
+      <button data-tab="keys" role="tab"><span class="ico" aria-hidden="true">⚿</span><span data-i18n="tab.keys"></span><i class="badge" id="keys-badge" hidden></i></button>
+      <button data-tab="brain" role="tab"><span class="ico" aria-hidden="true">✦</span><span data-i18n="tab.brain"></span></button>
+      <button data-tab="voice" role="tab"><span class="ico" aria-hidden="true">♪</span><span data-i18n="tab.voice"></span></button>
+      <button data-tab="audio" role="tab"><span class="ico" aria-hidden="true">🎙</span><span data-i18n="tab.audio"></span></button>
+      <button data-tab="you" role="tab"><span class="ico" aria-hidden="true">☺</span><span data-i18n="tab.you"></span></button>
+      <button data-tab="memory" role="tab"><span class="ico" aria-hidden="true">❖</span><span data-i18n="tab.memory"></span></button>
+      <button data-tab="skills" role="tab"><span class="ico" aria-hidden="true">✎</span><span data-i18n="tab.skills"></span></button>
+      <button data-tab="connectors" role="tab"><span class="ico" aria-hidden="true">⇄</span><span data-i18n="tab.connectors"></span></button>
+      <button data-tab="settings" role="tab"><span class="ico" aria-hidden="true">⚙</span><span data-i18n="tab.settings"></span></button>
+    </nav>
 
-    <!-- Keys -->
-    <section class="card span-2" id="keys-card">
-      <h3 data-i18n="keys.title"></h3>
-      <p class="hint" data-i18n="keys.hint"></p>
-      <div id="keys"></div>
-    </section>
+    <main class="panels">
+      <!-- Home -->
+      <section class="panel" data-tab="home">
+        <div class="card hero">
+          <button class="talk" id="talk-btn" aria-label="Talk">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2Z"/></svg>
+          </button>
+          <div class="hero-text">
+            <h2 id="hero-title" data-i18n="hero.title"></h2>
+            <p id="hero-sub"></p>
+            <ul class="problems" id="problems"></ul>
+            <div class="row">
+              <button class="btn" id="stop-btn" data-i18n="hero.stop"></button>
+              <button class="btn primary" id="restart-btn" hidden><span class="spin" aria-hidden="true">↻</span><span data-i18n="restart.button"></span></button>
+            </div>
+            <p class="hint" id="restart-hint" hidden data-i18n="restart.hint"></p>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="home.now"></h3>
+          <dl class="facts" id="home-facts"></dl>
+        </div>
+        <div class="card">
+          <h3 data-i18n="home.screen"></h3>
+          <label class="switch"><input type="checkbox" id="subtitles"><span></span><b data-i18n="adv.subtitles"></b></label>
+          <label class="switch"><input type="checkbox" id="live-captions"><span></span><b data-i18n="home.live_captions"></b></label>
+          <p class="hint" data-i18n="home.live_hint"></p>
+          <label class="switch"><input type="checkbox" id="overlay"><span></span><b data-i18n="adv.overlay"></b></label>
+        </div>
+      </section>
 
-    <!-- Brain -->
-    <section class="card">
-      <h3 data-i18n="brain.title"></h3>
-      <label class="field"><span data-i18n="brain.mode"></span>
-        <div class="seg" id="mode" role="group">
-          <button data-value="pipeline" data-i18n="brain.mode.pipeline"></button>
-          <button data-value="realtime" data-i18n="brain.mode.realtime"></button>
+      <!-- Keys -->
+      <section class="panel" data-tab="keys">
+        <div class="card">
+          <h3 data-i18n="keys.title"></h3>
+          <p class="hint" data-i18n="keys.hint"></p>
+          <div id="keys"></div>
         </div>
-      </label>
-      <p class="hint" id="mode-hint"></p>
-      <div id="brain-pipeline">
-        <div class="field"><span data-i18n="brain.model_pick"></span>
-          <div class="current-model" id="current-model"></div>
-          <input id="model-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="brain.search">
-          <div class="model-list" id="model-list" role="listbox"></div>
-        </div>
-        <label class="field"><span data-i18n="brain.effort"></span>
-          <select id="effort">
-            <option value="minimal" data-i18n="effort.minimal"></option>
-            <option value="low" data-i18n="effort.low"></option>
-            <option value="medium" data-i18n="effort.medium"></option>
-            <option value="high" data-i18n="effort.high"></option>
-            <option value="" data-i18n="effort.default"></option>
-          </select>
-        </label>
-        <p class="hint" id="hearing-hint"></p>
-      </div>
-    </section>
+      </section>
 
-    <!-- Voice -->
-    <section class="card">
-      <h3 data-i18n="voice.title"></h3>
-      <label class="field"><span data-i18n="voice.provider"></span>
-        <select id="voice-provider">
-          <option value="auto" data-i18n="voice.provider.auto"></option>
-          <option value="gemini">Google Gemini</option>
-          <option value="openrouter">OpenRouter</option>
-        </select>
-      </label>
-      <p class="hint" data-i18n="voice.model_hint"></p>
-      <label class="field"><span data-i18n="voice.gender"></span>
-        <div class="seg" id="gender" role="group">
-          <button data-value="female" data-i18n="voice.female"></button>
-          <button data-value="male" data-i18n="voice.male"></button>
+      <!-- Brain -->
+      <section class="panel" data-tab="brain">
+        <div class="card">
+          <h3 data-i18n="brain.title"></h3>
+          <label class="field"><span data-i18n="brain.mode"></span>
+            <div class="seg" id="mode" role="group">
+              <button data-value="pipeline" data-i18n="brain.mode.pipeline"></button>
+              <button data-value="realtime" data-i18n="brain.mode.realtime"></button>
+            </div>
+          </label>
+          <p class="hint" id="mode-hint"></p>
+          <div id="brain-pipeline">
+            <div class="field"><span data-i18n="brain.model_pick"></span>
+              <div class="current-model" id="current-model"></div>
+              <p class="note warn" id="model-warning" hidden></p>
+              <input id="model-search" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="brain.search">
+              <div class="model-list" id="model-list" role="listbox"></div>
+            </div>
+            <label class="field"><span data-i18n="brain.effort"></span>
+              <select id="effort">
+                <option value="minimal" data-i18n="effort.minimal"></option>
+                <option value="low" data-i18n="effort.low"></option>
+                <option value="medium" data-i18n="effort.medium"></option>
+                <option value="high" data-i18n="effort.high"></option>
+                <option value="" data-i18n="effort.default"></option>
+              </select>
+            </label>
+            <p class="hint" id="hearing-hint"></p>
+          </div>
         </div>
-      </label>
-      <div class="voices" id="voices"></div>
-      <label class="switch"><input type="checkbox" id="subtitles-voice"><span></span><b data-i18n="adv.subtitles"></b></label>
-      <label class="field"><span data-i18n="voice.style"></span>
-        <input id="tts-style" data-i18n-placeholder="voice.style_placeholder">
-      </label>
-    </section>
+        <div class="card">
+          <h3 data-i18n="brain.persona"></h3>
+          <p class="hint" data-i18n="brain.persona_hint"></p>
+          <textarea id="persona" rows="5" data-i18n-placeholder="brain.persona_placeholder"></textarea>
+          <div class="row"><button class="btn primary" id="persona-save" data-i18n="mem.save"></button></div>
+        </div>
+      </section>
 
-    <!-- Microphone & speaker -->
-    <section class="card" id="audio-card">
-      <h3 data-i18n="audio.title"></h3>
-      <label class="field"><span data-i18n="audio.mic"></span><select id="input-device"></select></label>
-      <div class="inline"><button class="btn" id="mic-test" data-i18n="audio.test_mic"></button><div class="meter" id="mic-meter"><i></i></div></div>
-      <p class="hint" id="mic-result"></p>
-      <label class="field"><span data-i18n="audio.speaker"></span><select id="output-device"></select></label>
-      <button class="btn" id="speaker-test" data-i18n="audio.test_speaker"></button>
-      <label class="field"><span><span data-i18n="audio.pause"></span> <b id="pause-value"></b></span>
-        <input id="silence-ms" type="range" min="500" max="2500" step="100"></label>
-      <label class="field"><span data-i18n="audio.follow_up"></span>
-        <select id="follow-up"><option value="4">4 s</option><option value="8">8 s</option><option value="15">15 s</option><option value="30">30 s</option></select></label>
-      <p class="hint" data-i18n="audio.hint"></p>
-    </section>
+      <!-- Voice -->
+      <section class="panel" data-tab="voice">
+        <div class="card">
+          <h3 data-i18n="voice.title"></h3>
+          <label class="field"><span data-i18n="voice.provider"></span>
+            <select id="voice-provider">
+              <option value="auto" data-i18n="voice.provider.auto"></option>
+              <option value="gemini">Google Gemini</option>
+              <option value="openrouter">OpenRouter</option>
+            </select>
+          </label>
+          <p class="hint" data-i18n="voice.model_hint"></p>
+          <label class="field"><span data-i18n="voice.gender"></span>
+            <div class="seg" id="gender" role="group">
+              <button data-value="female" data-i18n="voice.female"></button>
+              <button data-value="male" data-i18n="voice.male"></button>
+            </div>
+          </label>
+          <div class="voices" id="voices"></div>
+          <label class="field"><span data-i18n="voice.style"></span>
+            <input id="tts-style" data-i18n-placeholder="voice.style_placeholder">
+          </label>
+        </div>
+      </section>
 
-    <!-- Language & you -->
-    <section class="card">
-      <h3 data-i18n="lang.title"></h3>
-      <label class="field"><span data-i18n="lang.conversation"></span>
-        <div class="seg" id="conv-lang" role="group">
-          <button data-value="en">English</button><button data-value="ar">العربية</button>
+      <!-- Microphone & speaker -->
+      <section class="panel" data-tab="audio">
+        <div class="card" id="audio-card">
+          <h3 data-i18n="audio.title"></h3>
+          <label class="field"><span data-i18n="audio.mic"></span><select id="input-device"></select></label>
+          <div class="inline"><button class="btn" id="mic-test" data-i18n="audio.test_mic"></button><div class="meter" id="mic-meter"><i></i></div></div>
+          <p class="hint" id="mic-result"></p>
+          <label class="field"><span data-i18n="audio.speaker"></span><select id="output-device"></select></label>
+          <button class="btn" id="speaker-test" data-i18n="audio.test_speaker"></button>
         </div>
-      </label>
-      <label class="field"><span data-i18n="lang.assistant_name"></span><input id="assistant-name"></label>
-      <label class="field"><span data-i18n="lang.user_name"></span><input id="user-name"></label>
-      <label class="field"><span data-i18n="lang.wake_word"></span><input id="wake-word" spellcheck="false"></label>
-      <p class="hint" data-i18n="lang.wake_hint"></p>
-    </section>
+        <div class="card">
+          <h3 data-i18n="audio.turns"></h3>
+          <label class="field"><span><span data-i18n="audio.pause"></span> <b id="pause-value"></b></span>
+            <input id="silence-ms" type="range" min="500" max="2500" step="100"></label>
+          <label class="field"><span data-i18n="audio.follow_up"></span>
+            <select id="follow-up"><option value="4">4 s</option><option value="8">8 s</option><option value="15">15 s</option><option value="30">30 s</option></select></label>
+          <label class="field"><span data-i18n="adv.silence_factor"></span><input id="silence-factor" type="number" min="1.2" max="6" step="0.1"></label>
+          <p class="hint" data-i18n="audio.hint"></p>
+        </div>
+      </section>
 
-    <!-- Plan -->
-    <section class="card" id="plan-card">
-      <h3 data-i18n="plan.title"></h3>
-      <div class="plans">
-        <div class="plan" id="plan-free">
-          <h4 data-i18n="plan.free"></h4>
-          <p class="price">$0</p>
-          <ul><li data-i18n="plan.f.voice"></li><li data-i18n="plan.f.providers"></li><li data-i18n="plan.f.builtin"></li></ul>
+      <!-- You & Lura -->
+      <section class="panel" data-tab="you">
+        <div class="card">
+          <h3 data-i18n="lang.title"></h3>
+          <label class="field"><span data-i18n="lang.conversation"></span>
+            <div class="seg" id="conv-lang" role="group">
+              <button data-value="en">English</button><button data-value="ar">العربية</button>
+            </div>
+          </label>
+          <label class="field"><span data-i18n="lang.assistant_name"></span><input id="assistant-name"></label>
+          <label class="field"><span data-i18n="lang.user_name"></span><input id="user-name"></label>
+          <label class="field"><span data-i18n="lang.wake_word"></span><input id="wake-word" spellcheck="false"></label>
+          <p class="hint" data-i18n="lang.wake_hint"></p>
         </div>
-        <div class="plan pro" id="plan-pro">
-          <h4>Pro</h4>
-          <p class="price">$5<small data-i18n="plan.per_month"></small></p>
-          <ul><li data-i18n="plan.f.everything"></li><li data-i18n="plan.f.custom"></li><li data-i18n="plan.f.support"></li></ul>
-        </div>
-      </div>
-      <div id="plan-free-actions">
-        <a class="btn primary block" id="checkout" target="_blank" rel="noopener" data-i18n="plan.subscribe"></a>
-        <label class="field"><span data-i18n="plan.license"></span>
-          <div class="inline"><input id="license-key" spellcheck="false" autocomplete="off" placeholder="XXXXXXXX-XXXX-…"><button class="btn" id="activate" data-i18n="plan.activate"></button></div>
-        </label>
-      </div>
-      <div id="plan-pro-actions" hidden>
-        <p class="hint" id="plan-pro-info"></p>
-        <div class="row">
-          <a class="btn ghost" id="manage" target="_blank" rel="noopener" data-i18n="plan.manage"></a>
-          <button class="btn ghost" id="deactivate" data-i18n="plan.deactivate"></button>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Connectors -->
-    <section class="card span-all" id="connectors-card">
-      <h3 data-i18n="conn.title"></h3>
-      <p class="hint" data-i18n="conn.hint"></p>
-      <div id="connectors"></div>
-      <div class="add-connector" id="add-connector">
-        <div class="lock" id="conn-lock">
-          <p data-i18n="conn.pro_only"></p>
-          <a class="btn primary" href="#plan-card" data-i18n="conn.upgrade"></a>
+      <!-- Memory & history -->
+      <section class="panel" data-tab="memory">
+        <div class="card" id="memory-card">
+          <h3 data-i18n="mem.title"></h3>
+          <p class="hint" id="mem-hint"></p>
+          <label class="switch"><input type="checkbox" id="memory-enabled"><span></span><b data-i18n="mem.enabled"></b></label>
+          <label class="field"><span data-i18n="mem.budget"></span>
+            <select id="context-budget"><option value="32000">32k</option><option value="64000">64k</option><option value="128000">128k</option><option value="200000">200k</option></select></label>
         </div>
-        <h4 data-i18n="conn.add"></h4>
-        <div class="seg" id="conn-kind" role="group">
-          <button data-value="url" data-i18n="conn.kind.url"></button>
-          <button data-value="json" data-i18n="conn.kind.json"></button>
-          <button data-value="command" data-i18n="conn.kind.command"></button>
-        </div>
-        <form id="conn-form" autocomplete="off">
-          <div data-kind="url command"><label class="field"><span data-i18n="conn.name"></span><input name="name" placeholder="github" spellcheck="false"></label></div>
-          <div data-kind="url"><label class="field"><span data-i18n="conn.url"></span><input name="url" placeholder="https://api.githubcopilot.com/mcp/" spellcheck="false"></label>
-            <label class="field"><span data-i18n="conn.token"></span><input name="token" type="password" placeholder="ghp_…"></label></div>
-          <div data-kind="command"><label class="field"><span data-i18n="conn.command"></span><input name="command" placeholder="npx -y @modelcontextprotocol/server-github" spellcheck="false"></label>
-            <label class="field"><span data-i18n="conn.env"></span><textarea name="env" rows="2" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=ghp_…" spellcheck="false"></textarea></label></div>
-          <div data-kind="json"><label class="field"><span data-i18n="conn.json"></span><textarea name="json" rows="7" spellcheck="false" placeholder='{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}}}}'></textarea></label></div>
-          <button class="btn primary" type="submit" data-i18n="conn.add_button"></button>
-        </form>
-        <p class="hint" data-i18n="conn.node_hint"></p>
-      </div>
-    </section>
-
-    <!-- Memory & history -->
-    <section class="card span-all" id="memory-card">
-      <h3 data-i18n="mem.title"></h3>
-      <p class="hint" id="mem-hint"></p>
-      <div class="mem-top">
-        <label class="switch"><input type="checkbox" id="memory-enabled"><span></span><b data-i18n="mem.enabled"></b></label>
-        <label class="field"><span data-i18n="mem.budget"></span>
-          <select id="context-budget"><option value="32000">32k</option><option value="64000">64k</option><option value="128000">128k</option><option value="200000">200k</option></select></label>
-      </div>
-      <div class="mem-cols">
-        <div>
+        <div class="card">
           <label class="field"><span data-i18n="mem.facts"></span><textarea id="memory-facts" rows="8" data-i18n-placeholder="mem.facts_placeholder"></textarea></label>
-          <div class="row"><button class="btn primary" id="facts-save" data-i18n="mem.save"></button><button class="btn ghost" id="mem-reset" data-i18n="mem.reset"></button></div>
+          <div class="row"><button class="btn primary" id="facts-save" data-i18n="mem.save"></button><button class="btn" id="mem-reset" data-i18n="mem.reset"></button></div>
           <details class="summary-box"><summary data-i18n="mem.summary"></summary><p id="mem-summary"></p></details>
         </div>
-        <div>
+        <div class="card">
           <label class="field"><span data-i18n="mem.history"></span><input id="history-search" type="search" data-i18n-placeholder="mem.search"></label>
           <div class="history" id="history"></div>
           <div class="transcript" id="transcript" hidden></div>
-          <button class="btn ghost danger" id="history-clear" data-i18n="mem.delete_all"></button>
+          <div class="row"><button class="btn danger" id="history-clear" data-i18n="mem.delete_all"></button></div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- Skills -->
-    <section class="card span-all" id="skills-card">
-      <h3 data-i18n="skills.title"></h3>
-      <p class="hint" data-i18n="skills.hint"></p>
-      <div id="skills"></div>
-      <h4 data-i18n="skills.add"></h4>
-      <div class="seg" id="skill-kind" role="group">
-        <button data-value="paste" data-i18n="skills.kind.paste"></button>
-        <button data-value="zip" data-i18n="skills.kind.zip"></button>
-        <button data-value="url" data-i18n="skills.kind.url"></button>
-      </div>
-      <form id="skill-form" autocomplete="off">
-        <div data-kind="paste"><label class="field"><span>SKILL.md</span><textarea name="text" rows="8" spellcheck="false" placeholder="---&#10;name: release-notes&#10;description: Write release notes from the git log.&#10;---&#10;# Steps&#10;…"></textarea></label></div>
-        <div data-kind="zip"><label class="field"><span data-i18n="skills.zip"></span><input name="zip" type="file" accept=".zip,application/zip"></label></div>
-        <div data-kind="url"><label class="field"><span data-i18n="skills.url"></span><input name="url" placeholder="https://raw.githubusercontent.com/…/SKILL.md" spellcheck="false"></label></div>
-        <button class="btn primary" type="submit" data-i18n="skills.add_button"></button>
-      </form>
-      <p class="hint warn-text" data-i18n="skills.warning"></p>
-    </section>
+      <!-- Skills -->
+      <section class="panel" data-tab="skills">
+        <div class="card" id="skills-card">
+          <h3 data-i18n="skills.title"></h3>
+          <p class="hint" data-i18n="skills.hint"></p>
+          <div id="skills"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="skills.add"></h3>
+          <div class="seg" id="skill-kind" role="group">
+            <button data-value="paste" data-i18n="skills.kind.paste"></button>
+            <button data-value="zip" data-i18n="skills.kind.zip"></button>
+            <button data-value="url" data-i18n="skills.kind.url"></button>
+          </div>
+          <form id="skill-form" autocomplete="off">
+            <div data-kind="paste"><label class="field"><span>SKILL.md</span><textarea name="text" rows="8" spellcheck="false" placeholder="---&#10;name: release-notes&#10;description: Write release notes from the git log.&#10;---&#10;# Steps&#10;…"></textarea></label></div>
+            <div data-kind="zip"><label class="field"><span data-i18n="skills.zip"></span><input name="zip" type="file" accept=".zip,application/zip"></label></div>
+            <div data-kind="url"><label class="field"><span data-i18n="skills.url"></span><input name="url" placeholder="https://raw.githubusercontent.com/…/SKILL.md" spellcheck="false"></label></div>
+            <button class="btn primary" type="submit" data-i18n="skills.add_button"></button>
+          </form>
+          <p class="note warn" data-i18n="skills.warning"></p>
+        </div>
+      </section>
 
-    <!-- Advanced -->
-    <section class="card span-all">
-      <details>
-        <summary><h3 data-i18n="adv.title"></h3></summary>
-        <div class="adv">
+      <!-- Connectors -->
+      <section class="panel" data-tab="connectors">
+        <div class="card" id="connectors-card">
+          <h3 data-i18n="conn.title"></h3>
+          <p class="hint" data-i18n="conn.hint"></p>
+          <div id="connectors"></div>
+        </div>
+        <div class="card add-connector" id="add-connector">
+          <h3 data-i18n="conn.add"></h3>
+          <div class="seg" id="conn-kind" role="group">
+            <button data-value="url" data-i18n="conn.kind.url"></button>
+            <button data-value="json" data-i18n="conn.kind.json"></button>
+            <button data-value="command" data-i18n="conn.kind.command"></button>
+          </div>
+          <form id="conn-form" autocomplete="off">
+            <div data-kind="url command"><label class="field"><span data-i18n="conn.name"></span><input name="name" placeholder="github" spellcheck="false"></label></div>
+            <div data-kind="url"><label class="field"><span data-i18n="conn.url"></span><input name="url" placeholder="https://api.githubcopilot.com/mcp/" spellcheck="false"></label>
+              <label class="field"><span data-i18n="conn.token"></span><input name="token" type="password" placeholder="ghp_…"></label></div>
+            <div data-kind="command"><label class="field"><span data-i18n="conn.command"></span><input name="command" placeholder="npx -y @modelcontextprotocol/server-github" spellcheck="false"></label>
+              <label class="field"><span data-i18n="conn.env"></span><textarea name="env" rows="2" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=ghp_…" spellcheck="false"></textarea></label></div>
+            <div data-kind="json"><label class="field"><span data-i18n="conn.json"></span><textarea name="json" rows="7" spellcheck="false" placeholder='{"mcpServers": {"github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_…"}}}}'></textarea></label></div>
+            <button class="btn primary" type="submit" data-i18n="conn.add_button"></button>
+          </form>
+          <p class="hint" data-i18n="conn.node_hint"></p>
+        </div>
+      </section>
+
+      <!-- Settings -->
+      <section class="panel" data-tab="settings">
+        <div class="card">
+          <h3 data-i18n="adv.title"></h3>
           <label class="switch"><input type="checkbox" id="briefing"><span></span><b data-i18n="adv.briefing"></b></label>
           <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
-          <label class="switch"><input type="checkbox" id="overlay"><span></span><b data-i18n="adv.overlay"></b></label>
-          <label class="switch"><input type="checkbox" id="subtitles"><span></span><b data-i18n="adv.subtitles"></b></label>
-          <label class="field"><span data-i18n="adv.silence_factor"></span><input id="silence-factor" type="number" min="1.2" max="6" step="0.1"></label>
+          <p class="hint" id="config-path"></p>
         </div>
-        <p class="hint" id="config-path"></p>
-      </details>
-    </section>
-  </main>
-  <footer class="foot"><span id="version"></span></footer>
+        <div class="card">
+          <h3 data-i18n="about.title"></h3>
+          <p data-i18n="about.text"></p>
+          <p><a href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener">github.com/mohamedjs/lura</a></p>
+          <p class="hint" id="version"></p>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 </body>

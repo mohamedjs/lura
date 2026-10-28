@@ -183,9 +183,66 @@ async function submitSkill(e) {
   } catch (err) { fail(err); }
 }
 
+// ── tabs: one section at a time, remembered across visits
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch (_) { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch (_) { /* private window */ } },
+};
+let tab = null;
+
+function showTab(name) {
+  if (!$(`.panel[data-tab="${name}"]`)) name = "home";
+  tab = name;
+  store.set("lura-tab", name);
+  $$("#tabs button").forEach((b) => { b.classList.toggle("on", b.dataset.tab === name); b.setAttribute("aria-selected", b.dataset.tab === name); });
+  $$(".panel").forEach((p) => p.classList.toggle("on", p.dataset.tab === name));
+}
+
+function renderTabs() {
+  if (tab === null) {
+    $$("#tabs button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+    // First run with nothing set up: start where it gets fixed.
+    showTab(store.get("lura-tab") || (S.capabilities.can_talk ? "home" : "keys"));
+  }
+  $("#keys-badge").hidden = S.capabilities.can_talk;
+}
+
+// ── home: what Lura is using right now
+function renderHome() {
+  const s = S.settings;
+  const rows = [
+    [t("home.brain"), s.mode === "realtime" ? `Gemini Live · ${s.realtime_model}` : `${(S.keys[s.brain_provider] || {}).label || s.brain_provider} · ${s.models[s.brain_provider] || ""}`],
+    [t("home.voice"), `${s.voice_name} · ${s.voice_provider === "auto" ? t("home.auto") : (S.keys[s.voice_provider] || {}).label || s.voice_provider}`],
+    [t("home.mic"), s.input_device || t("audio.default")],
+    [t("home.wake"), `“${s.wake_word}”`],
+    [t("home.memory"), s.memory_enabled ? t("home.on") : t("home.off")],
+  ];
+  $("#hero-title").textContent = t("hero.title", { name: s.assistant_name || "Lura" });
+  $("#home-facts").replaceChildren(...rows.flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v, dir: "auto" })]));
+  bindCheck("#live-captions", "live_captions");
+  $("#live-captions").disabled = !s.subtitles;
+}
+
+// ── brain: a warning where a choice makes her worse, and the user's own instructions
+function renderBrainExtras() {
+  const s = S.settings, model = s.models[s.brain_provider] || "";
+  const warnings = [];
+  if (s.mode !== "realtime" && model.endsWith(":free")) warnings.push(t("brain.free_warning"));
+  if (s.mode !== "realtime" && s.reasoning_effort === "minimal") warnings.push(t("brain.minimal_warning"));
+  $("#model-warning").hidden = !warnings.length;
+  $("#model-warning").textContent = warnings.join(" ");
+  const persona = $("#persona");
+  if (document.activeElement !== persona && !persona.dataset.dirty) persona.value = s.persona || "";
+  persona.oninput = () => (persona.dataset.dirty = "1");
+  $("#persona-save").onclick = async () => { delete persona.dataset.dirty; await save({ persona: persona.value }); toast(t("mem.saved")); };
+}
+
 let lastStatus = "";
 
 function renderCards() {
+  renderTabs();
+  renderHome();
+  renderBrainExtras();
   // A conversation just ended: it may have added facts and a history row.
   if (lastStatus === "talking" && S.status !== "talking") { loadMemory(); loadHistory(); }
   lastStatus = S.status;
