@@ -31,6 +31,52 @@ from . import domain
 log = logging.getLogger(__name__)
 
 
+class LiveCaption:
+    """What the user is saying, written under the face while they still speak.
+
+    Display only: every ~1.5 s of new speech the audio so far is transcribed in
+    the background and shown with a trailing "…". The final transcript never
+    comes from here. Each refresh is one hearing call, so they are spaced out
+    and capped per turn.
+    """
+
+    GAP = 1.5
+    MAX_CALLS = 8
+    MIN_BLOCKS = 10        # a second of speech before the first try
+
+    def __init__(self, transcriber, to_wav, presence: Presence):
+        self._transcriber = transcriber   # callable returning a Transcriber, made on first use
+        self._to_wav = to_wav
+        self._presence = presence
+        self._busy = threading.Event()
+        self._last = 0.0
+        self._calls = 0
+        self._closed = False
+
+    def __call__(self, blocks: list[bytes], start: int) -> None:
+        now = time.monotonic()
+        if (self._closed or self._busy.is_set() or self._calls >= self.MAX_CALLS
+                or now - self._last < self.GAP or len(blocks) - start < self.MIN_BLOCKS):
+            return
+        self._busy.set()
+        self._last, self._calls = now, self._calls + 1
+        pcm = b"".join(blocks[start:])
+        threading.Thread(target=self._run, args=(pcm,), daemon=True, name="live-caption").start()
+
+    def _run(self, pcm: bytes) -> None:
+        try:
+            text = self._transcriber().transcribe(self._to_wav(pcm))
+            if text and not self._closed:
+                self._presence.set_caption("you", f"{text} …")
+        except Exception as exc:
+            log.debug("Live caption failed: %s", exc)
+        finally:
+            self._busy.clear()
+
+    def close(self) -> None:
+        self._closed = True
+
+
 class PipelineConversation:
     def __init__(self, settings: Settings, brain: BrainService, voice: VoiceService,
                  tools: ToolService, presence: Presence, stopped: threading.Event,
@@ -44,6 +90,8 @@ class PipelineConversation:
         self._session = ToolSession()
         self._history: list[Message] = []
         self._ending = False
+        self._quiet = False          # the brain judged the last turn not meant for it
+        self._discarded: set = set()
         self._hears = brain_hears_audio(self._model.provider, self._model.model)
         self._transcriber = None if self._hears else voice.transcriber(settings)
         self._caption_transcriber = self._transcriber
@@ -75,6 +123,7 @@ class PipelineConversation:
         player = self._voice.player(self.s, self._presence)
         done: Done | None = None
         said = ""
+        fed = 0
         try:
             for event in self._model.stream(self._system, domain.fit_history(self._history, self._budget),
                                             self._tools.specs(self._session) if with_tools else []):
@@ -83,8 +132,11 @@ class PipelineConversation:
                     return None
                 if isinstance(event, TextDelta):
                     said += event.text
+                    if domain.could_be_quiet(said):
+                        continue   # it may be NO_REPLY: say nothing until it is clear
                     self._presence.set_caption("lura", said)
-                    player.feed(event.text)
+                    player.feed(said[fed:])
+                    fed = len(said)
                 else:
                     done = event
         except HttpError as exc:
@@ -92,11 +144,20 @@ class PipelineConversation:
             log.warning("Brain failed: %s", exc)
             self._say(t("assistant.brain_error", self.s.language))
             return None
-        player.finish()
         if done is None:
+            player.finish()
             player.wait()
             return None
         message = done.message
+        if message.text.strip().startswith(domain.NO_REPLY) and not message.tool_calls:
+            player.cancel()
+            self._quiet = True
+            log.info("Not meant for me — staying quiet.")
+            return None
+        if fed < len(said) and not self._stopped.is_set():
+            player.feed(said[fed:])   # a reply shorter than the marker
+            self._presence.set_caption("lura", said)
+        player.finish()
         self._history.append(message)
         if message.text:
             self._keep("add", self._conv, "assistant", message.text, self._model.model)
@@ -132,6 +193,22 @@ class PipelineConversation:
             self._history.append(Message("tool", text[:6000], tool_call_id=call.id,
                                          tool_name=call.name, is_error=not call.valid))
 
+    def _captioner(self):
+        if self._caption_transcriber is None:
+            self._caption_transcriber = self._voice.transcriber(self.s)
+        return self._caption_transcriber
+
+    def _forget_turn(self, row: int | None) -> None:
+        """The last user turn was noise: out of the history and the memory."""
+        while self._history and self._history[-1].role != "user":
+            self._history.pop()
+        if self._history:
+            self._history.pop()
+        if row is not None:
+            self._discarded.add(row)
+            self._keep("discard", row)
+        self._presence.set_caption("you", "")
+
     def _caption_heard(self, wav: bytes, message: Message, row: int | None) -> None:
         """The brain hears the audio itself, so there is no text of what was
         said. For the subtitle and the history, transcribe it alongside — in
@@ -139,9 +216,8 @@ class PipelineConversation:
         rounds send this turn as text instead of sound."""
         def run():
             try:
-                if self._caption_transcriber is None:
-                    self._caption_transcriber = self._voice.transcriber(self.s)
-                if heard := self._caption_transcriber.transcribe(wav):
+                self._captioner()
+                if (heard := self._caption_transcriber.transcribe(wav)) and row not in self._discarded:
                     if self.s.subtitles:
                         self._presence.set_caption("you", heard)
                     message.text = heard
@@ -188,18 +264,29 @@ class PipelineConversation:
             self._history.append(Message("user", initial_prompt))
             self._answer()
             return
+        ignored = 0
         while not self._ending and not self._stopped.is_set():
             if time.monotonic() - started > self.s.max_session_seconds:
                 log.info("Session hit its time limit.")
                 return
+            if ignored >= domain.MAX_IGNORED_TURNS:
+                log.info("Only noise for %d turns — closing.", ignored)
+                return
             self._presence.set_state("listening")
-            pcm = self._voice.record(self.s, self._stopped.is_set)
+            live = LiveCaption(self._captioner, self._voice.to_wav, self._presence) \
+                if self.s.subtitles and self.s.live_captions else None
+            try:
+                pcm = self._voice.record(self.s, self._stopped.is_set, live)
+            finally:
+                if live is not None:
+                    live.close()
             if not pcm:
                 log.info("Nothing said — closing.")
                 return
             wav = self._voice.to_wav(pcm)
             self._presence.set_caption("lura", "")
             self._presence.set_caption("you", "…")
+            row = None
             if self._hears:
                 message = Message("user", audio_wav=wav)
                 self._history.append(message)
@@ -215,11 +302,19 @@ class PipelineConversation:
                     self._say(t("assistant.hearing_error", self.s.language))
                     return
                 if not heard:
+                    ignored += 1
+                    self._presence.set_caption("you", "")
                     continue
                 self._presence.set_caption("you", heard)
                 self._history.append(Message("user", heard))
-                self._keep("add", self._conv, "user", heard)
+                row = self._keep("add", self._conv, "user", heard)
+            self._quiet = False
             self._answer()
+            if self._quiet:
+                ignored += 1
+                self._forget_turn(row)
+            else:
+                ignored = 0
 
 
 class Assistant:

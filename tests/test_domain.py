@@ -208,6 +208,18 @@ def check_end_of_turn():
     assert blip.start is not None and abs(blip.spoken_seconds - 0.1) < 1e-9, "a click is one block"
 
 
+def check_quiet_and_speech_band():
+    import numpy as np
+    from lura.modules.assistant.domain import could_be_quiet
+    from lura.modules.voice.infrastructure.audio import speech_level
+    assert could_be_quiet("") and could_be_quiet(" [[qu") and could_be_quiet("[[quiet]]")
+    assert not could_be_quiet("Sure") and not could_be_quiet("[1] first")
+    t = np.arange(1600) / 16000
+    tone = lambda f: (np.sin(2 * np.pi * f * t) * 8000).astype(np.int16).tobytes()   # noqa: E731
+    assert speech_level(tone(50)) < 0.01 and speech_level(tone(6000)) < 0.01, "hum and hiss are not speech"
+    assert abs(speech_level(tone(300)) - 0.1726) < 0.005
+
+
 def check_resample():
     import numpy as np
     from lura.modules.voice.infrastructure.audio import resample

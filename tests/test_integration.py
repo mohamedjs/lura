@@ -389,6 +389,85 @@ def check_pipeline_turn():
     assert spoken == ["Checking.", "The answer is 42.", "Anything else?"], spoken
 
 
+def check_noise_and_live_captions():
+    """A turn the brain judges to be noise is neither spoken nor kept; captions
+    show what is being said while it is said."""
+    import time
+    from lura.modules.assistant import PipelineConversation
+    from lura.modules.brain import Done, Message, TextDelta
+    from lura.modules.settings import Settings
+    from lura.modules.tools import ToolService
+
+    histories, spoken, captions = [], [], []
+
+    class FakeModel:
+        provider, model = "anthropic", "claude-opus-5-5"
+
+        def stream(self, system, history, tools):
+            histories.append([(m.role, m.text) for m in history])
+            reply = "[[quiet]]" if history[-1].text == "the TV" else "Hello there."
+            for i in range(0, len(reply), 3):
+                yield TextDelta(reply[i:i + 3])
+            yield Done(Message("assistant", reply), "end")
+
+    class FakeBrain:
+        def model(self, settings):
+            return FakeModel()
+
+    class Player:
+        def feed(self, text):
+            spoken.append(text)
+        finish = wait = cancel = lambda self: None
+
+        def say(self, text):
+            spoken.append(text)
+
+    heard = iter(["the TV", "hi Lura"])
+
+    class Ear:
+        def transcribe(self, wav):
+            return "partial words" if len(wav) < 40000 else next(heard)
+
+    class FakeVoice:
+        recorded = 0
+
+        def player(self, settings, presence=None):
+            return Player()
+
+        def transcriber(self, settings):
+            return Ear()
+
+        @staticmethod
+        def to_wav(pcm):
+            return pcm
+
+        def record(self, settings, should_stop, on_audio=None):
+            self.recorded += 1
+            if self.recorded > 2:
+                return b""
+            blocks = [b"\0" * 3200] * 15
+            if on_audio:
+                on_audio(blocks[:12], 0)   # mid-sentence: shorter than the final turn
+                time.sleep(0.2)   # the caption thread
+            return b"".join(blocks)
+
+    class Presence:
+        def set_state(self, state):
+            pass
+
+        def set_amplitude(self, level):
+            pass
+
+        def set_caption(self, who, text):
+            captions.append((who, text))
+
+    PipelineConversation(Settings(brain_provider="anthropic"), FakeBrain(), FakeVoice(), ToolService(None),
+                         Presence(), threading.Event()).run()
+    assert "".join(spoken) == "Hello there.", spoken
+    assert histories[-1] == [("user", "hi Lura")], "the noise turn is gone from the thread"
+    assert ("you", "partial words …") in captions, captions
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):

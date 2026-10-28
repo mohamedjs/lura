@@ -196,9 +196,9 @@ class VoiceService:
 
     # Thin re-exports so the assistant never imports voice infrastructure.
     @staticmethod
-    def record(settings: Settings, should_stop=lambda: False) -> bytes:
+    def record(settings: Settings, should_stop=lambda: False, on_audio=None) -> bytes:
         from .infrastructure.audio import record_utterance
-        return record_utterance(settings, should_stop)
+        return record_utterance(settings, should_stop, on_audio)
 
     @staticmethod
     def level(pcm: bytes) -> float:

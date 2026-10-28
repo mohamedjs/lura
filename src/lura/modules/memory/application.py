@@ -82,6 +82,11 @@ class MemoryService:
         if message_id is not None:
             self.store.update(message_id, text.strip())
 
+    def discard(self, message_id: int | None) -> None:
+        """A turn that turned out to be noise: never kept."""
+        if message_id is not None:
+            self.store.delete_message(message_id)
+
     def end(self, conv_id: int | None) -> None:
         if conv_id is None:
             return

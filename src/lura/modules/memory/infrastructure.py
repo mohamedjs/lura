@@ -66,6 +66,9 @@ class MemoryStore:
         return self._insert("INSERT INTO messages (conv_id, ts, role, text, model) VALUES (?,?,?,?,?)",
                             (conv_id, time.time(), role, text, model))
 
+    def delete_message(self, message_id: int) -> None:
+        self._run("DELETE FROM messages WHERE id=?", (message_id,))
+
     def update(self, message_id: int, text: str) -> None:
         self._run("UPDATE messages SET text=? WHERE id=?", (text, message_id))
 

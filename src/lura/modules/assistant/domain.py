@@ -11,6 +11,12 @@ MAX_TOOL_ROUNDS = 6
 #: Gemini counts audio at 32 tokens a second; 16 kHz 16-bit WAV is 32 000
 #: bytes a second.
 AUDIO_BYTES_PER_TOKEN = 1000
+#: What the brain answers when what it heard was not meant for it (noise, a
+#: TV, someone else in the room). Never spoken, never kept.
+NO_REPLY = "[[quiet]]"
+#: Turns in a row that were noise or nothing before the session closes, so a
+#: noisy room does not keep Lura listening (and paying) forever.
+MAX_IGNORED_TURNS = 2
 #: Room left in the context for the reply itself.
 REPLY_RESERVE = 8000
 
@@ -42,6 +48,12 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
     # the language rule gets ignored.
     parts.append(f"IMPORTANT: {language_rule(language)}")
     return "\n".join(parts)
+
+
+def could_be_quiet(text: str) -> bool:
+    """While the reply may still turn out to be ``NO_REPLY``, hold the voice back."""
+    head = text.lstrip()
+    return NO_REPLY.startswith(head) or head.startswith(NO_REPLY)
 
 
 def message_tokens(message: Message) -> int:

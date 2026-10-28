@@ -17,9 +17,13 @@ log = logging.getLogger(__name__)
 BASES = {"gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
          "openrouter": "https://openrouter.ai/api/v1"}
 
-PROMPT = ("Transcribe this recording exactly as spoken, in the language it was spoken "
-          "(Egyptian Arabic stays in Arabic script). Output only the transcript. If nothing "
-          "intelligible was said, output nothing.")
+PROMPT = ("You transcribe what one person says to their voice assistant. Write their words exactly "
+          "as spoken, in the language spoken (Egyptian Arabic stays in Arabic script, English words "
+          "inside Arabic stay in Latin letters). Output only the transcript, no quotes or notes.\n"
+          "Output nothing at all if the recording is only noise, music, a TV or video, a cough, "
+          "typing, or other people talking in the background, or if the words are too unclear to be "
+          "sure of. Never guess a word from a sound: an empty answer is better than a wrong one. If "
+          "someone else talks over the main speaker, transcribe only the main speaker.")
 
 
 #: Past this the user is still waiting with nothing happening; better to try

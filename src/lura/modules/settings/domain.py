@@ -149,6 +149,9 @@ class Settings:
     overlay_enabled: bool = True
     #: What you said and what Lura answers, as subtitles under the face.
     subtitles: bool = True
+    #: Write what you say while you are still saying it (one extra hearing
+    #: call every ~1.5 s of speech).
+    live_captions: bool = True
     dashboard_port: int = 47321
     onboarded: bool = False
 

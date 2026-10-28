@@ -222,6 +222,23 @@ def rms_of(pcm: bytes) -> float:
     return float(np.sqrt(np.mean(samples * samples))) / 32768.0 if samples.size else 0.0
 
 
+def speech_level(pcm: bytes, rate: int = INPUT_RATE) -> float:
+    """Loudness in the band speech lives in (150–4000 Hz), 0..1.
+
+    Mains hum, fans and desk thumps sit below it; key clicks and hiss spread
+    above it. Counting only the band keeps them from looking like a voice,
+    which is what made the recorder hand room noise to the brain as a turn.
+    """
+    samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % 2], dtype=np.int16).astype(np.float32)
+    if samples.size < 64:
+        return 0.0
+    spectrum = np.fft.rfft(samples * np.hanning(samples.size))
+    freqs = np.fft.rfftfreq(samples.size, 1.0 / rate)
+    band = np.abs(spectrum[(freqs >= 150) & (freqs <= 4000)]) ** 2
+    # Parseval, with the Hann window's energy loss (3/8) put back.
+    return float(np.sqrt(2.0 * band.sum() / (samples.size ** 2 * 0.375))) / 32768.0
+
+
 def chime(rate: int = OUTPUT_RATE, device=None, up: bool = True) -> None:
     """A short two-tone beep, so a false trigger is obvious. Generated, not shipped."""
     parts = []
@@ -270,14 +287,15 @@ class Speaker:
                 self._on_level(0.0)  # or the mouth freezes half-open
 
 
-def record_utterance(settings, should_stop=lambda: False) -> bytes:
+def record_utterance(settings, should_stop=lambda: False, on_audio=None) -> bytes:
     """Record until the speaker stops; return 16 kHz mono PCM, or b"" for nothing.
 
     ``follow_up_seconds`` is how long to wait for the user to start; then
     ``silence_ms`` of quiet ends the turn. The noise floor is measured as it
     goes (see ``EndOfTurn``): a quiet room and a laptop fan differ by more
     than tenfold. Leading silence is trimmed to a short pre-roll, so seconds
-    of nothing are not sent to the brain as audio.
+    of nothing are not sent to the brain as audio. ``on_audio(blocks, start)``
+    is called after every block once speech has begun, for live captions.
     """
     turn = EndOfTurn(BLOCK_SECONDS, settings.silence_ms, settings.silence_factor,
                      settings.follow_up_seconds, settings.max_utterance_seconds)
@@ -291,7 +309,9 @@ def record_utterance(settings, should_stop=lambda: False) -> bytes:
                 log.warning("The microphone stopped sending audio.")
                 break
             captured.append(block)
-            verdict = turn.feed(rms_of(block))
+            verdict = turn.feed(speech_level(block))
+            if on_audio is not None and turn.start is not None and verdict == "wait":
+                on_audio(captured, turn.start)
     # One block of slack: 100 ms blocks quantise a short "no" down to 0.3 s.
     if turn.start is None or turn.spoken_seconds < settings.min_utterance_seconds - BLOCK_SECONDS:
         if turn.start is not None:
