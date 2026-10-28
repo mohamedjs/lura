@@ -22,6 +22,11 @@ PROMPT = ("Transcribe this recording exactly as spoken, in the language it was s
           "intelligible was said, output nothing.")
 
 
+#: Past this the user is still waiting with nothing happening; better to try
+#: the other provider. A healthy call takes 2–4 s.
+HEARING_TIMEOUT = 20
+
+
 class ChatTranscriber:
     def __init__(self, provider: str, key: str, model: str):
         self._provider, self._key, self._model = provider, key, model
@@ -41,7 +46,7 @@ class ChatTranscriber:
             payload["reasoning_effort"] = "low"
         started = time.monotonic()
         data = request_json(f"{BASES[self._provider]}/chat/completions",
-                            {"Authorization": f"Bearer {self._key}"}, payload, timeout=60)
+                            {"Authorization": f"Bearer {self._key}"}, payload, timeout=HEARING_TIMEOUT)
         text = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         log.info("heard (%.1fs): %s", time.monotonic() - started, text.strip())
         return text.strip()

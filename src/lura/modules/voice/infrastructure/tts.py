@@ -34,8 +34,11 @@ def _directed(text: str, style: str) -> str:
 
 
 class GeminiTTS:
-    def __init__(self, key: str, model: str, voice: str, style: str = ""):
+    def __init__(self, key: str, model: str, voice: str, style: str = "", lite_fallback: bool = True):
         self._key, self._model, self._voice, self._style = key, model, voice, style
+        #: Off when another provider stands behind this one: the Lite model
+        #: shares the exhausted quota more often than not.
+        self._lite_fallback = lite_fallback
 
     def _once(self, model: str, text: str) -> bytes:
         payload = {
@@ -66,15 +69,18 @@ class GeminiTTS:
         try:
             return self._once(self._model, text)
         except HttpError as exc:
-            if not exc.retryable or not _lite(self._model):
+            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             return self._once(_lite(self._model), text)
 
 
 class OpenRouterTTS:
-    def __init__(self, key: str, model: str, voice: str, style: str = ""):
+    def __init__(self, key: str, model: str, voice: str, style: str = "", lite_fallback: bool = True):
         self._key, self._model, self._voice, self._style = key, model, voice, style
+        #: Off when another provider stands behind this one: the Lite model
+        #: shares the exhausted quota more often than not.
+        self._lite_fallback = lite_fallback
         #: Raw PCM needs no decoder; MP3 needs ffmpeg, which Windows lacks.
         #: Ask for PCM and fall back to MP3 once if the route refuses it.
         self._format = "pcm"
@@ -100,7 +106,7 @@ class OpenRouterTTS:
         try:
             return self._once(self._model, text)
         except HttpError as exc:
-            if not exc.retryable or not _lite(self._model):
+            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             return self._once(_lite(self._model), text)

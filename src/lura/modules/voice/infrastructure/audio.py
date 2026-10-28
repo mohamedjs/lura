@@ -12,6 +12,7 @@ import logging
 import queue
 import shutil
 import subprocess
+import threading
 import time
 import wave
 
@@ -25,6 +26,10 @@ BLOCK_SECONDS = 0.1   # end-of-turn resolution; Vosk reads any block size
 #: After Lura stops talking, the room still rings for a moment; listening
 #: right away hears her own tail as the user's turn.
 REVERB_SECONDS = 0.15
+
+#: Set while the dashboard's mic test runs so WakeListener yields the device.
+_testing_mic = threading.Event()
+_wake_lock = threading.Lock()
 
 
 # ── devices ─────────────────────────────────────────────────────────────────
@@ -76,12 +81,20 @@ def _format(sd, index, kind: str, rate: int) -> tuple[int, int]:
     info = sd.query_devices(index if index is not None else sd.default.device[0 if kind == "input" else 1])
     native = int(info["default_samplerate"])
     most = int(info["max_input_channels" if kind == "input" else "max_output_channels"]) or 1
-    for candidate in ((rate, 1), (native, 1), (rate, min(2, most)), (native, min(2, most))):
-        try:
-            check(device=index, samplerate=candidate[0], channels=candidate[1], dtype="int16")
-            return candidate
-        except Exception:
-            continue
+    for attempt in range(3):
+        busy = False
+        for candidate in dict.fromkeys(((rate, 1), (native, 1), (rate, min(2, most)), (native, min(2, most)))):
+            try:
+                check(device=index, samplerate=candidate[0], channels=candidate[1], dtype="int16")
+                return candidate
+            except Exception as exc:
+                if "-9985" in str(exc):
+                    busy = True
+                    break
+                continue
+        if not busy:
+            break
+        time.sleep(0.5)   # PipeWire holds a raw hw device ~5s before suspending on idle
     return native, most
 
 
@@ -175,20 +188,24 @@ class OutputStream:
 def mic_test(device=None, seconds: float = 3.0) -> dict:
     """Listen for a few seconds and report levels — the dashboard's Test button.
 
-    ponytail: if the wake listener holds a raw hw device, this one reports
-    "busy"; the error is passed through verbatim so that is obvious.
+    Pauses the wake listener while measuring so a raw ALSA hw device held by
+    the wake loop is released first instead of reporting busy.
     """
+    _testing_mic.set()
     try:
-        levels = []
-        with MicStream(device) as mic:
-            for _ in range(int(seconds / BLOCK_SECONDS)):
-                block = mic.read(timeout=1.0)
-                if block is None:
-                    break
-                levels.append(rms_of(block))
-            rate = mic.rate
+        with _wake_lock:
+            levels = []
+            with MicStream(device) as mic:
+                for _ in range(int(seconds / BLOCK_SECONDS)):
+                    block = mic.read(timeout=1.0)
+                    if block is None:
+                        break
+                    levels.append(rms_of(block))
+                rate = mic.rate
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+    finally:
+        _testing_mic.clear()
     if not levels:
         return {"ok": False, "error": "no audio arrived from the microphone"}
     ranked = sorted(levels)

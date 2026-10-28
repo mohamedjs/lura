@@ -22,7 +22,7 @@ from pathlib import Path
 
 from ....shared import paths
 from ..domain import INPUT_RATE
-from .audio import MicStream
+from .audio import MicStream, _testing_mic, _wake_lock
 
 log = logging.getLogger(__name__)
 
@@ -91,25 +91,32 @@ class WakeListener:
         """Wait for the wake word. True if heard or ``interrupt`` (an Event,
         e.g. "talk now" from the dashboard) is set; False if ``stop`` or
         ``reload`` (the microphone changed) is set."""
-        with MicStream(self._device, block_seconds=0.25) as mic:
-            log.info("Listening for %r…", self._word)
-            while not stop.is_set():
-                if reload is not None and reload.is_set():
-                    return False
-                if interrupt is not None and interrupt.is_set():
-                    interrupt.clear()
-                    return True
-                block = mic.read(timeout=0.3)
-                if block is None:
-                    continue
-                if self._recognizer.AcceptWaveform(block):
-                    if self._heard(self._recognizer.Result()):
+        while not stop.is_set():
+            if _testing_mic.is_set():
+                time.sleep(0.05)
+                continue
+            with _wake_lock, MicStream(self._device, block_seconds=0.25) as mic:
+                log.info("Listening for %r…", self._word)
+                while not stop.is_set() and not _testing_mic.is_set():
+                    if reload is not None and reload.is_set():
+                        return False
+                    if interrupt is not None and interrupt.is_set():
+                        interrupt.clear()
                         return True
-                elif self._heard(self._recognizer.PartialResult()):
-                    # Partials fire the moment the word lands, not when the
-                    # recogniser decides the phrase ended: snappy, not sluggish.
-                    self._recognizer.Reset()
-                    return True
+                    block = mic.read(timeout=0.3)
+                    if block is None:
+                        continue
+                    if self._recognizer.AcceptWaveform(block):
+                        if self._heard(self._recognizer.Result()):
+                            self._recognizer.Reset()
+                            return True
+                    elif self._heard(self._recognizer.PartialResult()):
+                        # Partials fire the moment the word lands, not when the
+                        # recogniser decides the phrase ended: snappy, not sluggish.
+                        self._recognizer.Reset()
+                        return True
+                if not _testing_mic.is_set():
+                    return False
         return False
 
     def cooldown(self) -> None:

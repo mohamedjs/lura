@@ -101,6 +101,19 @@ class SentenceChunker:
         return piece or self._take(final=False)
 
 
+def retry_after(message: str, default: float = 300.0) -> float:
+    """Seconds an API asks us to wait, from its error text ("retry in 4h7m39.2s").
+
+    A free-tier daily quota says hours; trying again every few minutes only
+    pays a failed round trip each time.
+    """
+    match = re.search(r"retry in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:([\d.]+)s)?", message, re.I)
+    if not match or not any(match.groups()):
+        return default
+    hours, minutes, seconds = (float(g) if g else 0.0 for g in match.groups())
+    return hours * 3600 + minutes * 60 + seconds
+
+
 # ── devices ────────────────────────────────────────────────────────────────
 
 _HW_SUFFIX = re.compile(r"\s*\(hw:\d+,\d+\)\s*$")

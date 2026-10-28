@@ -162,6 +162,13 @@ def check_assistant_rules():
     assert talk[0].audio_wav == wav, "the history itself is untouched"
 
 
+def check_retry_after():
+    from lura.modules.voice.domain import retry_after
+    assert retry_after("Quota exceeded… Please retry in 4h7m39.221871599s.") == 4 * 3600 + 7 * 60 + 39.221871599
+    assert retry_after("Please retry in 12.5s") == 12.5 and retry_after("retry in 3m") == 180
+    assert retry_after("HTTP 503 overloaded") == 300
+
+
 def check_devices():
     from lura.modules.voice.domain import pick_device
     devices = [{"name": "HDA Intel PCH: ALC257 Analog (hw:0,0)", "hostapi": 0, "max_input_channels": 2, "max_output_channels": 2},

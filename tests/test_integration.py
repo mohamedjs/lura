@@ -215,6 +215,11 @@ def check_tts_and_hearing():
     httpd.shutdown()
 
     def hear(h, body):
+        if h.headers.get("Authorization") == "Bearer bad-gemini":
+            h.send_response(429)
+            h.end_headers()
+            h.wfile.write(b'{"error": "quota exceeded"}')
+            return
         out = json.dumps({"choices": [{"message": {"content": " ازيك يا لورا "}}]}).encode()
         h.send_response(200)
         h.send_header("Content-Type", "application/json")
@@ -223,8 +228,15 @@ def check_tts_and_hearing():
 
     httpd, url = serve(hear)
     transcribe.BASES["gemini"] = url
+    transcribe.BASES["openrouter"] = url
     assert transcribe.ChatTranscriber("gemini", "k", "gemini-3.8-flash").transcribe(b"RIFF") == "ازيك يا لورا"
     assert SEEN[-1]["body"]["messages"][0]["content"][1]["type"] == "input_audio"
+    from lura.modules.settings import Settings
+    from lura.modules.voice import VoiceService
+    keys = {"gemini": "bad-gemini", "openrouter": "good-or"}
+    vsvc = VoiceService(keys.get, lambda p: p in keys)
+    assert vsvc.transcriber(Settings(voice_provider="auto")).transcribe(b"RIFF") == "ازيك يا لورا"
+    assert vsvc._voice_providers(Settings(voice_provider="auto")) == ["openrouter", "gemini"]
     httpd.shutdown()
 
 

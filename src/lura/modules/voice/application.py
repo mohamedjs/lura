@@ -5,10 +5,12 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time
 
+from ...shared.http import HttpError
 from ...shared.presence import NullPresence, Presence
-from ..settings import GEMINI, HEARING_MODELS, TTS_MODELS, Settings, resolve_voice_provider
-from .domain import SentenceChunker, SpeechSynthesizer, Transcriber
+from ..settings import GEMINI, HEARING_MODELS, OPENROUTER, TTS_MODELS, Settings, resolve_voice_provider
+from .domain import SentenceChunker, SpeechSynthesizer, Transcriber, retry_after
 
 log = logging.getLogger(__name__)
 
@@ -95,33 +97,93 @@ class SpeechPlayer:
                 speaker.close()
 
 
+class _FallbackSynthesizer:
+    """Speak through the second voice provider when the first is out of quota,
+    overloaded or slow, instead of going silent."""
+
+    def __init__(self, primary: SpeechSynthesizer, backup: SpeechSynthesizer, on_429):
+        self._primary, self._backup, self._on_429 = primary, backup, on_429
+
+    def synthesize(self, text: str) -> bytes:
+        try:
+            return self._primary.synthesize(text)
+        except HttpError as exc:
+            if not exc.retryable:
+                raise
+            if exc.status == 429:
+                self._on_429(exc)
+            log.warning("Primary TTS failed (%s); falling back to alternate voice provider.", exc.status or exc)
+            return self._backup.synthesize(text)
+
+
+class _FallbackTranscriber:
+    """Hear through the second voice provider when the first fails."""
+
+    def __init__(self, primary: Transcriber, backup: Transcriber, on_429):
+        self._primary, self._backup, self._on_429 = primary, backup, on_429
+
+    def transcribe(self, wav: bytes) -> str:
+        try:
+            return self._primary.transcribe(wav)
+        except HttpError as exc:
+            if not exc.retryable:
+                raise
+            if exc.status == 429:
+                self._on_429(exc)
+            log.warning("Primary hearing failed (%s); falling back to alternate voice provider.", exc.status or exc)
+            return self._backup.transcribe(wav)
+
+
 class VoiceService:
     def __init__(self, key_for, has_key):
         self._key_for = key_for
         self._has_key = has_key
+        self._cooldown_until: dict[str, float] = {}
 
-    def _voice_provider(self, settings: Settings) -> str:
+    def _voice_providers(self, settings: Settings) -> list[str]:
         from ...shared.errors import NeedsSetup
 
-        keys = {p for p in (GEMINI, "openrouter") if self._has_key(p)}
+        keys = {p for p in (GEMINI, OPENROUTER) if self._has_key(p)}
         provider = resolve_voice_provider(settings, keys)
         if provider is None:
             raise NeedsSetup("Lura's voice needs a Gemini or an OpenRouter key.")
-        return provider
+        if settings.voice_provider != "auto" or len(keys) < 2:
+            return [provider]
+        now = time.monotonic()
+        order = [GEMINI, OPENROUTER]
+        order.sort(key=lambda p: self._cooldown_until.get(p, 0.0) > now)
+        return order
+
+    def _mark_429(self, provider: str, exc: HttpError) -> None:
+        wait = retry_after(str(exc))
+        self._cooldown_until[provider] = time.monotonic() + wait
+        log.warning("%s voice is out of quota; using the other provider for %.0f min.", provider, wait / 60)
 
     def synthesizer(self, settings: Settings, voice: str | None = None) -> SpeechSynthesizer:
         from .infrastructure.tts import GeminiTTS, OpenRouterTTS
 
-        provider = self._voice_provider(settings)
-        cls = GeminiTTS if provider == GEMINI else OpenRouterTTS
-        return cls(self._key_for(provider), TTS_MODELS[provider], voice or settings.voice_name,
-                   settings.tts_style)
+        def build(p: str) -> SpeechSynthesizer:
+            cls = GeminiTTS if p == GEMINI else OpenRouterTTS
+            return cls(self._key_for(p), TTS_MODELS[p], voice or settings.voice_name, settings.tts_style,
+                       lite_fallback=len(providers) == 1)
+
+        providers = self._voice_providers(settings)
+        primary = build(providers[0])
+        if len(providers) == 1:
+            return primary
+        return _FallbackSynthesizer(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
 
     def transcriber(self, settings: Settings) -> Transcriber:
         from .infrastructure.transcribe import ChatTranscriber
 
-        provider = self._voice_provider(settings)
-        return ChatTranscriber(provider, self._key_for(provider), HEARING_MODELS[provider])
+        def build(p: str) -> Transcriber:
+            return ChatTranscriber(p, self._key_for(p), HEARING_MODELS[p])
+
+        providers = self._voice_providers(settings)
+        primary = build(providers[0])
+        if len(providers) == 1:
+            return primary
+        return _FallbackTranscriber(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
 
     def player(self, settings: Settings, presence: Presence | None = None) -> SpeechPlayer:
         return SpeechPlayer(self.synthesizer(settings), settings.output_device, presence)
