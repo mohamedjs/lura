@@ -437,7 +437,9 @@ def check_noise_and_live_captions():
             blocks = [b"\0" * 3200] * 15
             if on_audio:
                 on_audio(blocks[:12], 0)   # mid-sentence: shorter than the final turn
-                time.sleep(0.2)   # the caption thread
+                deadline = time.monotonic() + 5   # the caption thread; slow CI runners vary
+                while time.monotonic() < deadline and not any(c[1].endswith("…") for c in captions):
+                    time.sleep(0.02)
             return b"".join(blocks)
 
     class Presence:

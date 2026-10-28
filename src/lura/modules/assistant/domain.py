@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from ..brain import Message
 from ..memory import tokens
 
@@ -116,10 +118,27 @@ def now_text() -> str:
     return time.strftime("%A %d %B %Y, %H:%M (%Z)")
 
 
+def speakable_reply(text: str) -> str:
+    """The streamed reply minus the ``NO_REPLY`` marker, wherever the model put
+    it, and minus a marker that is still half-written at the end — so the
+    voice never says "quiet"."""
+    cleaned = text.replace(NO_REPLY, "")
+    for k in range(len(NO_REPLY) - 1, 0, -1):
+        if cleaned.endswith(NO_REPLY[:k]):
+            return cleaned[:-k]
+    return cleaned
+
+
 def could_be_quiet(text: str) -> bool:
-    """While the reply may still turn out to be ``NO_REPLY``, hold the voice back."""
-    head = text.lstrip()
-    return NO_REPLY.startswith(head) or head.startswith(NO_REPLY)
+    """Nothing worth saying yet (only the marker, quotes, backticks…): hold the
+    voice back, the reply may still turn out to be ``NO_REPLY``."""
+    return not re.search(r"\w", speakable_reply(text))
+
+
+def is_quiet(text: str) -> bool:
+    """The model chose not to answer: the marker and nothing else that can be said
+    (a weak model wraps it in quotes or backticks, or adds a full stop)."""
+    return NO_REPLY in text and not re.search(r"\w", text.replace(NO_REPLY, ""))
 
 
 def message_tokens(message: Message) -> int:

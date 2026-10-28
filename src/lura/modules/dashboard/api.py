@@ -22,7 +22,9 @@ from .server import ApiError
 #: Settings that apply the moment they change, so they never ask for a restart.
 #: The rest is read again at the start of every conversation.
 LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device", "silence_ms",
-        "silence_factor", "follow_up_seconds", "memory_enabled", "context_budget_tokens", "live_captions"}
+        "silence_factor", "follow_up_seconds", "memory_enabled", "context_budget_tokens", "live_captions",
+        "persona", "user_name", "reasoning_effort", "voice_name", "voice_gender", "tts_style",
+        "language", "brain_provider", "models", "voice_provider", "mode", "wake_word"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 

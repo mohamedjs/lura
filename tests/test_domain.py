@@ -206,6 +206,12 @@ def check_quiet_and_speech_band():
     from lura.modules.voice.infrastructure.audio import speech_level
     assert could_be_quiet("") and could_be_quiet(" [[qu") and could_be_quiet("[[quiet]]")
     assert not could_be_quiet("Sure") and not could_be_quiet("[1] first")
+    from lura.modules.assistant.domain import is_quiet, speakable_reply
+    for quiet in ("[[quiet]]", " `[[quiet]]` ", '"[[quiet]]".', "[[quiet]]\n"):
+        assert is_quiet(quiet), quiet
+    assert not is_quiet("Okay. [[quiet]]") and speakable_reply("Okay. [[quiet]]") == "Okay. "
+    assert speakable_reply("Sure thing [[qu") == "Sure thing ", "a half-written marker is held back"
+    assert speakable_reply("Pick [1] or [2]") == "Pick [1] or [2]"
     t = np.arange(1600) / 16000
     tone = lambda f: (np.sin(2 * np.pi * f * t) * 8000).astype(np.int16).tobytes()   # noqa: E731
     assert speech_level(tone(50)) < 0.01 and speech_level(tone(6000)) < 0.01, "hum and hiss are not speech"

@@ -134,9 +134,10 @@ class PipelineConversation:
                     said += event.text
                     if domain.could_be_quiet(said):
                         continue   # it may be NO_REPLY: say nothing until it is clear
-                    self._presence.set_caption("lura", said)
-                    player.feed(said[fed:])
-                    fed = len(said)
+                    ready = domain.speakable_reply(said)
+                    self._presence.set_caption("lura", ready)
+                    player.feed(ready[fed:])
+                    fed = len(ready)
                 else:
                     done = event
         except HttpError as exc:
@@ -149,14 +150,17 @@ class PipelineConversation:
             player.wait()
             return None
         message = done.message
-        if message.text.strip().startswith(domain.NO_REPLY) and not message.tool_calls:
+        if domain.is_quiet(message.text) and not message.tool_calls:
             player.cancel()
             self._quiet = True
             log.info("Not meant for me — staying quiet.")
             return None
-        if fed < len(said) and not self._stopped.is_set():
-            player.feed(said[fed:])   # a reply shorter than the marker
-            self._presence.set_caption("lura", said)
+        if domain.NO_REPLY in message.text:   # the marker inside a real answer: never kept
+            message.text = message.text.replace(domain.NO_REPLY, "").strip()
+        final = domain.speakable_reply(said.replace(domain.NO_REPLY, ""))
+        if fed < len(final) and not self._stopped.is_set():
+            player.feed(final[fed:])   # held back while it looked like the marker
+            self._presence.set_caption("lura", final)
         player.finish()
         self._history.append(message)
         if message.text:
@@ -281,6 +285,7 @@ class PipelineConversation:
                 if live is not None:
                     live.close()
             if not pcm:
+                self._presence.set_caption("you", "")   # a live partial must not linger
                 log.info("Nothing said — closing.")
                 return
             wav = self._voice.to_wav(pcm)

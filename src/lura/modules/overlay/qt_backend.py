@@ -78,6 +78,10 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
                              | QtCore.Qt.Tool | QtCore.Qt.WindowDoesNotAcceptFocus)
             self.setAttribute(QtCore.Qt.WA_TranslucentBackground)
             self.setAttribute(QtCore.Qt.WA_ShowWithoutActivating)
+            # macOS hides tool windows whenever their app is not the active
+            # one — and Lura never is. Without this the face vanishes the
+            # moment the user clicks another app.
+            self.setAttribute(QtCore.Qt.WA_MacAlwaysShowToolWindow)
             geo = screen.geometry()
             #: Where the face itself sits; the window grows around it.
             self._face_pos = QtCore.QPoint(geo.x() + geo.width() - OVERLAY_SIZE - MARGIN_RIGHT,

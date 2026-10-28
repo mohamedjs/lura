@@ -47,14 +47,18 @@ set -e
 command -v update-desktop-database >/dev/null && update-desktop-database -q /usr/share/applications || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q /usr/share/icons/hicolor || true
 # Start Lura again for everyone it was running for before the upgrade (prerm
-# stopped them, so systemd did not crash-loop on a half-unpacked /opt/lura).
-if [ -f /run/lura-was-running ]; then
-  for u in $(sort -u /run/lura-was-running); do
-    systemctl --user -M "$u@" daemon-reload 2>/dev/null || true
+# stopped them, so systemd did not crash-loop on a half-unpacked /opt/lura),
+# and restart any that are still running old code (an older prerm stopped
+# nothing).
+for u in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
+  systemctl --user -M "$u@" daemon-reload 2>/dev/null || true
+  if grep -qx "$u" /run/lura-was-running 2>/dev/null; then
     systemctl --user -M "$u@" start lura.service 2>/dev/null || true
-  done
-  rm -f /run/lura-was-running
-fi
+  else
+    systemctl --user -M "$u@" try-restart lura.service 2>/dev/null || true
+  fi
+done
+rm -f /run/lura-was-running
 echo "Lura is installed. Open it from your applications menu, or run: lura"
 POSTINST
 cat > "$PKG/DEBIAN/prerm" <<'PRERM'
