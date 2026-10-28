@@ -71,7 +71,7 @@ mcp.json, license.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.1.0, Oct 2026)
+## Current behaviour (2.1.1, Oct 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
