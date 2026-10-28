@@ -125,7 +125,7 @@ class MemoryStore:
         """Every summary is also kept as Markdown, one file per day."""
         self.summaries.mkdir(parents=True, exist_ok=True)
         path = self.summaries / f"{time.strftime('%Y-%m-%d')}.md"
-        path.write_text(f"# Lura — summary of conversations up to {time.strftime('%Y-%m-%d %H:%M')}\n\n"
+        path.write_text(f"# Summary of conversations up to {time.strftime('%Y-%m-%d %H:%M')}\n\n"
                         f"{summary.strip()}\n", encoding="utf-8")
         return path
 

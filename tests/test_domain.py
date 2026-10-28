@@ -140,8 +140,16 @@ def check_billing():
 
 
 def check_assistant_rules():
-    prompt = system_prompt("You are {name}.", "Lura", "Mohamed", "ar", "\n[ctx]\n")
-    assert prompt.startswith("You are Lura.") and "Mohamed" in prompt
+    from lura.modules.assistant.domain import LEGACY_PERSONA, NO_REPLY
+    prompt = system_prompt("Call me boss, {name}.", "Nour", "Mohamed", "ar", "\n[ctx]\n", now="Wednesday")
+    assert prompt.startswith("You are Nour,") and "The user's name is Mohamed." in prompt
+    assert "Call me boss, Nour." in prompt and "[ctx]" in prompt and "It is now Wednesday." in prompt
+    assert "rename you" in prompt and NO_REPLY in prompt, "renames and noise are covered"
+    assert "Lura" not in prompt, "a renamed assistant is never called Lura"
+    old_default = system_prompt(LEGACY_PERSONA, "Lura", "", "en", "")
+    assert "user's own instructions" not in old_default and "save it with remember" in old_default
+    assert NO_REPLY not in system_prompt("", "Lura", "", "en", "", realtime=True), "Live speaks; it stays silent instead"
+    assert system_prompt("Use {braces} freely", "Lura", "", "en", "")   # a stray placeholder never breaks it
     assert prompt.splitlines()[-1].startswith("IMPORTANT: Always answer in Egyptian Arabic"), "language rule comes last"
     history = []
     for i in range(14):

@@ -122,8 +122,27 @@ class DashboardApi:
         return {"ok": True}
 
     def update_settings(self, body: dict) -> dict:
-        changed = self.settings.update(body.get("patch") or {})
-        return {"changed": changed, "settings": self.settings.current.to_dict(),
+        patch = dict(body.get("patch") or {})
+        lang = self.settings.current.ui_language
+        notes = []
+        if "wake_word" in patch:
+            patch["wake_word"] = str(patch["wake_word"]).strip().lower()
+            if self.voice.wake_word_known(patch["wake_word"]) is False:
+                raise ApiError(400, t("lang.wake_unknown", lang, word=patch["wake_word"]))
+        new_name = str(patch.get("assistant_name", "")).strip()
+        old = self.settings.current
+        # Renamed, and she was woken by her old name: follow the new one when
+        # the wake-word model can hear it, and say so either way.
+        if new_name and "wake_word" not in patch and old.wake_word in (old.assistant_name.lower(), "lura"):
+            candidate = new_name.lower()
+            if candidate != old.wake_word:
+                if self.voice.wake_word_known(candidate):
+                    patch["wake_word"] = candidate
+                    notes.append(t("lang.wake_followed", lang, word=candidate))
+                else:
+                    notes.append(t("lang.wake_kept", lang, word=old.wake_word, name=new_name))
+        changed = self.settings.update(patch)
+        return {"changed": changed, "notes": notes, "settings": self.settings.current.to_dict(),
                 "capabilities": self.settings.capabilities().to_dict(),
                 "restart_pending": self.restart_pending}
 

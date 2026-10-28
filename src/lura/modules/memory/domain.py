@@ -80,12 +80,15 @@ def split_for_compaction(turns: list[Turn], room: int, budget: int) -> tuple[lis
 
 def summary_prompt(previous: str, turns: list[Turn], user_name: str) -> str:
     who = user_name or "the user"
-    lines = "\n".join(f"[{'User' if t.role == 'user' else 'Lura'}] {t.text}" for t in turns)
-    return (f"You keep the long-term memory of Lura, a voice assistant, about {who}. Below is the "
+    # "Assistant", never a name: the user can rename the assistant, and a
+    # summary that calls it by the old name would contradict the new one.
+    lines = "\n".join(f"[{'User' if t.role == 'user' else 'Assistant'}] {t.text}" for t in turns)
+    return (f"You keep the long-term memory of a voice assistant about {who}. Below is the "
             f"previous summary and the conversation since. Write the new summary in Markdown: what "
             f"{who} asked for, decided, is working on, and anything to follow up, newest last. Keep "
             f"names, numbers, paths and dates exact; drop small talk. Write it in the language the "
-            f"conversation mostly uses. At most about 1500 words.\n\n"
+            f"conversation mostly uses. Call the assistant \"the assistant\", never by a name. At most "
+            f"about 1500 words.\n\n"
             f"## Previous summary\n{previous or '(none)'}\n\n## Conversation\n{lines}")
 
 

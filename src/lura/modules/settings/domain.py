@@ -71,11 +71,9 @@ MODES = ("pipeline", "realtime")
 LANGUAGES = ("en", "ar")
 EFFORTS = ("", "minimal", "low", "medium", "high")
 
-DEFAULT_PERSONA = (
-    "You are {name}, a spoken desktop assistant. Keep answers short and conversational, "
-    "as if talking out loud. Never use markdown, lists, code blocks or emoji: everything "
-    "you write is read aloud."
-)
+#: Extra instructions from the user, added to the built-in prompt. Empty by
+#: default: how Lura talks, hears and thinks lives in the assistant module.
+DEFAULT_PERSONA = ""
 
 
 def gender_of(voice: str) -> str:
@@ -96,9 +94,9 @@ class Settings:
     mode: str = "pipeline"
     brain_provider: str = OPENROUTER
     models: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_MODELS))
-    #: How hard thinking models may think. "minimal" cut a 3.8-flash turn
-    #: from 9.3s to 7.4s with the same answer; for a voice that is the point.
-    reasoning_effort: str = "minimal"
+    #: How hard thinking models may think. "minimal" answers ~2 s sooner but
+    #: misread follow-up questions in use; "low" is the default since 2.2.
+    reasoning_effort: str = "low"
     #: OpenRouter upstream preference. Pinning lets Google's implicit prompt
     #: cache hit across turns; fallbacks stay on.
     openrouter_provider_order: list[str] = field(

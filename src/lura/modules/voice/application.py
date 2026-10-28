@@ -236,6 +236,15 @@ class VoiceService:
         return WakeListener(settings.wake_word, settings.input_device, settings.wake_cooldown)
 
     @staticmethod
+    def wake_word_known(word: str) -> bool | None:
+        try:
+            from .infrastructure.wake import word_known
+            return word_known(word)
+        except Exception as exc:   # no vosk in this build, a broken model: do not block saving
+            log.debug("Cannot check the wake word: %s", exc)
+            return None
+
+    @staticmethod
     def ensure_wake_model(progress=None):
         from .infrastructure.wake import ensure_model
         return ensure_model(progress)

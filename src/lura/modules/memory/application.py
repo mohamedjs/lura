@@ -159,7 +159,7 @@ class MemoryService:
             if not hits:
                 return "Nothing in past conversations matches that."
             return "\n".join(f"[{time.strftime('%Y-%m-%d %H:%M', time.localtime(h['ts']))}] "
-                             f"{'User' if h['role'] == 'user' else 'Lura'}: {h['text'][:400]}" for h in hits)
+                             f"{'User' if h['role'] == 'user' else 'Assistant'}: {h['text'][:400]}" for h in hits)
         return f"Error: unknown tool {name}."
 
     # ── the dashboard ──

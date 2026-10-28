@@ -42,10 +42,11 @@ def _logging(verbose: bool) -> None:
                         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s", datefmt="%H:%M:%S")
 
 
-def _overlay_labels(lang: str) -> dict:
+def _overlay_labels(lang: str, assistant_name: str = "") -> dict:
     from .shared.i18n import t
     labels = {k: t(f"tray.{k}", lang) for k in ("open", "talk", "subtitles", "quit")}
-    labels.update(you=t("caption.you", lang), lura=t("caption.lura", lang))
+    # The caption says whatever the user named her, not "Lura".
+    labels.update(you=t("caption.you", lang), lura=assistant_name.strip() or t("caption.lura", lang))
     return labels
 
 
@@ -91,7 +92,7 @@ def cmd_run(args) -> int:
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
                       actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
                                "subtitles": toggle_subtitles, "quit": quit_from_tray},
-                      labels=_overlay_labels(s.ui_language))
+                      labels=_overlay_labels(s.ui_language, s.assistant_name))
     c.assistant.presence = overlay.state
     overlay.state.subtitles_enabled = s.subtitles
 

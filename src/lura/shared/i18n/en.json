@@ -187,5 +187,8 @@
   "skills.remove": "Remove",
   "skills.remove_confirm": "Remove the {name} skill and its files?",
   "skills.warning": "A skill is instructions Lura will follow, so only add ones you trust. Any command it runs still goes through the same safety guard.",
-  "mem.changed": "Lura changed her memory while you were editing. Here it is now; make your edit again."
+  "mem.changed": "Lura changed her memory while you were editing. Here it is now; make your edit again.",
+  "lang.wake_unknown": "The wake-word model cannot hear \"{word}\" (it is not in its vocabulary), so she would never wake up. Try a common English word, like a name.",
+  "lang.wake_followed": "Wake word is now \"{word}\" too.",
+  "lang.wake_kept": "The wake word stays \"{word}\": the offline model cannot hear \"{name}\". Pick another wake word if you like."
 }

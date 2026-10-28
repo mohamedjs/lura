@@ -101,7 +101,7 @@ class PipelineConversation:
         self._conv = self._keep("start")
         self._system = domain.system_prompt(settings.persona, settings.assistant_name,
                                             settings.user_name, settings.language,
-                                            tools.machine_context(),
+                                            tools.machine_context(), now=domain.now_text(),
                                             extra="\n\n".join(p for p in (memory_block, extra_prompt) if p))
         self._budget = settings.context_budget_tokens - domain.tokens(self._system) - domain.REPLY_RESERVE
         log.info("brain %s/%s (%s), voice %s", self._model.provider, self._model.model,
@@ -388,7 +388,7 @@ class Assistant:
         extra = "\n\n".join(p for p in (block, domain.recent_lines(prior[-10:]), self._extra_prompt()) if p)
         system = domain.system_prompt(settings.persona, settings.assistant_name, settings.user_name,
                                       settings.language, self._tools.machine_context(), realtime=True,
-                                      extra=extra)
+                                      extra=extra, now=domain.now_text())
         live = self._voice.realtime(settings, system, self._tools.realtime_specs(),
                                     lambda n, a: self._tools.dispatch(n, a), self.presence, initial_prompt)
         try:

@@ -31,23 +31,89 @@ def language_rule(language: str) -> str:
     return LANGUAGE_RULES.get(language, LANGUAGE_RULES["en"])
 
 
+#: The persona every 1.x/2.0 settings file stored. It is now part of the
+#: built-in prompt, so a stored copy of it adds nothing.
+LEGACY_PERSONA = (
+    "You are {name}, a spoken desktop assistant. Keep answers short and conversational, "
+    "as if talking out loud. Never use markdown, lists, code blocks or emoji: everything "
+    "you write is read aloud."
+)
+
+
+def _safe_format(text: str, **values: str) -> str:
+    try:
+        return text.format(**values)
+    except (KeyError, IndexError, ValueError):
+        return text   # a persona with stray braces is used as written
+
+
 def system_prompt(persona: str, assistant_name: str, user_name: str, language: str,
-                  machine_context: str, realtime: bool = False, extra: str = "") -> str:
+                  machine_context: str, realtime: bool = False, extra: str = "",
+                  now: str = "") -> str:
     """The system prompt. Byte-stable for one conversation: it is the cached
-    prefix of every request. ``extra`` is memory and skills."""
-    parts = [persona.format(name=assistant_name or "Lura")]
-    if user_name:
-        parts.append(f"The user's name is {user_name}.")
-    parts.append(machine_context)
+    prefix of every request. ``extra`` is memory and skills; ``now`` the date
+    and time the conversation started."""
+    name = assistant_name.strip() or "Lura"
+    who = user_name.strip() or "the user"
+    parts = [
+        f"You are {name}, a voice assistant that lives on {who}'s computer. You talk with them out "
+        f"loud and you can act on this computer with your tools. Your name is {name}. The user can "
+        f"rename you at any time: notes, summaries or earlier turns that use another name for the "
+        f"assistant are still about you.",
+        f"The user's name is {user_name.strip()}." if user_name.strip() else
+        "You do not know the user's name yet; if they tell you, save it with remember.",
+    ]
+    if now:
+        parts.append(f"It is now {now}.")
+    parts.append(
+        "How you hear: the user speaks and you get either their audio or a transcript of it. Both "
+        "can be imperfect: words misheard, cut off, or mixed with other voices, a TV or room noise. "
+        "Work out what they most likely mean from the whole conversation, not from one odd word. "
+        "If you truly cannot tell what they want, ask one short question instead of guessing or "
+        "acting on a fragment.")
+    if realtime:
+        parts.append("If what you heard was not meant for you (noise, a TV, people talking to each "
+                     "other), stay silent.")
+    else:
+        parts.append(f"If what you heard was not meant for you (only noise, a TV or video, people "
+                     f"talking to each other, a cough) or has no clear words, reply with exactly "
+                     f"{NO_REPLY} and nothing else; it is never spoken.")
+    parts.append(
+        "How you talk: everything you write is read aloud. Answer in one to three short sentences "
+        "unless they ask for more; lead with the answer itself; do not repeat their question back. "
+        "No markdown, lists, headings, code, emoji or links: say things the way a person would, "
+        "numbers and units included. After you do something, say briefly what you did and what you "
+        "found. Be warm, plain and direct.")
+    parts.append(
+        "How you think: keep track of the whole conversation, including earlier ones you are given "
+        "below, and connect new questions to them (\"it\", \"that file\", \"the same as "
+        "yesterday\"). When the user shares something lasting about themselves, their work or "
+        "their preferences, save it with remember. When they refer to something from before that "
+        "you do not see, look it up with search_history before saying you do not know. Never "
+        "invent facts, numbers, file contents or tool results; if you are not sure, say so.")
+    parts.append(
+        "How you act: when a tool can answer or do it, call it right away instead of describing "
+        "what you would do, then answer from what it returned. If a tool fails, say so plainly and "
+        "offer the next best step.")
+    parts.append(machine_context.strip())
     if not realtime:
         parts.append("Connected services (Chrome, live web pages, files, and any the user added) "
                      "are reachable through find_tools.")
+    custom = persona.strip()
+    if custom and custom != LEGACY_PERSONA:
+        parts.append("The user's own instructions for you:\n" + _safe_format(custom, name=name))
     if extra.strip():
         parts.append(extra.strip())
     # Repeated last on purpose: buried in the middle of a long system message
     # the language rule gets ignored.
     parts.append(f"IMPORTANT: {language_rule(language)}")
-    return "\n".join(parts)
+    return "\n\n".join(parts)
+
+
+def now_text() -> str:
+    """The date and time, as the prompt states it (local, with the weekday)."""
+    import time
+    return time.strftime("%A %d %B %Y, %H:%M (%Z)")
 
 
 def could_be_quiet(text: str) -> bool:

@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import tempfile
+import threading
 import time
 import urllib.request
 import zipfile
@@ -59,6 +61,43 @@ def ensure_model(progress=None) -> Path:
         shutil.move(str(inner), target)
     log.info("Wake-word model ready at %s", target)
     return target
+
+
+_model = None
+_model_lock = threading.Lock()
+
+
+def word_known(word: str) -> bool | None:
+    """Can Vosk listen for this word? None when the model is not downloaded.
+
+    A word outside the model's vocabulary is dropped from the grammar with a
+    single log line and then simply never fires — the user waits for an
+    assistant that cannot hear her name. Vosk says so only on stderr, so
+    stderr is captured while a throwaway recogniser is built.
+    """
+    global _model
+    if not ((model_dir() / "am").exists() or (model_dir() / "conf").exists()):
+        return None
+    from vosk import KaldiRecognizer, Model, SetLogLevel
+
+    word = ALIASES.get(word.lower().strip(), word.lower().strip())
+    if not word or " " in word:
+        return False
+    with _model_lock:
+        if _model is None:
+            SetLogLevel(-1)
+            _model = Model(str(model_dir()))
+        SetLogLevel(0)
+        saved, captured = os.dup(2), tempfile.TemporaryFile()
+        os.dup2(captured.fileno(), 2)
+        try:
+            KaldiRecognizer(_model, INPUT_RATE, json.dumps([word, "[unk]"]))
+        finally:
+            os.dup2(saved, 2)
+            os.close(saved)
+            SetLogLevel(-1)
+        captured.seek(0)
+        return "missing in vocabulary" not in captured.read().decode(errors="replace").lower()
 
 
 class WakeListener:

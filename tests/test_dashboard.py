@@ -67,6 +67,14 @@ def main() -> int:
         assert status == 200 and res["settings"]["voice_name"] == "Puck"
         assert c.settings.current.language == "ar"
         assert call(server, "PUT", "/api/settings", {"patch": {"mode": "nope"}})[0] == 400
+        # Wake word: refused if the offline model cannot hear it; follows a rename when it can.
+        c.voice.wake_word_known = lambda word: word != "zzqx"
+        assert call(server, "PUT", "/api/settings", {"patch": {"wake_word": "zzqx"}})[0] == 400
+        status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"assistant_name": "Nour"}})
+        assert status == 200 and res["settings"]["wake_word"] == "nour" and res["notes"], res
+        c.voice.wake_word_known = lambda word: False if word == "zzqx" else (word == "nour")
+        status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"assistant_name": "Zzqx"}})
+        assert res["settings"]["wake_word"] == "nour" and "nour" in res["notes"][0], "kept, and said so"
 
         status, res, _ = call(server, "POST", "/api/connectors",
                               {"kind": "url", "name": "github", "url": "https://api.githubcopilot.com/mcp/", "token": "x"})
