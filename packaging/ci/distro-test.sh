@@ -33,7 +33,7 @@ case "$ID" in
     pacman -Syu --noconfirm --needed xorg-server-xvfb imagemagick xorg-xwininfo mesa libglvnd nss nspr \
       libxcomposite libxdamage libxrandr libxtst libxkbfile alsa-lib portaudio jack2 xcb-util-cursor \
       xcb-util-wm xcb-util-keysyms xcb-util-renderutil xcb-util-image libxkbcommon-x11 fontconfig wayland \
-      glib2 harfbuzz fribidi freetype2 dbus nss >/dev/null || exit 1
+      glib2 harfbuzz fribidi freetype2 dbus ttf-dejavu >/dev/null || exit 1
     pacman -Q mesa gcc-libs ;;
   *) echo "unsupported distro $ID"; exit 2 ;;
 esac
