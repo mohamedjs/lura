@@ -175,8 +175,17 @@
               <button data-value="en">English</button><button data-value="ar">العربية</button>
             </div>
           </label>
+          <p class="hint" data-i18n="lang.conversation_hint"></p>
           <label class="field"><span data-i18n="lang.assistant_name"></span><input id="assistant-name"></label>
           <label class="field"><span data-i18n="lang.user_name"></span><input id="user-name"></label>
+          <label class="field"><span data-i18n="lang.user_gender"></span>
+            <div class="seg" id="user-gender" role="group">
+              <button data-value="male" data-i18n="lang.gender.male"></button>
+              <button data-value="female" data-i18n="lang.gender.female"></button>
+              <button data-value="" data-i18n="lang.gender.unset"></button>
+            </div>
+          </label>
+          <p class="hint" data-i18n="lang.user_gender_hint"></p>
           <label class="field"><span data-i18n="lang.wake_word"></span><input id="wake-word" spellcheck="false"></label>
           <p class="hint" data-i18n="lang.wake_hint"></p>
         </div>

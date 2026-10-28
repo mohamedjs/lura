@@ -102,6 +102,9 @@ class PipelineConversation:
         self._system = domain.system_prompt(settings.persona, settings.assistant_name,
                                             settings.user_name, settings.language,
                                             tools.machine_context(), now=domain.now_text(),
+                                            user_gender=settings.user_gender,
+                                            assistant_gender=settings.voice_gender,
+                                            services=tools.services(),
                                             extra="\n\n".join(p for p in (memory_block, extra_prompt) if p))
         self._budget = settings.context_budget_tokens - domain.tokens(self._system) - domain.REPLY_RESERVE
         log.info("brain %s/%s (%s), voice %s", self._model.provider, self._model.model,
@@ -241,7 +244,7 @@ class PipelineConversation:
             if self._ending:
                 # A user turn, not tool output: instructions inside a tool
                 # result get ignored and the turn ends in silence.
-                self._history.append(Message("user", domain.GOODBYE_NUDGE[self.s.language]))
+                self._history.append(Message("user", domain.GOODBYE_NUDGE))
                 self._stream(with_tools=False)
                 return
             # find_tools changes nothing outside this process; charging it
@@ -250,7 +253,7 @@ class PipelineConversation:
                 rounds += 1
             if rounds >= domain.MAX_TOOL_ROUNDS:
                 log.warning("Model used all %d tool rounds; asking it to answer.", rounds)
-                self._history.append(Message("user", domain.ANSWER_NOW[self.s.language]))
+                self._history.append(Message("user", domain.ANSWER_NOW))
                 self._stream(with_tools=False)
                 return
 
@@ -393,7 +396,10 @@ class Assistant:
         extra = "\n\n".join(p for p in (block, domain.recent_lines(prior[-10:]), self._extra_prompt()) if p)
         system = domain.system_prompt(settings.persona, settings.assistant_name, settings.user_name,
                                       settings.language, self._tools.machine_context(), realtime=True,
-                                      extra=extra, now=domain.now_text())
+                                      extra=extra, now=domain.now_text(),
+                                      user_gender=settings.user_gender,
+                                      assistant_gender=settings.voice_gender,
+                                      services=self._tools.services())
         live = self._voice.realtime(settings, system, self._tools.realtime_specs(),
                                     lambda n, a: self._tools.dispatch(n, a), self.presence, initial_prompt)
         try:
@@ -411,7 +417,7 @@ class Assistant:
     def briefing(self) -> None:
         settings = self._settings.current
         data = self._tools.briefing_data()
-        self.converse(domain.briefing_prompt(data, settings.language, settings.user_name))
+        self.converse(domain.briefing_prompt(data, settings.language, settings.user_name, settings.user_gender))
 
     def _wait_until_ready(self, stop: threading.Event) -> bool:
         """Block while setup is incomplete — the dashboard is how it gets fixed."""

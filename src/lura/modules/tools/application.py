@@ -18,6 +18,7 @@ class ConnectorTools(Protocol):
     def all_tools(self) -> list[ToolSpec]: ...
     def owns(self, name: str) -> bool: ...
     def call(self, name: str, arguments: dict[str, Any]) -> str: ...
+    def connected(self) -> list[dict[str, Any]]: ...
 
 
 class ToolProvider(Protocol):
@@ -105,6 +106,25 @@ class ToolService:
         except Exception as exc:
             log.warning("Tool %s failed: %s", name, exc)
             return f"Error running {name}: {exc}", False
+
+    def services(self) -> str:
+        """The connected MCP servers in a few lines: name, what it is for, and a
+        sample of its tool names (they say more than most descriptions)."""
+        if not self._connectors:
+            return ""
+        try:
+            rows = self._connectors.connected()
+        except Exception as exc:
+            log.debug("Connector summary unavailable: %s", exc)
+            return ""
+        if not rows:
+            return ""
+        lines = []
+        for row in rows:
+            sample = ", ".join(row["tools"][:8]) + (", …" if len(row["tools"]) > 8 else "")
+            about = f" — {row['description']}" if row.get("description") else ""
+            lines.append(f"- {row['name']}{about} ({len(row['tools'])} tools: {sample})")
+        return "Connected right now:\n" + "\n".join(lines)
 
     @staticmethod
     def machine_context() -> str:

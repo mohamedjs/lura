@@ -259,6 +259,9 @@ def check_connectors():
     svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")
     assert row["status"] == "ready" and row["tools"] == ["echo_text", "open_tab"], row
+    from lura.modules.tools import ToolService
+    listed = ToolService(svc).services()
+    assert listed.startswith("Connected right now:") and "- echo" in listed and "echo_text, open_tab" in listed, listed
     found = svc.search("open a new tab in the browser")
     assert found and found[0].name == "mcp_echo_open_tab", found
     assert svc.call("mcp_echo_echo_text", {"text": "hi"}) == "echo: hi"

@@ -22,15 +22,35 @@ MAX_IGNORED_TURNS = 2
 #: Room left in the context for the reply itself.
 REPLY_RESERVE = 8000
 
-LANGUAGE_RULES = {
-    "ar": ("Always answer in Egyptian Arabic (عامية مصرية), written in Arabic script, even if the "
-           "user speaks English. Spell out numbers and units the way an Egyptian would say them."),
-    "en": "Always answer in English, even if the user speaks another language.",
-}
+_LANGUAGE_NAMES = {"ar": "Egyptian Arabic (عامية مصرية, in Arabic script)", "en": "English"}
 
 
 def language_rule(language: str) -> str:
-    return LANGUAGE_RULES.get(language, LANGUAGE_RULES["en"])
+    """Answer in the language the user speaks; the dashboard's choice is only
+    the default. An Egyptian who asks in English wants English back, and the
+    other way round."""
+    default = _LANGUAGE_NAMES.get(language, _LANGUAGE_NAMES["en"])
+    return (f"Reply in the language the user speaks to you. If they speak Arabic, answer in Egyptian "
+            f"Arabic (عامية مصرية) written in Arabic script, never Modern Standard Arabic; if they speak "
+            f"English, answer in English; if they mix, use the one they mostly used. Your default is "
+            f"{default}: use it when you speak first, or when you cannot tell (a name, a one-word "
+            f"reply, noise). Keep names, commands, file names and technical terms as they are. Say "
+            f"numbers and units the way a speaker of that language says them out loud.")
+
+
+def addressing_rule(user_gender: str, assistant_gender: str) -> str:
+    """Arabic is gendered both ways: how she speaks to the user, and of herself."""
+    me = ("a woman: in Arabic use feminine forms for yourself (أنا جاهزة، فتحتلك، شايفة)"
+          if assistant_gender != "male" else
+          "a man: in Arabic use masculine forms for yourself (أنا جاهز، فتحتلك، شايف)")
+    if user_gender == "male":
+        them = "The user is a man: in Arabic address him in masculine forms (إنتَ، عايز، تحب، قولّي)."
+    elif user_gender == "female":
+        them = "The user is a woman: in Arabic address her in feminine forms (إنتِ، عايزة، تحبي، قوليلي)."
+    else:
+        them = ("You do not know whether the user is a man or a woman: in Arabic prefer wording that "
+                "avoids gendered forms; if they tell you, follow it and save it with remember.")
+    return f"You speak of yourself as {me}. {them}"
 
 
 #: The persona every 1.x/2.0 settings file stored. It is now part of the
@@ -51,10 +71,11 @@ def _safe_format(text: str, **values: str) -> str:
 
 def system_prompt(persona: str, assistant_name: str, user_name: str, language: str,
                   machine_context: str, realtime: bool = False, extra: str = "",
-                  now: str = "") -> str:
+                  now: str = "", user_gender: str = "", assistant_gender: str = "female",
+                  services: str = "") -> str:
     """The system prompt. Byte-stable for one conversation: it is the cached
     prefix of every request. ``extra`` is memory and skills; ``now`` the date
-    and time the conversation started."""
+    and time the conversation started; ``services`` the connected MCP servers."""
     name = assistant_name.strip() or "Lura"
     who = user_name.strip() or "the user"
     parts = [
@@ -93,14 +114,29 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
         "their preferences, save it with remember. When they refer to something from before that "
         "you do not see, look it up with search_history before saying you do not know. Never "
         "invent facts, numbers, file contents or tool results; if you are not sure, say so.")
+    parts.append(addressing_rule(user_gender, assistant_gender))
     parts.append(
         "How you act: when a tool can answer or do it, call it right away instead of describing "
-        "what you would do, then answer from what it returned. If a tool fails, say so plainly and "
-        "offer the next best step.")
+        "what you would do, then answer from what it returned. Chain tools when a task needs "
+        "several steps: read each result, decide the next step, and keep going until it is done, "
+        "then say the outcome in a sentence or two. Read-only actions (looking, listing, reading, "
+        "searching, opening) need no permission. Before anything that sends, posts, buys, books, "
+        "deletes or changes something for other people, say exactly what you will do and wait for "
+        "a yes. If a tool fails, say so plainly and try the next best way.")
     parts.append(machine_context.strip())
-    if not realtime:
-        parts.append("Connected services (Chrome, live web pages, files, and any the user added) "
-                     "are reachable through find_tools.")
+    if realtime:
+        parts.append("Your connected services' tools are declared to you directly; use them like "
+                     "your own." + (f"\n{services}" if services else ""))
+    else:
+        parts.append(
+            "Connected services (MCP servers: the browser, live web pages, files, and any the user "
+            "added such as GitHub or Notion) are reached in two steps within the same turn: call "
+            "find_tools with a few words for the action (\"list github pull requests\", \"open a "
+            "chrome tab\", \"search notion pages\"), then call the tool it returns. Prefer a "
+            "connected service over run_command when one fits. If find_tools finds nothing, try "
+            "once more with other words (the service's name, another verb), then fall back to "
+            "run_command or open_url, or say that service is not connected."
+            + (f"\n{services}" if services else ""))
     custom = persona.strip()
     if custom and custom != LEGACY_PERSONA:
         parts.append("The user's own instructions for you:\n" + _safe_format(custom, name=name))
@@ -187,20 +223,25 @@ def recent_lines(turns: list[tuple[str, str]], limit: int = 2000) -> str:
     return f"The conversation so far:\n{text[-limit:]}" if text else ""
 
 
-def briefing_prompt(data: dict[str, str], language: str, user_name: str) -> str:
+def briefing_prompt(data: dict[str, str], language: str, user_name: str, user_gender: str = "") -> str:
     readings = "\n".join(f"- {k.replace('_', ' ')}: {v}" for k, v in data.items())
-    who = user_name or ("صاحبي" if language == "ar" else "there")
     if language == "ar":
-        return (f"الجهاز لسه فاتح. ابدأ الكلام من نفسك مع {who}: سلّم عليه بالمصري بشكل طبيعي وودود، "
-                f"وبعدين ادّيله ملخص سريع لحالة الجهاز واليوم من البيانات دي بس (ما تخترعش أرقام):\n"
-                f"{readings}\nلو في آخر كوميت، اشرح معناه في جملة. اختم بسؤاله يحب يبدأ بإيه. "
+        her = user_gender == "female"
+        who = user_name or ("صاحبتي" if her else "صاحبي")
+        on, to, ask, wants = (("عليها", "ادّيلها", "بسؤالها", "تحب تبدأ") if her
+                              else ("عليه", "ادّيله", "بسؤاله", "يحب يبدأ"))
+        return (f"الجهاز لسه فاتح. ابدأ الكلام من نفسك مع {who}: سلّم {on} بالمصري بشكل طبيعي وودود، "
+                f"وبعدين {to} ملخص سريع لحالة الجهاز واليوم من البيانات دي بس (ما تخترعش أرقام):\n"
+                f"{readings}\nلو في آخر كوميت، اشرح معناه في جملة. اختم {ask} {wants} بإيه. "
                 f"كلام صوتي طبيعي من غير قوائم أو رموز.")
+    who = user_name or "there"
     return (f"The computer just started. Speak first: greet {who} warmly and naturally, then give a "
             f"quick spoken summary of the day and the machine from these readings only (never invent "
             f"numbers):\n{readings}\nIf there is a latest commit, say what it means in one sentence. "
             f"End by asking what they want to start with. Natural speech, no lists or symbols.")
 
 
-GOODBYE_NUDGE = {"ar": "قول مع السلامة في جملة قصيرة.", "en": "Say a short goodbye, one sentence."}
-ANSWER_NOW = {"ar": "كفاية أدوات، جاوبني دلوقتي في جملة واحدة.",
-              "en": "Stop using tools and answer me now in one sentence."}
+# In no particular language on purpose: she answers in the one the
+# conversation is in, which may not be the dashboard's default.
+GOODBYE_NUDGE = "Say a short goodbye in one sentence, in the language we have been speaking."
+ANSWER_NOW = "Stop using tools and answer me now in one sentence, in the language we have been speaking."

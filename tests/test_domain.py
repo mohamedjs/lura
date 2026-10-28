@@ -134,7 +134,20 @@ def check_assistant_rules():
     assert "user's own instructions" not in old_default and "save it with remember" in old_default
     assert NO_REPLY not in system_prompt("", "Lura", "", "en", "", realtime=True), "Live speaks; it stays silent instead"
     assert system_prompt("Use {braces} freely", "Lura", "", "en", "")   # a stray placeholder never breaks it
-    assert prompt.splitlines()[-1].startswith("IMPORTANT: Always answer in Egyptian Arabic"), "language rule comes last"
+    last = prompt.splitlines()[-1]
+    assert last.startswith("IMPORTANT: Reply in the language the user speaks"), "language rule comes last"
+    assert "Your default is Egyptian Arabic" in last and "if they speak English, answer in English" in last
+    assert "Your default is English" in system_prompt("", "Lura", "", "en", "")
+    # Arabic is gendered: how she speaks to the user, and of herself.
+    assert "address him in masculine" in system_prompt("", "Lura", "", "ar", "", user_gender="male")
+    her = system_prompt("", "Lura", "", "ar", "", user_gender="female", assistant_gender="male")
+    assert "address her in feminine" in her and "masculine forms for yourself" in her
+    assert "avoids gendered forms" in system_prompt("", "Lura", "", "ar", "")
+    # Connected MCP servers are named, so she knows to look for their tools.
+    with_github = system_prompt("", "Lura", "", "en", "", services="Connected right now:\n- github (2 tools: a, b)")
+    assert "find_tools" in with_github and "- github (2 tools" in with_github
+    from lura.modules.assistant import briefing_prompt
+    assert "تحب تبدأ" in briefing_prompt({}, "ar", "", "female") and "يحب يبدأ" in briefing_prompt({}, "ar", "")
     history = []
     for i in range(14):
         history += [Message("user", f"q{i}"), Message("assistant", "", tool_calls=[]),

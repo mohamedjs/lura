@@ -220,6 +220,7 @@ function renderHome() {
   $("#hero-title").textContent = t("hero.title", { name: s.assistant_name || "Lura" });
   $("#home-facts").replaceChildren(...rows.flatMap(([k, v]) => [el("dt", { textContent: k }), el("dd", { textContent: v, dir: "auto" })]));
   bindCheck("#live-captions", "live_captions");
+  seg($("#user-gender"), s.user_gender || "", (v) => save({ user_gender: v }));
   $("#live-captions").disabled = !s.subtitles;
 }
 

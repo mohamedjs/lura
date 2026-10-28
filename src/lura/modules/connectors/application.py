@@ -48,6 +48,17 @@ class ConnectorService:
                         "tools": [t["name"] for t in run.tools] if run else []})
         return out
 
+    def connected(self) -> list[dict[str, Any]]:
+        """Servers that are up, with what they can do — for the system prompt,
+        so the model knows a service exists before it searches for its tools."""
+        out = []
+        for c in self._connectors:
+            run = self._running.get(c.name)
+            if run and run.status == "ready" and run.tools:
+                out.append({"name": c.name, "description": c.description,
+                            "tools": [t["name"] for t in run.tools]})
+        return out
+
     def get(self, name: str) -> Connector | None:
         return next((c for c in self._connectors if c.name == name), None)
 

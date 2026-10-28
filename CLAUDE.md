@@ -134,6 +134,12 @@ is an **editable install**, so editing `src/` + restarting the service is enough
     (`overlay/workspaces.py`).
   - A dead assistant/face loop exits 1 (systemd restarts it); tray Quit is logged.
   - Wake word checked against the Vosk vocabulary on save; renaming moves it along.
+  - Language: `settings.language` is only the default; she answers in the language the
+    user speaks (Arabic → Egyptian). `user_gender` (male/female/unset) sets how she
+    addresses the user in Arabic; her own forms follow `voice_gender`.
+  - Tool harness: the prompt lists connected MCP servers with a sample of their tool
+    names (`ToolService.services`) and how to reach them (find_tools, retry, fallback),
+    plus when to ask before acting (sending, posting, buying, deleting).
 
 ## The overlay face (`modules/overlay/`)
 

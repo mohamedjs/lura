@@ -200,5 +200,11 @@
   "brain.minimal_warning": "Thinking is set to \"minimal\": faster, but she may misread follow-up questions. \"Low\" is the better balance.",
   "audio.turns": "Turn-taking",
   "about.title": "About",
-  "about.text": "Lura is free and open source (MIT). Bugs and ideas are welcome on GitHub; every change is reviewed by the maintainer."
+  "about.text": "Lura is free and open source (MIT). Bugs and ideas are welcome on GitHub; every change is reviewed by the maintainer.",
+  "lang.conversation_hint": "Her default. She answers in whatever language you speak to her: Arabic gets Egyptian Arabic, English gets English.",
+  "lang.user_gender": "Talk to me as",
+  "lang.gender.male": "a man",
+  "lang.gender.female": "a woman",
+  "lang.gender.unset": "not set",
+  "lang.user_gender_hint": "Arabic addresses men and women differently (إنتَ عايز / إنتِ عايزة). Her own forms follow her voice."
 }

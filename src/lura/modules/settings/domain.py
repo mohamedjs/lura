@@ -113,6 +113,8 @@ class Settings:
     # ── who ──
     assistant_name: str = "Lura"
     user_name: str = ""
+    #: "male", "female" or "" (unknown): how she addresses the user in Arabic.
+    user_gender: str = ""
     persona: str = DEFAULT_PERSONA
 
     # ── wake word: always local Vosk, whichever provider answers ──
@@ -171,6 +173,7 @@ _CHOICES: dict[str, tuple[str, ...]] = {
     "brain_provider": PROVIDERS, "voice_provider": ("auto", *VOICE_PROVIDERS),
     "voice_gender": tuple(VOICES), "reasoning_effort": EFFORTS,
     "context_budget_tokens": (32_000, 64_000, 128_000, 200_000),
+    "user_gender": ("", "male", "female"),
 }
 
 
