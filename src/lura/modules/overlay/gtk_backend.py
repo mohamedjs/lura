@@ -147,8 +147,12 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
 
     blender = StateBlender()
     phase = [0.0]
+    alive = [True]
+    win.connect("destroy", lambda *_: alive.__setitem__(0, False))   # monitor unplugged
 
     def tick():
+        if not alive[0]:
+            return False
         blender.update(shared.state, dt=0.033)
         # Idle motion slows to 60%; scale the increment so the phase stays
         # monotonic and the motion never jumps across a state blend.
@@ -183,11 +187,23 @@ def start(shared: OverlayState, actions: dict | None = None, labels: dict | None
             if not display or display.get_n_monitors() == 0:
                 log.warning("No display for the overlay.")
                 return
-            windows = [_window(display.get_monitor(i), shared, actions, labels)
-                       for i in range(display.get_n_monitors())]
-            for win in windows:
-                win.show_all()
-            log.info("Overlay (GTK) on %d monitor(s).", len(windows))
+            windows = {}
+
+            def add(_display, monitor):
+                if monitor not in windows:
+                    windows[monitor] = _window(monitor, shared, actions, labels)
+                    windows[monitor].show_all()
+                    log.info("Overlay (GTK) on %d monitor(s).", len(windows))
+
+            def remove(_display, monitor):
+                if win := windows.pop(monitor, None):
+                    win.destroy()
+
+            for i in range(display.get_n_monitors()):
+                add(display, display.get_monitor(i))
+            # A monitor that wakes up later (second GPU, dock) gets a face too.
+            display.connect("monitor-added", add)
+            display.connect("monitor-removed", remove)
             Gtk.main()
         except Exception:
             log.warning("Overlay unavailable — running headless.", exc_info=True)

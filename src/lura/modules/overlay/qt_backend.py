@@ -18,6 +18,7 @@ import threading
 from .captions import CAPTION_HEIGHT, CAPTION_WIDTH, caption_lines
 from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, render_surface
 from .state import OverlayState, StateBlender
+from .workspaces import on_every_workspace
 
 log = logging.getLogger(__name__)
 
@@ -83,10 +84,7 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
                                            geo.y() + MARGIN_TOP)
             self._wide = None
             self._offset = 0
-            self._blender = StateBlender()
-            self._phase = 0.0
             self._image = None
-            self._surface = None
             self._drag = None
             self._caption_html = ""
             self.label = QtWidgets.QLabel(self)
@@ -140,15 +138,8 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
                 self.label.adjustSize()
                 self.label.setFixedWidth(CAPTION_WIDTH)
 
-        def tick(self):
-            b = self._blender
-            b.update(shared.state, dt=0.033)
-            self._phase += 0.033 * (0.60 * b.wl + b.wt + b.ws)
-            self._surface = render_surface(self._phase, b, size=OVERLAY_SIZE, amp=shared.amplitude)
-            self._surface.flush()
-            self._image = QtGui.QImage(self._surface.get_data(), OVERLAY_SIZE, OVERLAY_SIZE,
-                                       self._surface.get_stride(),
-                                       QtGui.QImage.Format_ARGB32_Premultiplied)
+        def show_frame(self, image) -> None:
+            self._image = image
             self._captions()
             self.update()
 
@@ -180,9 +171,31 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             if open_dashboard := actions.get("open"):
                 open_dashboard()
 
-    faces = [Face(screen) for screen in app.screens()] if show_face else []
-    for face in faces:
+    #: One face per screen, kept in step with the screens: a monitor that
+    #: wakes up after Lura started (an HDMI port on a second GPU, a dock)
+    #: gets its face too, and an unplugged one loses it.
+    faces: dict = {}
+
+    def add_screen(screen) -> None:
+        if not show_face or screen in faces:
+            return
+        face = Face(screen)
+        faces[screen] = face
         face.show()
+        # Once mapped, so the window manager has a window to move.
+        QtCore.QTimer.singleShot(300, lambda: on_every_workspace(int(face.winId())))
+        log.info("Overlay (Qt) on %d screen(s).", len(faces))
+
+    def remove_screen(screen) -> None:
+        if face := faces.pop(screen, None):
+            face.close()
+            face.deleteLater()
+            log.info("Overlay (Qt) on %d screen(s).", len(faces))
+
+    for screen in app.screens():
+        add_screen(screen)
+    app.screenAdded.connect(add_screen)
+    app.screenRemoved.connect(remove_screen)
 
     # Tray icon: one still frame of the face.
     icon_surface = render_surface(1.0, StateBlender(), size=64, amp=0.0)
@@ -210,14 +223,32 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
     if QtWidgets.QSystemTrayIcon.isSystemTrayAvailable():
         tray.show()
 
+    # One render per frame, shown on every screen: the mesh is the costly
+    # part (~9 ms), and drawing it once per monitor doubled Lura's CPU. While
+    # idle the face barely moves, so it runs at half the rate.
+    blender = StateBlender()
+    clock = {"phase": 0.0, "surface": None}
+
+    def frame_tick() -> None:
+        dt = frame.interval() / 1000
+        blender.update(shared.state, dt=dt)
+        clock["phase"] += dt * (0.60 * blender.wl + blender.wt + blender.ws)
+        surface = render_surface(clock["phase"], blender, size=OVERLAY_SIZE, amp=shared.amplitude)
+        surface.flush()
+        clock["surface"] = surface   # the QImage borrows its memory; keep it alive
+        image = QtGui.QImage(surface.get_data(), OVERLAY_SIZE, OVERLAY_SIZE, surface.get_stride(),
+                             QtGui.QImage.Format_ARGB32_Premultiplied)
+        for face in list(faces.values()):
+            face.show_frame(image)
+        frame.setInterval(66 if str(getattr(shared.state, "value", shared.state)) == "idle" else 33)
+
     frame = QtCore.QTimer()
-    frame.timeout.connect(lambda: [face.tick() for face in faces])
+    frame.timeout.connect(frame_tick)
     frame.start(33)
     # Polling the stop event also hands control back to Python regularly,
     # so Ctrl+C and SIGTERM handlers get to run under Qt's loop.
     watcher = QtCore.QTimer()
     watcher.timeout.connect(lambda: app.quit() if stop.is_set() else None)
     watcher.start(200)
-    log.info("Overlay (Qt) on %d screen(s).", len(faces))
     app.exec()
     tray.hide()
