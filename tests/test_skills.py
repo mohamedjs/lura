@@ -61,7 +61,7 @@ def check_import_and_tools():
     assert "- release-notes: Write release notes" in svc.prompt_block()
     assert [t.name for t in svc.tool_specs()] == ["use_skill", "read_skill_file"]
     used = svc.call("use_skill", {"name": "release-notes"})
-    assert used.startswith("# Release notes") and "scripts/log.sh" in used and str(root) in used
+    assert used.startswith("# Release notes") and "scripts/log.sh" in used and str(root.resolve()) in used   # resolved: macOS /private/var, Windows RUNNER~1
     assert svc.call("read_skill_file", {"name": "release-notes", "path": "reference/style.md"}) == "Short. Past tense."
     for escape in ("../../keys.json", "/etc/passwd", "reference/../../release-notes/../x"):
         assert svc.call("read_skill_file", {"name": "release-notes", "path": escape}).startswith("Error"), escape

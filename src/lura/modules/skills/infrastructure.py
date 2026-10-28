@@ -67,7 +67,8 @@ class SkillRepository:
 
     def files(self, name: str) -> list[str]:
         base = self.folder(name)
-        return sorted(str(p.relative_to(base)) for p in base.rglob("*")
+        # Forward slashes on every OS: these go into the prompt and back into read_skill_file.
+        return sorted(p.relative_to(base).as_posix() for p in base.rglob("*")
                       if p.is_file() and p.name != "SKILL.md")[:200]
 
     def read_file(self, name: str, rel: str, limit: int = 60_000) -> str:
