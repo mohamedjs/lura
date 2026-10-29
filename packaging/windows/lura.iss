@@ -25,6 +25,10 @@ UninstallDisplayIcon={app}\LuraApp.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; Updates from inside Lura run this installer silently while Lura is open:
+; close it (forcefully if it does not answer) and start the new one at the end.
+CloseApplications=force
+RestartApplications=no
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
@@ -51,6 +55,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\LuraApp.exe"; Parameters: "run"; Description: "Start Lura now"; Flags: nowait postinstall skipifsilent
+; An update from inside the app (silent): start the new version straight away.
+Filename: "{app}\LuraApp.exe"; Parameters: "run --no-browser"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM LuraApp.exe /F"; Flags: runhidden; RunOnceId: "StopLura"
@@ -60,6 +66,16 @@ function NodeInstalled(): Boolean;
 var ResultCode: Integer;
 begin
   Result := Exec(ExpandConstant('{cmd}'), '/C where npx', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+// Make sure no Lura is still holding its files (an update starts while it runs).
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM LuraApp.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{cmd}'), '/C taskkill /IM lura.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(800);
+  Result := '';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

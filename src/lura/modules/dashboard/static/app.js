@@ -425,6 +425,56 @@ function renderAdvanced() {
   $("#version").textContent = `Lura ${S.version} · ${S.os}`;
 }
 
+// ── updates: a new release is offered here and installed from inside the app
+let U = null;
+async function loadUpdate(check = false) {
+  try { U = await api(check ? "POST" : "GET", check ? "/api/update/check" : "/api/update"); } catch (_) { return; }
+  renderUpdate();
+  if (U.state === "downloading" || U.state === "installing") setTimeout(loadUpdate, 1000);
+}
+function renderUpdate() {
+  if (!U || !S) return;
+  const busy = U.state === "downloading" || U.state === "installing";
+  const banner = $("#update-banner");
+  banner.hidden = !(U.available || busy || (U.state === "error" && U.latest));
+  $("#update-title").textContent = t("update.available", { v: U.latest });
+  let sub = t("update.current", { v: U.current });
+  if (U.state === "downloading") sub = t("update.downloading", { p: Math.round(U.progress * 100) });
+  else if (U.state === "installing") sub = t("update.installing");
+  else if (U.state === "error") sub = U.error;
+  else if (!U.can_install) sub = t(U.kind === "source" ? "update.source" : "update.manual");
+  $("#update-sub").textContent = sub;
+  $("#update-bar").hidden = U.state !== "downloading";
+  $("#update-fill").style.width = `${Math.round(U.progress * 100)}%`;
+  $("#update-notes").href = U.notes_url || "https://github.com/mohamedjs/lura/releases";
+  const btn = $("#update-btn");
+  btn.hidden = !U.can_install && !busy;
+  btn.disabled = busy;
+  btn.textContent = busy ? t("update.working") : t("update.now");
+  btn.onclick = installUpdate;
+  $("#update-state").textContent = U.state === "checking" ? t("update.checking")
+    : U.available ? t("update.available", { v: U.latest })
+    : U.error ? U.error : U.checked ? t("update.latest", { v: U.current }) : "";
+}
+async function installUpdate() {
+  try { U = await api("POST", "/api/update/install"); } catch (e) { return fail(e); }
+  renderUpdate();
+  toast(t("update.started"));
+  // Lura quits while the new version installs, then the new one answers on
+  // the same address with the same token.
+  let away = false;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 300000) {
+    await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const u = await api("GET", "/api/update");
+      if (away || u.current !== U.current) { toast(t("update.done", { v: u.current })); location.reload(); return; }
+      U = u; renderUpdate();
+      if (u.state === "error") return;
+    } catch (_) { away = true; }
+  }
+}
+
 function render() {
   applyI18n();
   renderStatus();
@@ -435,6 +485,9 @@ function render() {
   renderConnectors();
   renderAdvanced();
   renderCards();   // cards.js
+  bindCheck("#check-updates", "check_updates");
+  $("#update-check").onclick = () => loadUpdate(true);
+  renderUpdate();
 }
 
 async function refresh() {
@@ -482,4 +535,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   setInterval(poll, 2500);
   loadChrome();
   setInterval(loadChrome, 15000);
+  loadUpdate();
+  setInterval(() => loadUpdate(), 60000);
 });

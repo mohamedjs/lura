@@ -216,5 +216,20 @@
   "briefing.first_wake": "أول مرة أناديها كل يوم",
   "briefing.boot": "لما الجهاز يفتح",
   "briefing.off": "مقفول",
-  "briefing.hint": "بتبص على الخدمات اللي وصّلتها — GitHub وGitLab وBitbucket وJira وTrello وNotion والكالندر… — وتقولك عملت إيه امبارح وإيه اللي عليك النهارده، وتقترح تبدأ بإيه، وتسألك عنه."
+  "briefing.hint": "بتبص على الخدمات اللي وصّلتها — GitHub وGitLab وBitbucket وJira وTrello وNotion والكالندر… — وتقولك عملت إيه امبارح وإيه اللي عليك النهارده، وتقترح تبدأ بإيه، وتسألك عنه.",
+  "update.available": "لورا {v} نزلت",
+  "update.current": "عندك {v}. التحديث بياخد دقيقة، ولورا هتقفل وتفتح لوحدها.",
+  "update.now": "حدّث دلوقتي",
+  "update.notes": "إيه الجديد",
+  "update.working": "بيتحدّث…",
+  "update.downloading": "بيتحمّل… {p}%",
+  "update.installing": "بيتسطّب — لورا هتقفل وتفتح تاني لوحدها.",
+  "update.started": "لورا بتتحدّث…",
+  "update.done": "لورا {v} جاهزة.",
+  "update.manual": "حمّلها من صفحة الإصدارات عشان تحدّث.",
+  "update.source": "شغّالة من السورس: حدّث بـ git pull.",
+  "update.auto": "دوّر على نسخ جديدة لوحدك",
+  "update.check": "دوّر على تحديث",
+  "update.checking": "بدوّر…",
+  "update.latest": "عندك آخر نسخة ({v})."
 }

@@ -54,6 +54,10 @@ a clean machine and photographed (`docs/screenshots/`).
 | **Other Linux** | Unpack `lura-<version>-linux-x86_64.tar.gz` and run `lura/LuraApp` |
 | **From source** | `./install.sh` (Linux), or `pip install -e ".[all]"` then `lura` |
 
+Lura **updates herself**: when a new version is out, the dashboard shows it with an
+**Update now** button. She downloads the right file, checks it against the release's
+checksums, installs it and opens again (from 2.2.1 on).
+
 ### Opening Lura on a Mac
 
 Lura is not notarised by Apple yet (that needs a paid developer ID), so a

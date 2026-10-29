@@ -24,6 +24,8 @@ TALK_REQUESTED = "assistant.talk"
 STOP_REQUESTED = "assistant.stop"
 STATUS = "assistant.status"
 RESTART_REQUESTED = "app.restart"
+#: Quit so a newly downloaded version can take over (its installer starts it).
+EXIT_REQUESTED = "app.exit"
 
 
 class EventBus:

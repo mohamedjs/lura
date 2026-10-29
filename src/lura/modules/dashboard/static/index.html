@@ -28,6 +28,14 @@
     </div>
   </header>
 
+  <div class="update-banner" id="update-banner" hidden>
+    <span class="ico" aria-hidden="true">⬆</span>
+    <div class="txt"><b id="update-title"></b><small id="update-sub"></small>
+      <div class="bar" id="update-bar" hidden><span id="update-fill"></span></div></div>
+    <a class="btn ghost" id="update-notes" target="_blank" rel="noopener" data-i18n="update.notes"></a>
+    <button class="btn primary" type="button" id="update-btn" data-i18n="update.now"></button>
+  </div>
+
   <div class="layout">
     <nav class="tabs" id="tabs" role="tablist">
       <button data-tab="home" role="tab"><span class="ico" aria-hidden="true">◉</span><span data-i18n="tab.home"></span></button>
@@ -282,6 +290,8 @@
           </label>
           <p class="hint" data-i18n="briefing.hint"></p>
           <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
+          <label class="switch"><input type="checkbox" id="check-updates"><span></span><b data-i18n="update.auto"></b></label>
+          <div class="row"><button class="btn" type="button" id="update-check" data-i18n="update.check"></button><span class="hint" id="update-state"></span></div>
           <p class="hint" id="config-path"></p>
         </div>
         <div class="card">

@@ -162,8 +162,9 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 .key-row .tags { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .key-row .row { margin-top: 0; }
 .key-field { position: relative; display: flex; align-items: center; }
-.key-field input { padding-inline-end: 46px; direction: ltr; text-align: start; }
-.key-field .eye { position: absolute; inset-inline-end: 4px; padding: 4px 8px; font-size: .9em; opacity: .7; }
+/* A key is Latin text: the field is LTR in both languages, the eye on its right. */
+.key-field input { padding-right: 46px; direction: ltr; text-align: left; }
+.key-field .eye { position: absolute; right: 4px; padding: 4px 8px; font-size: .9em; opacity: .7; }
 .tag { font-size: .75em; padding: 1px 8px; border-radius: 999px; background: var(--sunken); color: var(--muted); }
 .tag.voice { color: var(--teal); }
 @media (max-width: 760px) { .key-row { grid-template-columns: 1fr; gap: 8px; } }
@@ -239,3 +240,13 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 .chrome-box { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin: 8px 0 12px; border-radius: 14px; box-shadow: var(--inset); }
 .chrome-box > div { flex: 1; min-width: 0; }
 .chrome-box small { display: block; color: var(--muted); }
+
+/* A new release, installable from here */
+.update-banner { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; padding: 12px 16px; border-radius: 16px;
+  background: var(--card, var(--bg)); box-shadow: var(--raise-sm); border-inline-start: 4px solid var(--teal); }
+.update-banner .ico { font-size: 1.3em; color: var(--teal); }
+.update-banner .txt { flex: 1; min-width: 0; }
+.update-banner small { display: block; color: var(--muted); }
+.update-banner .bar { height: 6px; border-radius: 3px; background: var(--line-strong); margin-top: 6px; overflow: hidden; }
+.update-banner .bar span { display: block; height: 100%; width: 0; background: var(--teal); transition: width .3s; }
+@media (max-width: 560px) { .update-banner { flex-wrap: wrap; } }

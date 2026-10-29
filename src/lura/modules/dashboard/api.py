@@ -16,6 +16,7 @@ from ..connectors import ConnectorService
 from ..memory import MemoryService
 from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, SettingsService
 from ..skills import SkillsService
+from ..updates import UpdateService
 from ..voice import VoiceService
 from .server import ApiError
 
@@ -24,7 +25,8 @@ from .server import ApiError
 LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device", "silence_ms",
         "silence_factor", "follow_up_seconds", "memory_enabled", "context_budget_tokens", "live_captions",
         "persona", "user_name", "user_gender", "reasoning_effort", "voice_name", "voice_gender", "tts_style",
-        "language", "brain_provider", "models", "voice_provider", "mode", "wake_word"}
+        "language", "brain_provider", "models", "voice_provider", "mode", "wake_word",
+        "daily_briefing", "check_updates"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
@@ -39,6 +41,7 @@ class DashboardApi:
     status: Callable[[], str]
     memory: MemoryService | None = None
     skills: SkillsService | None = None
+    updates: UpdateService | None = None
     #: Whether a restart applies the changes made since Lura started. False
     #: for the standalone dashboard, which has no assistant to restart.
     can_restart: bool = True
@@ -57,6 +60,9 @@ class DashboardApi:
 
     def register(self, server) -> None:
         r = server.route
+        r("GET", "/api/update", lambda b, m: self.update_status())
+        r("POST", "/api/update/check", lambda b, m: self.update_status(check=True))
+        r("POST", "/api/update/install", lambda b, m: self.update_install())
         r("GET", "/api/state", lambda b, m: self.state())
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
@@ -112,6 +118,20 @@ class DashboardApi:
             "paths": {"config": str(self.settings.settings_path.parent)},
             "restart_pending": self.restart_pending, "can_restart": self.can_restart,
         }
+
+    # ── updates ──
+    def update_status(self, check: bool = False) -> dict:
+        if self.updates is None:
+            return {"available": False, "state": "idle", "can_install": False}
+        return self.updates.check(force=True) if check else self.updates.status()
+
+    def update_install(self) -> dict:
+        if self.updates is None or not self.can_restart:
+            raise ApiError(409, "Start Lura to update it from here.")
+        try:
+            return self.updates.install()
+        except RuntimeError as exc:
+            raise ApiError(409, str(exc))
 
     def restart(self) -> dict:
         if not self.can_restart:

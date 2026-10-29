@@ -133,6 +133,15 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   yesterday + today, sums up, suggests where to start, ends on a question and keeps
   listening (`run(..., then_listen=True)`). No work services → she says they can be
   connected.
+- **Updates from inside the app** (`modules/updates/`): the daemon asks GitHub's
+  `releases/latest` a minute after start and every 6 h (`check_updates`); the dashboard
+  shows a banner with "Update now". The file for this install (Setup.exe / macOS zip /
+  .deb / tar.gz) is downloaded only from this repo's release URLs and checked against
+  the release's `SHA256SUMS.txt`, then: Windows runs the Inno installer silently (lura.iss
+  closes the running Lura and starts the new one), macOS swaps Lura.app after exit and
+  reopens it, .deb goes through `pkexec apt-get install` then a restart, tar.gz is
+  swapped in place. Installs from source only get the notice. Versions before 2.2.1
+  have no updater, so 2.2.1 must be installed by hand once.
 - **macOS install:** `Casks/lura.rb` in this repo (no separate tap) installs the latest
   release from the fixed-name zips `Lura-macos-<arch>.zip` and clears the quarantine
   flag (not notarised). Landing page `#mac-first` explains "Lura" Not Opened → Open Anyway.

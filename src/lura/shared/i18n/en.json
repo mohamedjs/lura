@@ -216,5 +216,20 @@
   "briefing.first_wake": "The first time I call her each day",
   "briefing.boot": "When the computer starts",
   "briefing.off": "Off",
-  "briefing.hint": "She checks the services you connected — GitHub, GitLab, Bitbucket, Jira, Trello, Notion, your calendar… — tells you what you did yesterday and what's on today, suggests where to start, and asks you about it."
+  "briefing.hint": "She checks the services you connected — GitHub, GitLab, Bitbucket, Jira, Trello, Notion, your calendar… — tells you what you did yesterday and what's on today, suggests where to start, and asks you about it.",
+  "update.available": "Lura {v} is available",
+  "update.current": "You have {v}. Updating takes a minute; Lura restarts by herself.",
+  "update.now": "Update now",
+  "update.notes": "What's new",
+  "update.working": "Updating…",
+  "update.downloading": "Downloading… {p}%",
+  "update.installing": "Installing — Lura will close and open again by herself.",
+  "update.started": "Updating Lura…",
+  "update.done": "Lura {v} is ready.",
+  "update.manual": "Download it from the releases page to update.",
+  "update.source": "Running from source: update with git pull.",
+  "update.auto": "Check for new versions automatically",
+  "update.check": "Check for updates",
+  "update.checking": "Checking…",
+  "update.latest": "You have the latest version ({v})."
 }

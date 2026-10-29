@@ -149,6 +149,8 @@ class Settings:
     #: "boot" when the computer starts, or "off".
     daily_briefing: str = "first_wake"
     start_at_login: bool = True
+    #: Look for a new release (GitHub) at start and every six hours.
+    check_updates: bool = True
     overlay_enabled: bool = True
     #: What you said and what Lura answers, as subtitles under the face.
     subtitles: bool = True
