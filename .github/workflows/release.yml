@@ -1,12 +1,12 @@
 # Builds Lura for Linux (.deb + tar.gz), macOS (.app zip, arm64 + Intel) and
 # Windows (installer .exe), installs and runs each build on its runner and
-# takes screenshots. On a tag like v2.0.0 it also publishes a GitHub Release
-# and updates the Homebrew tap; on claude/** branches the builds are only
-# downloadable artifacts of the run. A manual run (workflow_dispatch with a
-# version) publishes the release too, creating the tag on the built commit.
+# takes screenshots. On a tag like v2.0.0 it also publishes a GitHub Release;
+# on claude/** branches the builds are only downloadable artifacts of the run.
+# A manual run (workflow_dispatch with a version) publishes the release too,
+# creating the tag on the built commit.
 #
-# Optional configuration (Settings → Secrets and variables → Actions):
-#   secrets.HOMEBREW_TAP_TOKEN  a token that can push to mohamedjs/homebrew-lura
+# Homebrew needs nothing here: Casks/lura.rb in this repo points at the
+# fixed-name macOS zips of the latest release (Lura-macos-<arch>.zip).
 name: Release
 
 on:
@@ -124,6 +124,9 @@ jobs:
           ARCH="${{ matrix.target }}"; ARCH="${ARCH#macos-}"
           mkdir -p out
           ditto -c -k --keepParent dist/Lura.app "out/Lura-$VERSION-macos-$ARCH.zip"
+          # The same zip under a fixed name: Casks/lura.rb downloads
+          # releases/latest/download/Lura-macos-<arch>.zip.
+          cp "out/Lura-$VERSION-macos-$ARCH.zip" "out/Lura-macos-$ARCH.zip"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -188,7 +191,7 @@ jobs:
           body: |
             ## Install
             - **Ubuntu / Debian:** download `lura_${{ env.VERSION }}_amd64.deb`, then `sudo apt install ./lura_${{ env.VERSION }}_amd64.deb`
-            - **macOS:** `brew install --cask mohamedjs/lura/lura`
+            - **macOS:** `brew tap mohamedjs/lura https://github.com/mohamedjs/lura && brew install --cask lura`, or download the zip and see [opening Lura on a Mac](https://mohamedjs.github.io/lura/#mac-first)
             - **Windows:** run `Lura-Setup-${{ env.VERSION }}.exe`
             - **Other Linux:** unpack `lura-${{ env.VERSION }}-linux-x86_64.tar.gz` and run `lura/LuraApp`
 
@@ -199,35 +202,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main || echo "::warning::could not trigger pages.yml"
-
-  homebrew:
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    needs: [version, release]
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.version.outputs.version }}
-      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with: { path: artifacts, merge-multiple: true, pattern: "macos-*" }
-      - name: Update the tap
-        if: env.TAP_TOKEN != ''
-        run: |
-          ARM=$(sha256sum "artifacts/Lura-$VERSION-macos-arm64.zip" | cut -d' ' -f1)
-          X86=$(sha256sum "artifacts/Lura-$VERSION-macos-x86_64.zip" | cut -d' ' -f1)
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/mohamedjs/homebrew-lura.git" tap
-          mkdir -p tap/Casks
-          sed -e "s/@VERSION@/$VERSION/" -e "s/@SHA_ARM64@/$ARM/" -e "s/@SHA_X86_64@/$X86/" \
-            packaging/homebrew/lura.rb.tmpl > tap/Casks/lura.rb
-          cd tap
-          git config user.name "lura-release"
-          git config user.email "release@users.noreply.github.com"
-          git add Casks/lura.rb
-          git commit -m "lura $VERSION" && git push
-      - name: No tap token
-        if: env.TAP_TOKEN == ''
-        run: echo "::warning::HOMEBREW_TAP_TOKEN is not set; the Homebrew cask was not updated."
 
   # Branch builds only: keep the smoke-test screenshots in the repo
   # (docs/screenshots/<platform>/), where they document what each build looks like.

@@ -134,3 +134,16 @@ img, video, canvas { max-width: 100%; }
 
 .foot { margin-top: 96px; padding-top: 28px; border-top: 1px solid var(--line); text-align: center; color: var(--muted); font-size: .92em; }
 .foot p { margin: 8px 0 0; }
+
+/* macOS first open */
+.macfirst { display: grid; grid-template-columns: minmax(220px, 340px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.macfirst > *, .macsteps > * { min-width: 0; }
+.macshot { margin: 0; text-align: center; }
+.macshot img { width: 100%; height: auto; border-radius: 18px; }
+.macshot figcaption { font-size: .9em; color: var(--muted); margin-top: 10px; }
+.macsteps { display: grid; gap: 16px; }
+.macsteps h3 { margin-top: 0; }
+.macsteps ol { margin: 0; padding-inline-start: 1.3em; }
+.macsteps li { margin: .35em 0; }
+.badge.rec { display: inline-block; float: inline-end; }
+@media (max-width: 800px) { .macfirst { grid-template-columns: minmax(0, 1fr); } .macshot { max-width: 340px; margin: 0 auto; } }

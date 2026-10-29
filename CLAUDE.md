@@ -125,8 +125,17 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Skills** (Free): paste / zip / https URL in the dashboard; listed in the prompt, body via
   `use_skill`, files via `read_skill_file` (confined to the folder); scripts only through
   the guarded `run_command`.
-- **Briefing** once per boot, in the conversation language; GitHub line only if a
-  connector named `github` is connected.
+- **Daily briefing** (`daily_briefing`: `first_wake` default / `boot` / `off`; a 2.2
+  `briefing_on_boot: false` migrates to `off`): the first time she is called each day
+  she picks the connected work services (`tools/domain.py: briefing_sources` — code,
+  tasks, calendar, notes, messages, or "other" custom ones; read tools only, ≤8 each,
+  ≤28 total), pre-loads those tools into the conversation, greets while she gathers
+  yesterday + today, sums up, suggests where to start, ends on a question and keeps
+  listening (`run(..., then_listen=True)`). No work services → she says they can be
+  connected.
+- **macOS install:** `Casks/lura.rb` in this repo (no separate tap) installs the latest
+  release from the fixed-name zips `Lura-macos-<arch>.zip` and clears the quarantine
+  flag (not notarised). Landing page `#mac-first` explains "Lura" Not Opened → Open Anyway.
 - **2.2 (Oct 2026):**
   - Voice falls back Gemini ⇄ OpenRouter on 429/5xx/timeouts (hearing gives up after
     20 s) and skips an exhausted provider for as long as its "retry in 4h…" says.

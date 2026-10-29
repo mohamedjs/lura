@@ -273,7 +273,14 @@
       <section class="panel" data-tab="settings">
         <div class="card">
           <h3 data-i18n="adv.title"></h3>
-          <label class="switch"><input type="checkbox" id="briefing"><span></span><b data-i18n="adv.briefing"></b></label>
+          <label class="field"><span data-i18n="briefing.label"></span>
+            <select id="daily-briefing">
+              <option value="first_wake" data-i18n="briefing.first_wake"></option>
+              <option value="boot" data-i18n="briefing.boot"></option>
+              <option value="off" data-i18n="briefing.off"></option>
+            </select>
+          </label>
+          <p class="hint" data-i18n="briefing.hint"></p>
           <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
           <p class="hint" id="config-path"></p>
         </div>

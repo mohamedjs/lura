@@ -144,7 +144,10 @@ class Settings:
     context_budget_tokens: int = 200_000
 
     # ── desktop ──
-    briefing_on_boot: bool = True
+    #: The day's briefing (yesterday, today, suggestions — from the connected
+    #: work services): "first_wake" the first time she is called each day,
+    #: "boot" when the computer starts, or "off".
+    daily_briefing: str = "first_wake"
     start_at_login: bool = True
     overlay_enabled: bool = True
     #: What you said and what Lura answers, as subtitles under the face.
@@ -172,6 +175,7 @@ _CHOICES: dict[str, tuple[str, ...]] = {
     "language": LANGUAGES, "ui_language": LANGUAGES, "mode": MODES,
     "brain_provider": PROVIDERS, "voice_provider": ("auto", *VOICE_PROVIDERS),
     "voice_gender": tuple(VOICES), "reasoning_effort": EFFORTS,
+    "daily_briefing": ("first_wake", "boot", "off"),
     "context_budget_tokens": (32_000, 64_000, 128_000, 200_000),
     "user_gender": ("", "male", "female"),
 }
@@ -305,6 +309,8 @@ def brain_hears_audio(provider: str, model: str) -> bool:
 
 def migrate_legacy(raw: dict[str, Any]) -> dict[str, Any]:
     """Settings files from Lura 1.x had one ``provider`` and flat model names."""
+    if "daily_briefing" not in raw and raw.get("briefing_on_boot") is False:
+        raw = {**raw, "daily_briefing": "off"}   # 2.2 and older: the boot briefing was switched off
     if "provider" not in raw and "openrouter_model" not in raw:
         return raw
     out = {k: v for k, v in raw.items() if k in {f.name for f in fields(Settings)}}

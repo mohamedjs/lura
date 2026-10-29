@@ -85,7 +85,6 @@
   "conn.remove_confirm": "Remove the {name} connector?",
   "conn.node_hint": "Command connectors run with npx, which comes with Node.js (nodejs.org).",
   "adv.title": "Advanced",
-  "adv.briefing": "Morning briefing after the computer starts",
   "adv.start_login": "Start Lura when I log in",
   "adv.overlay": "Show the face on screen",
   "adv.silence_factor": "Speech sensitivity (× room noise)",
@@ -212,5 +211,10 @@
   "chrome.connected": "Connected — Chrome and Playwright work in your Chrome window, with your profile and sign-ins.",
   "chrome.off": "Not connected. Lura will never open a separate guest Chrome: switch on remote debugging once (chrome://inspect/#remote-debugging) and allow the connection.",
   "chrome.setup": "Turn it on in Chrome",
-  "chrome.opened": "In Chrome: tick “Enable remote debugging”, then allow the connection when Chrome asks."
+  "chrome.opened": "In Chrome: tick “Enable remote debugging”, then allow the connection when Chrome asks.",
+  "briefing.label": "Daily briefing",
+  "briefing.first_wake": "The first time I call her each day",
+  "briefing.boot": "When the computer starts",
+  "briefing.off": "Off",
+  "briefing.hint": "She checks the services you connected — GitHub, GitLab, Bitbucket, Jira, Trello, Notion, your calendar… — tells you what you did yesterday and what's on today, suggests where to start, and asks you about it."
 }

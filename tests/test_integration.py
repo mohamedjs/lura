@@ -414,6 +414,108 @@ def check_pipeline_turn():
     assert spoken == ["Checking.", "The answer is 42.", "Anything else?"], spoken
 
 
+def check_daily_briefing():
+    """The first call of the day: the connected work services are picked, their
+    read tools pre-loaded, the brain gathers and sums up, then she listens."""
+    from lura.modules.assistant import PipelineConversation, briefing_prompt
+    from lura.modules.brain import Done, Message, TextDelta, ToolCall, ToolSpec
+    from lura.modules.settings import Settings
+    from lura.modules.tools import ToolService
+    from lura.shared.presence import NullPresence
+
+    obj = {"type": "object", "properties": {}}
+    servers = {"github": ["get_me", "list_commits", "create_issue", "merge_pull_request"],
+               "atlassian": ["searchJiraIssuesUsingJql", "createJiraIssue"],
+               "chrome": ["list_pages"]}
+    asked = []
+
+    class FakeConnectors:
+        def connected(self):
+            desc = {"atlassian": "Jira and Confluence"}
+            return [{"name": n, "description": desc.get(n, ""), "tools": t} for n, t in servers.items()]
+
+        def all_tools(self):
+            return [ToolSpec(f"mcp_{n}_{t}", f"[{n}] {t}", obj) for n, ts in servers.items() for t in ts]
+
+        def owns(self, name):
+            return name.startswith("mcp_")
+
+        def call(self, name, arguments):
+            asked.append(name)
+            return "2 commits yesterday: fix login, add tests"
+
+        def search(self, query, limit=8):
+            return []
+
+    tools = ToolService(FakeConnectors())
+    sources = tools.briefing_sources()
+    assert [(s["name"], s["kind"]) for s in sources] == [("github", "code"), ("atlassian", "tasks")], sources
+    assert sources[0]["tools"] == ["mcp_github_get_me", "mcp_github_list_commits"], "read tools only"
+    prompt = briefing_prompt({"weather": "sunny"}, "en", "Mohamed", "male", sources,
+                             "Thursday 29 October 2026", "Wednesday 28 October 2026")
+    assert "github (code)" in prompt and "mcp_atlassian_searchJiraIssuesUsingJql" in prompt
+    assert "Wednesday 28 October 2026" in prompt and "question" in prompt
+    assert "connect their tools" in briefing_prompt({}, "en", "", "", [], "", "")
+
+    rounds, spoken, listened = [], [], []
+
+    class FakeModel:
+        provider, model = "anthropic", "claude-opus-5-5"
+
+        def stream(self, system, history, tools_):
+            rounds.append([t.name for t in tools_])
+            if history[-1].role == "user":
+                yield TextDelta("Morning! Let me check your day. ")
+                yield Done(Message("assistant", "Morning! Let me check your day.", tool_calls=[
+                    ToolCall("t1", "mcp_github_list_commits", {"since": "yesterday"})]), "tool_use")
+            else:
+                text = "Yesterday you pushed two commits. Shall we start with the tests?"
+                yield TextDelta(text)
+                yield Done(Message("assistant", text), "end")
+
+    class FakeBrain:
+        def model(self, settings):
+            return FakeModel()
+
+    class FakePlayer:
+        def feed(self, text):
+            spoken.append(text)
+
+        def finish(self):
+            pass
+
+        def wait(self):
+            pass
+
+        def cancel(self):
+            pass
+
+        def say(self, text):
+            spoken.append(text)
+
+    class FakeVoice:
+        def player(self, settings, presence=None):
+            return FakePlayer()
+
+        def transcriber(self, settings):
+            return None
+
+        def record(self, settings, should_stop=None, live=None):
+            listened.append(1)
+            return b""
+
+        def to_wav(self, pcm):
+            return pcm
+
+    PipelineConversation(Settings(brain_provider="anthropic", subtitles=False), FakeBrain(), FakeVoice(),
+                         tools, NullPresence(), threading.Event(),
+                         preload=[spec for s in sources for spec in s["specs"]]).run(prompt, then_listen=True)
+    assert "mcp_github_list_commits" in rounds[0] and "mcp_atlassian_searchJiraIssuesUsingJql" in rounds[0]
+    assert "mcp_github_create_issue" not in rounds[0], "no write tools pre-loaded"
+    assert asked == ["mcp_github_list_commits"]
+    assert spoken[-1].endswith("start with the tests?") and listened == [1], "then she listens for the answer"
+
+
 def check_noise_and_live_captions():
     """A turn the brain judges to be noise is neither spoken nor kept; captions
     show what is being said while it is said."""

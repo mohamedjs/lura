@@ -414,7 +414,9 @@ async function submitConnector(e) {
 }
 
 function renderAdvanced() {
-  bindCheck("#briefing", "briefing_on_boot");
+  const briefing = $("#daily-briefing");
+  briefing.value = S.settings.daily_briefing;
+  briefing.onchange = () => save({ daily_briefing: briefing.value });
   bindCheck("#start-login", "start_at_login");
   bindCheck("#overlay", "overlay_enabled");
   bindCheck("#subtitles", "subtitles");

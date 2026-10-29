@@ -85,7 +85,6 @@
   "conn.remove_confirm": "تمسح كونكتور {name}؟",
   "conn.node_hint": "كونكتورز الأوامر بتشتغل بـ npx، وده جاي مع Node.js (nodejs.org).",
   "adv.title": "متقدم",
-  "adv.briefing": "ملخص الصبح بعد ما الجهاز يفتح",
   "adv.start_login": "شغّل لورا لما أسجّل دخول",
   "adv.overlay": "اعرض الوش على الشاشة",
   "adv.silence_factor": "حساسية الصوت (× دوشة الأوضة)",
@@ -212,5 +211,10 @@
   "chrome.connected": "متوصلة — كروم وPlaywright بيشتغلوا في شباك كروم بتاعك، بالبروفايل والحسابات بتوعك.",
   "chrome.off": "مش متوصلة. لورا عمرها ما هتفتح كروم ضيف لوحده: فعّل الـ remote debugging مرة واحدة (chrome://inspect/#remote-debugging) ووافق على الاتصال.",
   "chrome.setup": "فعّلها في كروم",
-  "chrome.opened": "في كروم: علّم على «Enable remote debugging»، وبعدين وافق لما كروم يسألك."
+  "chrome.opened": "في كروم: علّم على «Enable remote debugging»، وبعدين وافق لما كروم يسألك.",
+  "briefing.label": "ملخص اليوم",
+  "briefing.first_wake": "أول مرة أناديها كل يوم",
+  "briefing.boot": "لما الجهاز يفتح",
+  "briefing.off": "مقفول",
+  "briefing.hint": "بتبص على الخدمات اللي وصّلتها — GitHub وGitLab وBitbucket وJira وTrello وNotion والكالندر… — وتقولك عملت إيه امبارح وإيه اللي عليك النهارده، وتقترح تبدأ بإيه، وتسألك عنه."
 }

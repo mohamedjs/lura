@@ -49,10 +49,27 @@ a clean machine and photographed (`docs/screenshots/`).
 | Platform | How |
 |---|---|
 | **Ubuntu / Debian** | Download `lura_<version>_amd64.deb` from [Releases](https://github.com/mohamedjs/lura/releases), then `sudo apt install ./lura_<version>_amd64.deb` |
-| **macOS** | `brew install --cask mohamedjs/lura/lura` |
+| **macOS** | `brew tap mohamedjs/lura https://github.com/mohamedjs/lura && brew install --cask lura`, or the zip from [Releases](https://github.com/mohamedjs/lura/releases) (see below) |
 | **Windows** | Run `Lura-Setup-<version>.exe` from [Releases](https://github.com/mohamedjs/lura/releases) |
 | **Other Linux** | Unpack `lura-<version>-linux-x86_64.tar.gz` and run `lura/LuraApp` |
 | **From source** | `./install.sh` (Linux), or `pip install -e ".[all]"` then `lura` |
+
+### Opening Lura on a Mac
+
+Lura is not notarised by Apple yet (that needs a paid developer ID), so a
+downloaded copy is stopped the first time with **“Lura” Not Opened — Apple could
+not verify “Lura” is free of malware**. Click **Done** (not *Move to Trash*), then:
+
+- **Homebrew** (easiest): the two commands above install Lura in Applications and
+  clear the warning, so it simply opens. Update later with
+  `brew upgrade --cask --greedy lura`.
+- **Downloaded zip**: unzip, drag Lura into Applications, open it once, then open
+  **System Settings → Privacy & Security**, scroll down and click **Open Anyway**
+  next to “Lura”, and confirm with your password or Touch ID. Or, in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Lura.app`
+- The first time she listens, allow the **microphone**. Lura lives in the menu
+  bar (top right), not in the Dock. The settings window: double-click the face,
+  the menu-bar icon → Open dashboard, or `/Applications/Lura.app/Contents/MacOS/lura dashboard`.
 
 Install **Node.js** too ([nodejs.org](https://nodejs.org)). It provides `npx`,
 which runs the built-in Chrome, web and files connectors. Everything else works
