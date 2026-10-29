@@ -150,11 +150,13 @@ jobs:
       - name: Smoke test — install, run, screenshot (Windows)
         if: runner.os == 'Windows'
         continue-on-error: true
+        timeout-minutes: 20   # a hung smoke test must never hold up a release
         shell: pwsh
         run: packaging/ci/smoke-windows.ps1 -Version $env:VERSION
       - name: Smoke test — run, screenshot (Linux, macOS)
         if: runner.os != 'Windows'
         continue-on-error: true
+        timeout-minutes: 20
         run: packaging/ci/smoke-unix.sh
       - uses: actions/upload-artifact@v4
         if: always()

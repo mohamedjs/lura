@@ -106,8 +106,9 @@ def install(kind: str, file: Path) -> str:
 
 def _windows(setup: Path) -> str:
     # Silent, into the folder it is already installed in (Inno remembers it by
-    # AppId); lura.iss closes the running Lura and starts the new one.
-    flags = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
+    # AppId); lura.iss closes the running Lura and, for /LURAUPDATE=1 only,
+    # starts the new one.
+    flags = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/LURAUPDATE=1"]
     subprocess.Popen([str(setup), *flags], creationflags=0x00000008 | 0x00000200, close_fds=True)
     return "exit"
 

@@ -55,8 +55,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\LuraApp.exe"; Parameters: "run"; Description: "Start Lura now"; Flags: nowait postinstall skipifsilent
-; An update from inside the app (silent): start the new version straight away.
-Filename: "{app}\LuraApp.exe"; Parameters: "run --no-browser"; Flags: nowait; Check: WizardSilent
+; An update from inside the app (silent, /LURAUPDATE=1): start the new version
+; straight away. Not on every silent install: a script waiting for setup to
+; finish (Start-Process -Wait) would wait for Lura too.
+Filename: "{app}\LuraApp.exe"; Parameters: "run --no-browser"; Flags: nowait; Check: IsLuraUpdate
 
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/C taskkill /IM LuraApp.exe /F"; Flags: runhidden; RunOnceId: "StopLura"
@@ -66,6 +68,11 @@ function NodeInstalled(): Boolean;
 var ResultCode: Integer;
 begin
   Result := Exec(ExpandConstant('{cmd}'), '/C where npx', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+function IsLuraUpdate(): Boolean;
+begin
+  Result := WizardSilent() and (ExpandConstant('{param:LURAUPDATE|0}') = '1');
 end;
 
 // Make sure no Lura is still holding its files (an update starts while it runs).
