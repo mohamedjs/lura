@@ -6,4 +6,4 @@ and other modules reach it only through what its ``__init__`` exports. The
 wiring happens in one place, :mod:`lura.bootstrap`.
 """
 
-__version__ = "2.2.0"
+__version__ = "2.2.1"

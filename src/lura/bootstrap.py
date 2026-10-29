@@ -17,6 +17,7 @@ from .modules.memory import MemoryService
 from .modules.settings import SettingsService
 from .modules.skills import SkillsService
 from .modules.tools import ToolService
+from .modules.updates import UpdateService
 from .modules.voice import VoiceService
 from .shared import desktop, events
 from .shared.events import EventBus
@@ -35,6 +36,7 @@ class Container:
     voice: VoiceService
     memory: MemoryService
     skills: SkillsService
+    updates: UpdateService
     assistant: Assistant
 
 
@@ -50,6 +52,10 @@ def build(presence: Presence | None = None) -> Container:
                            lambda prompt: brain.complete(settings.current, prompt),
                            lambda: settings.current.user_name)
     skills = SkillsService()
+    from . import __version__
+    updates = UpdateService(__version__, lambda: settings.current.check_updates,
+                            lambda how: bus.publish(events.RESTART_REQUESTED if how == "restart"
+                                                    else events.EXIT_REQUESTED))
     tools.add_provider(memory)
     tools.add_provider(skills)
     assistant = Assistant(settings, brain, voice, tools, bus, presence, memory=memory,
@@ -60,4 +66,4 @@ def build(presence: Presence | None = None) -> Container:
             desktop.apply_autostart(settings.current.start_at_login)
 
     bus.subscribe(events.SETTINGS_CHANGED, on_settings)
-    return Container(bus, settings, connectors, tools, brain, voice, memory, skills, assistant)
+    return Container(bus, settings, connectors, tools, brain, voice, memory, skills, updates, assistant)

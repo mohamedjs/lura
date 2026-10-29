@@ -11,10 +11,18 @@ from typing import Any, Callable
 from ...shared import events
 from ...shared.events import EventBus
 from ..brain import ToolSpec
-from .domain import HTTP, Connector, parse_mcp_json, tool_name
+from .domain import CHROME_ENDPOINT, HTTP, Connector, parse_mcp_json, tool_name
 from .infrastructure.repository import McpJsonRepository
 
 log = logging.getLogger(__name__)
+
+#: What a Chrome connector says when the browser it was attached to is gone
+#: (closed, restarted) or remote debugging is off.
+_CHROME_GONE = re.compile(r"Could not connect to Chrome|ECONNREFUSED|connectOverCDP|has been closed|"
+                          r"Browser was closed|DevToolsActivePort|socket hang up|Target closed", re.I)
+#: Started when Chrome is closed: the server still lists its tools, and the
+#: first call starts Chrome and reconnects.
+_NO_CHROME = "ws://127.0.0.1:9/chrome-is-closed"
 
 
 class _Running:
@@ -158,7 +166,12 @@ class ConnectorService:
                 if not shutil.which(c.command) and not shutil.which(c.command + ".cmd"):
                     hint = " Install Node.js (it provides npx)." if c.command in ("npx", "node") else ""
                     raise RuntimeError(f"{c.command!r} is not installed.{hint}")
-                client = StdioClient(c.command, c.args, c.env)
+                args = c.args
+                if CHROME_ENDPOINT in args:
+                    from .infrastructure import chrome
+                    url = chrome.endpoint() or _NO_CHROME
+                    args = [url if a == CHROME_ENDPOINT else a for a in args]
+                client = StdioClient(c.command, args, c.env)
             client.open()
             tools = handshake(client)
         except Exception as exc:
@@ -229,8 +242,6 @@ class ConnectorService:
         return name in self._index
 
     def call(self, name: str, arguments: dict[str, Any]) -> str:
-        from .infrastructure.clients import call
-
         target = self._index.get(name)
         if not target:
             return f"Error: no connected tool called {name}."
@@ -238,11 +249,53 @@ class ConnectorService:
         if not run or not run.client:
             return f"Error: connector {target[0]} is not running."
         log.info("connector %s → %s", target[0], target[1])
+        result = self._call_once(run, target[1], arguments)
+        if run.connector.uses_chrome and _CHROME_GONE.search(result[:600]):
+            result = self._reconnect_chrome(run, target, arguments) or result
+        return result[:6000]
+
+    @staticmethod
+    def _call_once(run: _Running, tool: str, arguments: dict[str, Any]) -> str:
+        from .infrastructure.clients import call
+
         try:
             with run.lock:
-                return call(run.client, target[1], arguments)[:6000]
+                return call(run.client, tool, arguments)
         except Exception as exc:
-            return f"Error from {target[0]}: {exc}"
+            return f"Error from {run.connector.name}: {exc}"
+
+    def _reconnect_chrome(self, run: _Running, target: tuple[str, str], arguments: dict[str, Any]) -> str | None:
+        """Chrome was closed, restarted or not yet allowed: open the user's
+        Chrome, re-attach, and try the call once more."""
+        from .infrastructure import chrome
+
+        log.info("Connector %s lost Chrome; starting / re-attaching to the user's Chrome.", target[0])
+        if chrome.ensure_running() is None:
+            return f"Error from {target[0]}: Chrome is not reachable. {chrome.ENABLE_HINT}"
+        if CHROME_ENDPOINT in run.connector.args:
+            # The address changes with every Chrome start: restart the server on the new one.
+            self._stop(target[0])
+            fresh = _Running(run.connector)
+            with self._lock:
+                self._running[target[0]] = fresh
+            self._start(fresh)
+            if fresh.status != "ready":
+                return f"Error from {target[0]}: {fresh.error}"
+            run = fresh
+        return self._call_once(run, target[1], arguments)
+
+    # ── the user's own Chrome ──
+    @staticmethod
+    def chrome_status() -> dict[str, Any]:
+        """Whether the chrome / playwright connectors can reach the user's Chrome."""
+        from .infrastructure import chrome
+        return {"connected": chrome.endpoint() is not None, "hint": chrome.ENABLE_HINT}
+
+    @staticmethod
+    def open_chrome_setup() -> bool:
+        """Open Chrome on the page where remote debugging is switched on."""
+        from .infrastructure import chrome
+        return chrome.launch("chrome://inspect/#remote-debugging")
 
     @property
     def config_path(self):

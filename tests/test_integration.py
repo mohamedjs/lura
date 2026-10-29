@@ -250,11 +250,43 @@ def wait_ready(svc, name, timeout=20):
     raise AssertionError(f"{name} never started")
 
 
+def _own_chrome(fixture):
+    """A Chrome connector whose browser is closed starts the user's Chrome,
+    re-attaches to its new address and retries (#own-chrome)."""
+    from lura.modules.connectors import CHROME_ENDPOINT, Connector, ConnectorService
+    from lura.modules.connectors.infrastructure import chrome
+
+    real = chrome.endpoint, chrome.ensure_running
+    live = {"url": None}
+    chrome.endpoint = lambda: live["url"]
+    try:
+        svc = ConnectorService()
+        svc.add(Connector("mybrowser", command=sys.executable, args=[fixture, "--cdp-endpoint", CHROME_ENDPOINT],
+                          uses_chrome=True))
+        wait_ready(svc, "mybrowser")
+        # Chrome is closed and remote debugging cannot be reached: say how to fix it.
+        chrome.ensure_running = lambda: None
+        said = svc.call("mcp_mybrowser_open_tab", {})
+        assert "chrome://inspect/#remote-debugging" in said, said
+        # Chrome comes up: restart on its address and retry.
+        def start():
+            live["url"] = "ws://127.0.0.1:5555/devtools/browser/abc"
+            return live["url"]
+        chrome.ensure_running = start
+        said = svc.call("mcp_mybrowser_open_tab", {})
+        assert said == "tab opened via ws://127.0.0.1:5555/devtools/browser/abc", said
+        svc.stop_all()
+    finally:
+        chrome.endpoint, chrome.ensure_running = real
+
+
 def check_connectors():
     from lura.modules.connectors import ConnectorService
     svc = ConnectorService()
     names = [c["name"] for c in svc.list()]
-    assert names[:3] == ["chrome", "web", "files"], names
+    assert names[:4] == ["chrome", "playwright", "web", "files"], names
+    chrome_args = {c["name"]: c["args"] for c in svc.list()}
+    assert "--autoConnect" in chrome_args["chrome"], "the user's own Chrome, never a fresh profile"
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "echo_mcp.py")
     svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")
@@ -277,6 +309,7 @@ def check_connectors():
     svc.set_enabled("chrome", False)
     assert ConnectorService().get("chrome").enabled is False
     svc.stop_all()
+    _own_chrome(fixture)
 
     # Streamable HTTP with a bearer token and a session id.
     def mcp_http(h, body):
@@ -379,6 +412,108 @@ def check_pipeline_turn():
     conv.run(initial_prompt="What is six times seven?")
     assert calls == [["user"], ["user", "assistant", "tool"]], calls
     assert spoken == ["Checking.", "The answer is 42.", "Anything else?"], spoken
+
+
+def check_daily_briefing():
+    """The first call of the day: the connected work services are picked, their
+    read tools pre-loaded, the brain gathers and sums up, then she listens."""
+    from lura.modules.assistant import PipelineConversation, briefing_prompt
+    from lura.modules.brain import Done, Message, TextDelta, ToolCall, ToolSpec
+    from lura.modules.settings import Settings
+    from lura.modules.tools import ToolService
+    from lura.shared.presence import NullPresence
+
+    obj = {"type": "object", "properties": {}}
+    servers = {"github": ["get_me", "list_commits", "create_issue", "merge_pull_request"],
+               "atlassian": ["searchJiraIssuesUsingJql", "createJiraIssue"],
+               "chrome": ["list_pages"]}
+    asked = []
+
+    class FakeConnectors:
+        def connected(self):
+            desc = {"atlassian": "Jira and Confluence"}
+            return [{"name": n, "description": desc.get(n, ""), "tools": t} for n, t in servers.items()]
+
+        def all_tools(self):
+            return [ToolSpec(f"mcp_{n}_{t}", f"[{n}] {t}", obj) for n, ts in servers.items() for t in ts]
+
+        def owns(self, name):
+            return name.startswith("mcp_")
+
+        def call(self, name, arguments):
+            asked.append(name)
+            return "2 commits yesterday: fix login, add tests"
+
+        def search(self, query, limit=8):
+            return []
+
+    tools = ToolService(FakeConnectors())
+    sources = tools.briefing_sources()
+    assert [(s["name"], s["kind"]) for s in sources] == [("github", "code"), ("atlassian", "tasks")], sources
+    assert sources[0]["tools"] == ["mcp_github_get_me", "mcp_github_list_commits"], "read tools only"
+    prompt = briefing_prompt({"weather": "sunny"}, "en", "Mohamed", "male", sources,
+                             "Thursday 29 October 2026", "Wednesday 28 October 2026")
+    assert "github (code)" in prompt and "mcp_atlassian_searchJiraIssuesUsingJql" in prompt
+    assert "Wednesday 28 October 2026" in prompt and "question" in prompt
+    assert "connect their tools" in briefing_prompt({}, "en", "", "", [], "", "")
+
+    rounds, spoken, listened = [], [], []
+
+    class FakeModel:
+        provider, model = "anthropic", "claude-opus-5-5"
+
+        def stream(self, system, history, tools_):
+            rounds.append([t.name for t in tools_])
+            if history[-1].role == "user":
+                yield TextDelta("Morning! Let me check your day. ")
+                yield Done(Message("assistant", "Morning! Let me check your day.", tool_calls=[
+                    ToolCall("t1", "mcp_github_list_commits", {"since": "yesterday"})]), "tool_use")
+            else:
+                text = "Yesterday you pushed two commits. Shall we start with the tests?"
+                yield TextDelta(text)
+                yield Done(Message("assistant", text), "end")
+
+    class FakeBrain:
+        def model(self, settings):
+            return FakeModel()
+
+    class FakePlayer:
+        def feed(self, text):
+            spoken.append(text)
+
+        def finish(self):
+            pass
+
+        def wait(self):
+            pass
+
+        def cancel(self):
+            pass
+
+        def say(self, text):
+            spoken.append(text)
+
+    class FakeVoice:
+        def player(self, settings, presence=None):
+            return FakePlayer()
+
+        def transcriber(self, settings):
+            return None
+
+        def record(self, settings, should_stop=None, live=None):
+            listened.append(1)
+            return b""
+
+        def to_wav(self, pcm):
+            return pcm
+
+    PipelineConversation(Settings(brain_provider="anthropic", subtitles=False), FakeBrain(), FakeVoice(),
+                         tools, NullPresence(), threading.Event(),
+                         preload=[spec for s in sources for spec in s["specs"]]).run(prompt, then_listen=True)
+    assert "mcp_github_list_commits" in rounds[0] and "mcp_atlassian_searchJiraIssuesUsingJql" in rounds[0]
+    assert "mcp_github_create_issue" not in rounds[0], "no write tools pre-loaded"
+    assert asked == ["mcp_github_list_commits"]
+    assert spoken[-1].endswith("start with the tests?") and listened == [1], "then she listens for the answer"
 
 
 def check_noise_and_live_captions():

@@ -80,7 +80,8 @@ class LiveCaption:
 class PipelineConversation:
     def __init__(self, settings: Settings, brain: BrainService, voice: VoiceService,
                  tools: ToolService, presence: Presence, stopped: threading.Event,
-                 memory: MemoryService | None = None, extra_prompt: str = ""):
+                 memory: MemoryService | None = None, extra_prompt: str = "",
+                 preload: list | None = None):
         self.s = settings
         self._model = brain.model(settings)
         self._voice = voice
@@ -88,6 +89,10 @@ class PipelineConversation:
         self._presence = presence
         self._stopped = stopped
         self._session = ToolSession()
+        if preload:
+            # Tools this conversation needs from the start (the daily briefing's
+            # sources), so the model calls them without a find_tools round first.
+            self._session.add(preload)
         self._history: list[Message] = []
         self._ending = False
         self._quiet = False          # the brain judged the last turn not meant for it
@@ -257,20 +262,25 @@ class PipelineConversation:
                 self._stream(with_tools=False)
                 return
 
-    def run(self, initial_prompt: str | None = None) -> None:
+    def run(self, initial_prompt: str | None = None, then_listen: bool = False) -> None:
+        """``then_listen``: after answering the prompt, keep the conversation
+        going (the daily briefing ends on a question)."""
         try:
-            self._converse(initial_prompt)
+            self._converse(initial_prompt, then_listen)
         finally:
             self._keep("end", self._conv)
 
-    def _converse(self, initial_prompt: str | None) -> None:
+    def _converse(self, initial_prompt: str | None, then_listen: bool = False) -> None:
         started = time.monotonic()
         if initial_prompt:
             self._presence.set_caption("you", "")
             self._presence.set_caption("lura", "")
             self._history.append(Message("user", initial_prompt))
             self._answer()
-            return
+            if not then_listen:
+                return
+            # Then it is a conversation: she ended on a question, so listen
+            # for the answer (follow_up_seconds of silence ends it as usual).
         ignored = 0
         while not self._ending and not self._stopped.is_set():
             if time.monotonic() - started > self.s.max_session_seconds:
@@ -361,7 +371,8 @@ class Assistant:
         """End the current conversation (not the daemon)."""
         self._stopped.set()
 
-    def converse(self, initial_prompt: str | None = None) -> None:
+    def converse(self, initial_prompt: str | None = None, preload: list | None = None,
+                 then_listen: bool = False) -> None:
         settings = self._settings.current
         caps = self._settings.capabilities()
         if not caps.can_talk:
@@ -378,7 +389,7 @@ class Assistant:
                 else:
                     PipelineConversation(settings, self._brain, self._voice, self._tools,
                                          self.presence, self._stopped, self._memory,
-                                         self._extra_prompt()).run(initial_prompt)
+                                         self._extra_prompt(), preload).run(initial_prompt, then_listen)
             finally:
                 self.presence.set_state("idle")
                 self.presence.set_amplitude(0.0)
@@ -415,9 +426,18 @@ class Assistant:
                     log.warning("Could not save the conversation: %s", exc)
 
     def briefing(self) -> None:
+        """Open the day: what the user did yesterday and has today, from every
+        connected work service (code, tasks, calendar, notes, messages), then a
+        conversation about it."""
         settings = self._settings.current
         data = self._tools.briefing_data()
-        self.converse(domain.briefing_prompt(data, settings.language, settings.user_name, settings.user_gender))
+        sources = self._tools.briefing_sources()
+        log.info("Daily briefing from: %s",
+                 ", ".join(f"{s['name']} ({s['kind']})" for s in sources) or "no work services connected")
+        today, yesterday = domain.day_names()
+        prompt = domain.briefing_prompt(data, settings.language, settings.user_name, settings.user_gender,
+                                        sources, today, yesterday)
+        self.converse(prompt, preload=[spec for s in sources for spec in s["specs"]], then_listen=True)
 
     def _wait_until_ready(self, stop: threading.Event) -> bool:
         """Block while setup is incomplete — the dashboard is how it gets fixed."""
@@ -456,7 +476,7 @@ class Assistant:
                     continue
             if not briefed:
                 briefed = True
-                if settings.briefing_on_boot and self._tools.briefing_due():
+                if settings.daily_briefing == "boot" and self._tools.briefing_due("boot"):
                     self._tools.mark_briefing_done()
                     try:
                         self.briefing()
@@ -473,7 +493,17 @@ class Assistant:
                 log.info("Woken.")
                 self.presence.set_state("listening")
                 self._voice.chime(settings, up=True)
-                self.converse()
+                if settings.daily_briefing == "first_wake" and self._tools.briefing_due("day"):
+                    self._tools.mark_briefing_done()
+                    try:
+                        self.briefing()
+                    except NeedsSetup:
+                        raise
+                    except Exception as exc:
+                        log.warning("Daily briefing failed (%s); talking normally.", exc)
+                        self.converse()
+                else:
+                    self.converse()
                 self._voice.chime(settings, up=False)
                 listener.cooldown()
             except NeedsSetup as exc:

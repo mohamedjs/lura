@@ -69,7 +69,8 @@
       <p class="hint" data-i18n="dl.mac.req"></p>
       <a class="btn primary block" data-asset="mac-arm" data-i18n="dl.mac.arm"></a>
       <a class="btn ghost block" data-asset="mac-intel" data-i18n="dl.mac.intel"></a>
-      <div class="cmd"><code>brew install --cask mohamedjs/lura/lura</code><button class="copy" data-i18n="dl.copy"></button></div>
+      <div class="cmd"><code>brew tap mohamedjs/lura https://github.com/mohamedjs/lura &amp;&amp; brew install --cask lura</code><button class="copy" data-i18n="dl.copy"></button></div>
+      <p class="note"><span data-i18n="dl.mac.note"></span> <a href="#mac-first" data-i18n="dl.mac.how"></a></p>
     </article>
     <article class="card platform" data-os="linux">
       <div class="os-head"><span class="os-icon linux"></span><h3>Linux</h3><span class="badge" data-i18n="dl.yours"></span></div>
@@ -80,6 +81,42 @@
     </article>
   </div>
   <p class="center hint"><span data-i18n="dl.node"></span> · <a id="all-releases" href="https://github.com/mohamedjs/lura/releases" target="_blank" rel="noopener" data-i18n="dl.all"></a> · <a id="checksums" target="_blank" rel="noopener">SHA256</a></p>
+</section>
+
+<section class="section" id="mac-first">
+  <h2 data-i18n="mac.title"></h2>
+  <p class="sub" data-i18n="mac.sub"></p>
+  <div class="macfirst">
+    <figure class="card macshot">
+      <img loading="lazy" src="assets/mac-not-opened.png" width="516" height="583" alt="“Lura” Not Opened — Apple could not verify “Lura” is free of malware">
+      <figcaption data-i18n="mac.shot"></figcaption>
+    </figure>
+    <div class="macsteps">
+      <div class="card">
+        <span class="badge rec" data-i18n="mac.brew.badge"></span>
+        <h3 data-i18n="mac.brew.t"></h3>
+        <p data-i18n="mac.brew.d"></p>
+        <div class="cmd"><code>brew tap mohamedjs/lura https://github.com/mohamedjs/lura</code><button class="copy" data-i18n="dl.copy"></button></div>
+        <div class="cmd"><code>brew install --cask lura</code><button class="copy" data-i18n="dl.copy"></button></div>
+        <p class="note" data-i18n="mac.brew.update"></p>
+      </div>
+      <div class="card">
+        <h3 data-i18n="mac.zip.t"></h3>
+        <ol>
+          <li data-i18n="mac.zip.1"></li>
+          <li data-i18n="mac.zip.2"></li>
+          <li data-i18n="mac.zip.3"></li>
+          <li data-i18n="mac.zip.4"></li>
+        </ol>
+        <p data-i18n="mac.zip.or"></p>
+        <div class="cmd"><code>xattr -dr com.apple.quarantine /Applications/Lura.app</code><button class="copy" data-i18n="dl.copy"></button></div>
+      </div>
+      <div class="card">
+        <h3 data-i18n="mac.perm.t"></h3>
+        <p data-i18n="mac.perm.d"></p>
+      </div>
+    </div>
+  </div>
 </section>
 
 <section class="section" id="how">

@@ -20,16 +20,19 @@ on Ubuntu 24.04 and 22.04 (.deb), Fedora and Arch (tarball) and opens the native
 dashboard under Xvfb; a crash, a GLX/GBM error or a blank window stops the release.
 To re-check a published build: run *Linux distros* with `tag=v2.0.1, expect=fail`.
 
-It publishes a GitHub Release with `SHA256SUMS.txt`, then updates the Homebrew
-cask. The tag must match `__version__`, or the run stops.
+It publishes a GitHub Release with `SHA256SUMS.txt`. The tag must match
+`__version__`, or the run stops.
 
 ## One-time setup
 
-### Homebrew tap
-Create the public repo **`mohamedjs/homebrew-lura`** (empty is fine). Make a
-fine-grained token with *Contents: read & write* on that repo only, and save it in
-this repo as the secret **`HOMEBREW_TAP_TOKEN`**. Users then run
-`brew install --cask mohamedjs/lura/lura`.
+### Homebrew
+Nothing to set up. `Casks/lura.rb` lives in this repo and always installs the
+latest release: each release carries the macOS zips twice, versioned and under
+the fixed names `Lura-macos-arm64.zip` / `Lura-macos-x86_64.zip` that the cask
+downloads. Users run
+`brew tap mohamedjs/lura https://github.com/mohamedjs/lura && brew install --cask lura`.
+The cask clears the quarantine flag, because the app is not notarised (no Apple
+Developer ID); downloaded zips need *Open Anyway* once (README → Opening Lura on a Mac).
 
 ### Pro ($5/month) through Lemon Squeezy
 1. Create a store and a **subscription product** at $5/month with **licence keys

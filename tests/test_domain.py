@@ -147,7 +147,7 @@ def check_assistant_rules():
     with_github = system_prompt("", "Lura", "", "en", "", services="Connected right now:\n- github (2 tools: a, b)")
     assert "find_tools" in with_github and "- github (2 tools" in with_github
     from lura.modules.assistant import briefing_prompt
-    assert "تحب تبدأ" in briefing_prompt({}, "ar", "", "female") and "يحب يبدأ" in briefing_prompt({}, "ar", "")
+    assert "Egyptian Arabic" in briefing_prompt({}, "ar", "", "female")
     history = []
     for i in range(14):
         history += [Message("user", f"q{i}"), Message("assistant", "", tool_calls=[]),
@@ -251,6 +251,62 @@ def check_brain_catalog():
     assert bc("openai", {"id": "gpt-5.5"}) and not bc("openai", {"id": "gpt-4o-mini-tts"})
     assert not bc("openai", {"id": "gpt-realtime"}) and not bc("openai", {"id": "dall-e-3"})
     assert bc("anthropic", {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"})["name"] == "Claude Sonnet 5.5"
+
+
+def check_bundled_certificates():
+    """A frozen build that cannot see the OS root certificates uses certifi's
+    (the Mac build: every Gemini / OpenRouter key test failed on TLS)."""
+    import os
+    import ssl
+    from lura.shared import http
+
+    real, saved = ssl.get_default_verify_paths, os.environ.pop("SSL_CERT_FILE", None)
+    try:
+        missing = ssl.DefaultVerifyPaths("/nope/cert.pem", "/nope/certs", "SSL_CERT_FILE",
+                                         "/nope/cert.pem", "SSL_CERT_DIR", "/nope/certs")
+        ssl.get_default_verify_paths = lambda: missing
+        http.use_bundled_certificates()
+        import certifi
+        assert os.environ.get("SSL_CERT_FILE") == certifi.where()
+        os.environ["SSL_CERT_FILE"] = "/mine.pem"   # an explicit choice always wins
+        http.use_bundled_certificates()
+        assert os.environ["SSL_CERT_FILE"] == "/mine.pem"
+    finally:
+        ssl.get_default_verify_paths = real
+        os.environ.pop("SSL_CERT_FILE", None)
+        if saved is not None:
+            os.environ["SSL_CERT_FILE"] = saved
+
+
+def check_daily_briefing_rules():
+    from lura.modules.settings import Settings
+    from lura.modules.settings.domain import migrate_legacy
+    from lura.modules.tools.domain import briefing_sources, read_tools, source_kind
+    # What a service is for, from its name, description or tools.
+    assert source_kind("gitlab", "", []) == "code" and source_kind("x", "Trello boards", []) == "tasks"
+    assert source_kind("work", "", ["list-events"]) == "other"
+    assert source_kind("gcal", "", []) == "calendar" and source_kind("notion", "", []) == "notes"
+    # Read tools only, identity first; Notion's POST-for-search is a read.
+    assert read_tools(["create_issue", "list_commits", "get_me", "API-post-search", "API-post-page",
+                       "slack_post_message", "merge_pull_request"]) == ["get_me", "list_commits", "API-post-search"]
+    # Built-ins are not work sources; the tool budget is shared.
+    many = [{"name": f"s{i}", "description": "jira", "tools": [f"list_{j}" for j in range(20)]} for i in range(6)]
+    picked = briefing_sources(many + [{"name": "chrome", "tools": ["list_pages"]}])
+    assert "chrome" not in [p["name"] for p in picked]
+    assert sum(len(p["tools"]) for p in picked) == 28 and len(picked[0]["tools"]) == 8
+    # 2.2 settings with the boot briefing switched off stay off.
+    assert migrate_legacy({"briefing_on_boot": False})["daily_briefing"] == "off"
+    assert "daily_briefing" not in migrate_legacy({"briefing_on_boot": True})
+    assert Settings().daily_briefing == "first_wake"
+
+
+def check_briefing_once_a_day():
+    import time
+    from lura.modules.tools.infrastructure import briefing
+    briefing.mark_done()
+    assert not briefing.due("day")
+    briefing._flag().write_text(str(time.time() - 86400 * 1.5))
+    assert briefing.due("day")
 
 
 def main() -> int:

@@ -16,6 +16,13 @@ for line in sys.stdin:
                                              "required": ["text"]}},
                             {"name": "open_tab", "description": "Open a new browser tab",
                              "inputSchema": {"type": "object", "properties": {}}}]}
+    elif method == "tools/call" and msg["params"]["name"] == "open_tab" and "--cdp-endpoint" in sys.argv:
+        # Stands in for Playwright MCP attached to the user's Chrome.
+        url = sys.argv[sys.argv.index("--cdp-endpoint") + 1]
+        if "chrome-is-closed" in url:
+            result = {"isError": True, "content": [{"type": "text", "text": "browserType.connectOverCDP: connect ECONNREFUSED"}]}
+        else:
+            result = {"content": [{"type": "text", "text": "tab opened via " + url}]}
     elif method == "tools/call":
         result = {"content": [{"type": "text", "text": "echo: " + msg["params"]["arguments"].get("text", "")}]}
     else:

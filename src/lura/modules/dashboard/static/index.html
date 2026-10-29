@@ -28,6 +28,14 @@
     </div>
   </header>
 
+  <div class="update-banner" id="update-banner" hidden>
+    <span class="ico" aria-hidden="true">⬆</span>
+    <div class="txt"><b id="update-title"></b><small id="update-sub"></small>
+      <div class="bar" id="update-bar" hidden><span id="update-fill"></span></div></div>
+    <a class="btn ghost" id="update-notes" target="_blank" rel="noopener" data-i18n="update.notes"></a>
+    <button class="btn primary" type="button" id="update-btn" data-i18n="update.now"></button>
+  </div>
+
   <div class="layout">
     <nav class="tabs" id="tabs" role="tablist">
       <button data-tab="home" role="tab"><span class="ico" aria-hidden="true">◉</span><span data-i18n="tab.home"></span></button>
@@ -242,6 +250,11 @@
         <div class="card" id="connectors-card">
           <h3 data-i18n="conn.title"></h3>
           <p class="hint" data-i18n="conn.hint"></p>
+          <div class="chrome-box" id="chrome-box">
+            <span class="dot" id="chrome-dot"></span>
+            <div><b data-i18n="chrome.title"></b><small id="chrome-state"></small></div>
+            <button class="btn" type="button" id="chrome-setup" data-i18n="chrome.setup"></button>
+          </div>
           <div id="connectors"></div>
         </div>
         <div class="card add-connector" id="add-connector">
@@ -268,8 +281,17 @@
       <section class="panel" data-tab="settings">
         <div class="card">
           <h3 data-i18n="adv.title"></h3>
-          <label class="switch"><input type="checkbox" id="briefing"><span></span><b data-i18n="adv.briefing"></b></label>
+          <label class="field"><span data-i18n="briefing.label"></span>
+            <select id="daily-briefing">
+              <option value="first_wake" data-i18n="briefing.first_wake"></option>
+              <option value="boot" data-i18n="briefing.boot"></option>
+              <option value="off" data-i18n="briefing.off"></option>
+            </select>
+          </label>
+          <p class="hint" data-i18n="briefing.hint"></p>
           <label class="switch"><input type="checkbox" id="start-login"><span></span><b data-i18n="adv.start_login"></b></label>
+          <label class="switch"><input type="checkbox" id="check-updates"><span></span><b data-i18n="update.auto"></b></label>
+          <div class="row"><button class="btn" type="button" id="update-check" data-i18n="update.check"></button><span class="hint" id="update-state"></span></div>
           <p class="hint" id="config-path"></p>
         </div>
         <div class="card">
