@@ -161,6 +161,9 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 .key-row .who small { color: var(--muted); }
 .key-row .tags { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .key-row .row { margin-top: 0; }
+.key-field { position: relative; display: flex; align-items: center; }
+.key-field input { padding-inline-end: 46px; direction: ltr; text-align: start; }
+.key-field .eye { position: absolute; inset-inline-end: 4px; padding: 4px 8px; font-size: .9em; opacity: .7; }
 .tag { font-size: .75em; padding: 1px 8px; border-radius: 999px; background: var(--sunken); color: var(--muted); }
 .tag.voice { color: var(--teal); }
 @media (max-width: 760px) { .key-row { grid-template-columns: 1fr; gap: 8px; } }
@@ -231,3 +234,8 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 .toast { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 12px; padding: 11px 16px;
   border-inline-start: 4px solid var(--teal); animation: fade .2s ease-out; word-break: break-word; }
 .toast.bad { border-inline-start-color: var(--bad); }
+
+/* The user's own Chrome (chrome + playwright connectors) */
+.chrome-box { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin: 8px 0 12px; border-radius: 14px; box-shadow: var(--inset); }
+.chrome-box > div { flex: 1; min-width: 0; }
+.chrome-box small { display: block; color: var(--muted); }

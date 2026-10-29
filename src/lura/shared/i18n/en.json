@@ -23,6 +23,7 @@
   "keys.save": "Test & save",
   "keys.testing": "Testing…",
   "keys.get": "Get a key",
+  "keys.show": "Show / hide",
   "keys.remove": "Remove",
   "keys.empty": "Paste a key first.",
   "keys.tag.brain": "brain",
@@ -60,7 +61,7 @@
   "lang.wake_word": "Wake word",
   "lang.wake_hint": "Heard on this computer, offline. It must be an English word; “lura” works.",
   "conn.title": "Connectors",
-  "conn.hint": "MCP servers Lura can use. Chrome, web and files come with the app.",
+  "conn.hint": "MCP servers Lura can use. Chrome, Playwright, web and files come with the app.",
   "conn.builtin": "built-in",
   "conn.tools": "{n} tools",
   "conn.status.ready": "connected",
@@ -206,5 +207,10 @@
   "lang.gender.male": "a man",
   "lang.gender.female": "a woman",
   "lang.gender.unset": "not set",
-  "lang.user_gender_hint": "Arabic addresses men and women differently (إنتَ عايز / إنتِ عايزة). Her own forms follow her voice."
+  "lang.user_gender_hint": "Arabic addresses men and women differently (إنتَ عايز / إنتِ عايزة). Her own forms follow her voice.",
+  "chrome.title": "Your own Chrome",
+  "chrome.connected": "Connected — Chrome and Playwright work in your Chrome window, with your profile and sign-ins.",
+  "chrome.off": "Not connected. Lura will never open a separate guest Chrome: switch on remote debugging once (chrome://inspect/#remote-debugging) and allow the connection.",
+  "chrome.setup": "Turn it on in Chrome",
+  "chrome.opened": "In Chrome: tick “Enable remote debugging”, then allow the connection when Chrome asks."
 }

@@ -23,6 +23,7 @@
   "keys.save": "جرّب واحفظ",
   "keys.testing": "بجرّب…",
   "keys.get": "هات مفتاح",
+  "keys.show": "اظهر / اخفي",
   "keys.remove": "امسح",
   "keys.empty": "الصق المفتاح الأول.",
   "keys.tag.brain": "عقل",
@@ -60,7 +61,7 @@
   "lang.wake_word": "كلمة التشغيل",
   "lang.wake_hint": "بتتسمع على جهازك من غير نت. لازم تكون كلمة إنجليزي؛ «lura» شغالة.",
   "conn.title": "الكونكتورز",
-  "conn.hint": "سيرفرات MCP لورا تقدر تستخدمها. كروم والويب والملفات جايين مع التطبيق.",
+  "conn.hint": "سيرفرات MCP لورا تقدر تستخدمها. كروم وPlaywright والويب والملفات جايين مع التطبيق.",
   "conn.builtin": "مدمج",
   "conn.tools": "{n} أداة",
   "conn.status.ready": "متوصل",
@@ -206,5 +207,10 @@
   "lang.gender.male": "راجل",
   "lang.gender.female": "ست",
   "lang.gender.unset": "مش محدد",
-  "lang.user_gender_hint": "العربي بيكلّم الراجل غير الست (إنتَ عايز / إنتِ عايزة). وكلامها عن نفسها بيمشي مع صوتها."
+  "lang.user_gender_hint": "العربي بيكلّم الراجل غير الست (إنتَ عايز / إنتِ عايزة). وكلامها عن نفسها بيمشي مع صوتها.",
+  "chrome.title": "كروم بتاعك",
+  "chrome.connected": "متوصلة — كروم وPlaywright بيشتغلوا في شباك كروم بتاعك، بالبروفايل والحسابات بتوعك.",
+  "chrome.off": "مش متوصلة. لورا عمرها ما هتفتح كروم ضيف لوحده: فعّل الـ remote debugging مرة واحدة (chrome://inspect/#remote-debugging) ووافق على الاتصال.",
+  "chrome.setup": "فعّلها في كروم",
+  "chrome.opened": "في كروم: علّم على «Enable remote debugging»، وبعدين وافق لما كروم يسألك."
 }

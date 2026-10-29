@@ -250,11 +250,43 @@ def wait_ready(svc, name, timeout=20):
     raise AssertionError(f"{name} never started")
 
 
+def _own_chrome(fixture):
+    """A Chrome connector whose browser is closed starts the user's Chrome,
+    re-attaches to its new address and retries (#own-chrome)."""
+    from lura.modules.connectors import CHROME_ENDPOINT, Connector, ConnectorService
+    from lura.modules.connectors.infrastructure import chrome
+
+    real = chrome.endpoint, chrome.ensure_running
+    live = {"url": None}
+    chrome.endpoint = lambda: live["url"]
+    try:
+        svc = ConnectorService()
+        svc.add(Connector("mybrowser", command=sys.executable, args=[fixture, "--cdp-endpoint", CHROME_ENDPOINT],
+                          uses_chrome=True))
+        wait_ready(svc, "mybrowser")
+        # Chrome is closed and remote debugging cannot be reached: say how to fix it.
+        chrome.ensure_running = lambda: None
+        said = svc.call("mcp_mybrowser_open_tab", {})
+        assert "chrome://inspect/#remote-debugging" in said, said
+        # Chrome comes up: restart on its address and retry.
+        def start():
+            live["url"] = "ws://127.0.0.1:5555/devtools/browser/abc"
+            return live["url"]
+        chrome.ensure_running = start
+        said = svc.call("mcp_mybrowser_open_tab", {})
+        assert said == "tab opened via ws://127.0.0.1:5555/devtools/browser/abc", said
+        svc.stop_all()
+    finally:
+        chrome.endpoint, chrome.ensure_running = real
+
+
 def check_connectors():
     from lura.modules.connectors import ConnectorService
     svc = ConnectorService()
     names = [c["name"] for c in svc.list()]
-    assert names[:3] == ["chrome", "web", "files"], names
+    assert names[:4] == ["chrome", "playwright", "web", "files"], names
+    chrome_args = {c["name"]: c["args"] for c in svc.list()}
+    assert "--autoConnect" in chrome_args["chrome"], "the user's own Chrome, never a fresh profile"
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "echo_mcp.py")
     svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")
@@ -277,6 +309,7 @@ def check_connectors():
     svc.set_enabled("chrome", False)
     assert ConnectorService().get("chrome").enabled is False
     svc.stop_all()
+    _own_chrome(fixture)
 
     # Streamable HTTP with a bearer token and a session id.
     def mcp_http(h, body):

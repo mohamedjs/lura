@@ -14,6 +14,31 @@ from typing import Any, Iterator
 
 from .errors import LuraError
 
+
+def use_bundled_certificates() -> None:
+    """Point every HTTPS client at certifi's CA bundle when the OS one is out of reach.
+
+    A frozen build's Python looks for root certificates where the build
+    machine kept them (on macOS, inside the runner's toolcache), so on a
+    user's Mac every urllib request failed with CERTIFICATE_VERIFY_FAILED:
+    Gemini and OpenRouter keys "would not save". SSL_CERT_FILE is read by
+    every default SSL context, urllib's included. An explicit setting wins.
+    """
+    import os
+    import ssl
+
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+    found = ssl.get_default_verify_paths()
+    if (found.cafile and os.path.exists(found.cafile)) or (found.capath and os.path.isdir(found.capath)
+                                                          and os.listdir(found.capath)):
+        return   # the OS bundle is there (keeps corporate CAs working)
+    try:
+        import certifi
+    except ImportError:
+        return
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+
 USER_AGENT = "lura-desktop"
 
 

@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=1.26",
     "sounddevice>=0.4.6",
     "vosk>=0.3.44",  # 0.3.45 has no macOS wheel
+    "certifi",       # CA bundle for frozen builds whose Python cannot find the OS one
 ]
 
 [project.optional-dependencies]

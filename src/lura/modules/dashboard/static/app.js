@@ -136,52 +136,75 @@ async function restartLura() {
   toast(t("restart.timeout"), true);
 }
 
+// The key rows are built once and then only updated: rebuilding them on every
+// render (a status poll, a connector starting) wiped what was being typed or
+// pasted and took the cursor away mid-word.
+const keyRows = {};
+
+function buildKeyRow(p) {
+  const r = { row: Object.assign(document.createElement("div"), { className: "key-row" }) };
+  r.who = Object.assign(document.createElement("div"), { className: "who" });
+  r.who.innerHTML = `<b></b><small></small><div class="tags"></div>`;
+  r.field = Object.assign(document.createElement("div"), { className: "key-field" });
+  r.input = Object.assign(document.createElement("input"), {
+    type: "password", autocomplete: "off", spellcheck: false, autocapitalize: "off",
+  });
+  r.input.setAttribute("autocorrect", "off");
+  // Show what was pasted. A password field also locks macOS to a Latin
+  // keyboard (secure input); keys are Latin anyway, but seeing them helps.
+  r.eye = Object.assign(document.createElement("button"), { className: "btn ghost eye", type: "button", textContent: "👁" });
+  r.eye.onclick = () => { r.input.type = r.input.type === "password" ? "text" : "password"; r.input.focus(); };
+  r.field.append(r.input, r.eye);
+  r.actions = Object.assign(document.createElement("div"), { className: "row" });
+  r.save = Object.assign(document.createElement("button"), { className: "btn primary", type: "button" });
+  r.save.onclick = async () => {
+    const key = r.input.value.trim();
+    if (!key) { toast(t("keys.empty"), true); r.input.focus(); return; }
+    r.save.disabled = true;
+    r.save.textContent = t("keys.testing");
+    try {
+      const res = await api("PUT", `/api/keys/${p}`, { key });
+      Object.assign(S, { keys: res.keys, capabilities: res.capabilities, settings: res.settings, restart_pending: res.restart_pending });
+      r.input.value = "";
+      r.input.type = "password";
+      toast(`${S.keys[p].label}: ${res.message}`);
+    } catch (e) { fail(e); }
+    r.save.disabled = false;
+    render();
+  };
+  // A block body: an on… handler that returns false cancels the keystroke, and
+  // `e.key === "Enter" && …` is false for every other key — nothing could be
+  // typed or pasted (#keys on macOS).
+  r.input.onkeydown = (e) => { if (e.key === "Enter") r.save.click(); };
+  r.link = Object.assign(document.createElement("a"), { className: "btn ghost", target: "_blank", rel: "noopener" });
+  r.remove = Object.assign(document.createElement("button"), { className: "btn ghost danger", type: "button" });
+  r.remove.onclick = async () => {
+    try { Object.assign(S, await api("DELETE", `/api/keys/${p}`)); render(); } catch (e) { fail(e); }
+  };
+  r.actions.append(r.save, r.link, r.remove);
+  r.row.append(r.who, r.field, r.actions);
+  return r;
+}
+
 function renderKeys() {
   const box = $("#keys");
-  box.replaceChildren();
   for (const p of S.providers) {
     const k = S.keys[p];
-    const row = document.createElement("div");
-    row.className = "key-row";
-    const who = document.createElement("div");
-    who.className = "who";
-    who.innerHTML = `<b></b><small></small><div class="tags"></div>`;
-    $("b", who).textContent = k.label;
-    $("small", who).textContent = k.set ? `${t("keys.saved")} ${k.masked}${k.source === "env" ? " · env" : ""}` : t("keys.none");
-    const tags = $(".tags", who);
+    const r = keyRows[p] || (keyRows[p] = buildKeyRow(p));
+    if (r.row.parentNode !== box) box.append(r.row);
+    $("b", r.who).textContent = k.label;
+    $("small", r.who).textContent = k.set ? `${t("keys.saved")} ${k.masked}${k.source === "env" ? " · env" : ""}` : t("keys.none");
     const tagList = [["tag", t("keys.tag.brain")]];
     if (k.voice) tagList.push(["tag voice", t("keys.tag.voice")]);
     if (k.realtime) tagList.push(["tag voice", t("keys.tag.realtime")]);
-    for (const [c, txt] of tagList) tags.append(Object.assign(document.createElement("span"), { className: c, textContent: txt }));
-
-    const input = Object.assign(document.createElement("input"), {
-      type: "password", placeholder: k.set ? t("keys.replace") : t("keys.paste"), autocomplete: "off", spellcheck: false,
-    });
-    const actions = document.createElement("div");
-    actions.className = "row";
-    const saveBtn = Object.assign(document.createElement("button"), { className: "btn primary", textContent: t("keys.save") });
-    saveBtn.onclick = async () => {
-      saveBtn.disabled = true;
-      saveBtn.textContent = t("keys.testing");
-      try {
-        const res = await api("PUT", `/api/keys/${p}`, { key: input.value });
-        Object.assign(S, { keys: res.keys, capabilities: res.capabilities, settings: res.settings, restart_pending: res.restart_pending });
-        toast(`${k.label}: ${res.message}`);
-        render();
-      } catch (e) { fail(e); saveBtn.disabled = false; saveBtn.textContent = t("keys.save"); }
-    };
-    input.onkeydown = (e) => e.key === "Enter" && saveBtn.click();
-    const link = Object.assign(document.createElement("a"), { className: "btn ghost", href: k.key_url, target: "_blank", rel: "noopener", textContent: t("keys.get") });
-    actions.append(saveBtn, link);
-    if (k.set && k.source === "file") {
-      const rm = Object.assign(document.createElement("button"), { className: "btn ghost danger", textContent: t("keys.remove") });
-      rm.onclick = async () => {
-        try { Object.assign(S, await api("DELETE", `/api/keys/${p}`)); render(); } catch (e) { fail(e); }
-      };
-      actions.append(rm);
-    }
-    row.append(who, input, actions);
-    box.append(row);
+    $(".tags", r.who).replaceChildren(...tagList.map(([c, txt]) => Object.assign(document.createElement("span"), { className: c, textContent: txt })));
+    r.input.placeholder = k.set ? t("keys.replace") : t("keys.paste");
+    r.eye.title = t("keys.show");
+    if (!r.save.disabled) r.save.textContent = t("keys.save");
+    r.link.href = k.key_url;
+    r.link.textContent = t("keys.get");
+    r.remove.textContent = t("keys.remove");
+    r.remove.hidden = !(k.set && k.source === "file");
   }
 }
 
@@ -279,7 +302,7 @@ function renderVoice() {
     };
     chip.append(play);
     chip.onclick = () => save({ voice_name: name });
-    chip.onkeydown = (e) => e.key === "Enter" && chip.click();
+    chip.onkeydown = (e) => { if (e.key === "Enter") chip.click(); };
     return chip;
   }));
   bindText("#tts-style", "tts_style");
@@ -304,7 +327,24 @@ function renderLanguage() {
   bindText("#wake-word", "wake_word", (v) => v.trim().toLowerCase());
 }
 
+let chromeState = null;
+async function loadChrome() {
+  try { chromeState = await api("GET", "/api/chrome"); } catch (_) { chromeState = null; }
+  renderChrome();
+}
+function renderChrome() {
+  const ok = !!(chromeState && chromeState.connected);
+  $("#chrome-dot").className = "dot " + (chromeState ? (ok ? "ok" : "warn") : "");
+  $("#chrome-state").textContent = chromeState ? t(ok ? "chrome.connected" : "chrome.off") : "";
+  $("#chrome-setup").hidden = ok;
+  $("#chrome-setup").onclick = async () => {
+    try { await api("POST", "/api/chrome/setup"); toast(t("chrome.opened")); } catch (e) { fail(e); }
+    setTimeout(loadChrome, 8000);
+  };
+}
+
 function renderConnectors() {
+  renderChrome();
   const box = $("#connectors");
   box.replaceChildren(...S.connectors.map((c) => {
     const row = Object.assign(document.createElement("div"), { className: "conn" });
@@ -438,4 +478,6 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#conn-form").onsubmit = submitConnector;
   await refresh();
   setInterval(poll, 2500);
+  loadChrome();
+  setInterval(loadChrome, 15000);
 });

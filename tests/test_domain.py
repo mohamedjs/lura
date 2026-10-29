@@ -253,6 +253,31 @@ def check_brain_catalog():
     assert bc("anthropic", {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"})["name"] == "Claude Sonnet 5.5"
 
 
+def check_bundled_certificates():
+    """A frozen build that cannot see the OS root certificates uses certifi's
+    (the Mac build: every Gemini / OpenRouter key test failed on TLS)."""
+    import os
+    import ssl
+    from lura.shared import http
+
+    real, saved = ssl.get_default_verify_paths, os.environ.pop("SSL_CERT_FILE", None)
+    try:
+        missing = ssl.DefaultVerifyPaths("/nope/cert.pem", "/nope/certs", "SSL_CERT_FILE",
+                                         "/nope/cert.pem", "SSL_CERT_DIR", "/nope/certs")
+        ssl.get_default_verify_paths = lambda: missing
+        http.use_bundled_certificates()
+        import certifi
+        assert os.environ.get("SSL_CERT_FILE") == certifi.where()
+        os.environ["SSL_CERT_FILE"] = "/mine.pem"   # an explicit choice always wins
+        http.use_bundled_certificates()
+        assert os.environ["SSL_CERT_FILE"] == "/mine.pem"
+    finally:
+        ssl.get_default_verify_paths = real
+        os.environ.pop("SSL_CERT_FILE", None)
+        if saved is not None:
+            os.environ["SSL_CERT_FILE"] = saved
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):

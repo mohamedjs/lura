@@ -408,6 +408,8 @@ def _utf8_console() -> None:
 
 def main(argv=None) -> int:
     _utf8_console()
+    from .shared.http import use_bundled_certificates
+    use_bundled_certificates()
     parser = argparse.ArgumentParser(prog="lura", description="Lura — a voice-first desktop assistant.")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"lura {__version__}")

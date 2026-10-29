@@ -35,7 +35,7 @@ class McpJsonRepository:
     def load(self) -> list[Connector]:
         raw = self._raw()
         disabled = set((raw.get("lura") or {}).get("disabledBuiltins") or [])
-        builtins = builtin_connectors()
+        builtins = builtin_connectors(output_dir=paths.data_dir() / "playwright")
         for c in builtins:
             c.enabled = c.name not in disabled
         names = {c.name for c in builtins}

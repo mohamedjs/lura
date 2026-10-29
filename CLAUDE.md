@@ -83,9 +83,18 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Anthropic:** official SDK, default `claude-opus-5-5`, `output_config.effort`,
   `fallbacks: "default"`; turns replayed verbatim.
 - **Realtime:** Gemini Live `gemini-2.5-flash-native-audio-preview-12-2025`, mic gated.
-- **Connectors:** built-ins `chrome` (chrome-devtools-mcp), `web` (mcp-fetch-server),
-  `files` (server-filesystem ~) via `npx`; anyone can add more. Pipeline mode pulls MCP
-  schemas only via `find_tools`.
+- **Connectors:** built-ins `chrome` (chrome-devtools-mcp `--autoConnect`), `playwright`
+  (@playwright/mcp `--cdp-endpoint` from Chrome's `DevToolsActivePort`), `web`
+  (mcp-fetch-server), `files` (server-filesystem ~) via `npx`; anyone can add more.
+  Both browser ones drive the user's **own** running Chrome (profile, sign-ins), never a
+  fresh guest one: the user switches on `chrome://inspect/#remote-debugging` once; a call
+  that finds Chrome closed starts it and re-attaches (`connectors/infrastructure/chrome.py`).
+  Pipeline mode pulls MCP schemas only via `find_tools`.
+- **Dashboard key fields:** an `on…` handler must never return `false` (it cancels the
+  keystroke — the old `e.key === "Enter" && …` blocked all typing and pasting). Key rows
+  are built once and updated, so polls never wipe what is being typed.
+- **TLS in frozen builds:** `shared/http.use_bundled_certificates()` points SSL_CERT_FILE at
+  certifi when the OS bundle is unreachable (the macOS build could not verify any HTTPS).
 - **Settings migration:** a 1.x settings.json (`provider`, `openrouter_model`, …) is
   converted on load (`settings/domain.py: migrate_legacy`).
 - **Command guard** also blocks Windows/macOS destructive commands. Test:

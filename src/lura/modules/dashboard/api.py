@@ -76,6 +76,8 @@ class DashboardApi:
         r("POST", "/api/talk", lambda b, m: self._publish(events.TALK_REQUESTED))
         r("POST", "/api/stop", lambda b, m: self._publish(events.STOP_REQUESTED))
         r("GET", "/api/connectors", lambda b, m: {"connectors": self.connectors.list()})
+        r("GET", "/api/chrome", lambda b, m: self.connectors.chrome_status())
+        r("POST", "/api/chrome/setup", lambda b, m: {"opened": self.connectors.open_chrome_setup()})
         r("POST", "/api/connectors", lambda b, m: self.add_connector(b))
         r("PATCH", r"/api/connectors/([\w-]+)", lambda b, m: self.toggle_connector(m[1], b))
         r("DELETE", r"/api/connectors/([\w-]+)", lambda b, m: self.remove_connector(m[1]))
