@@ -128,6 +128,8 @@
   "audio.seconds": "{n} s",
   "audio.follow_up": "After she answers, wait for me",
   "audio.hint": "Changes apply right away. Lura listens while you talk and answers once you have been quiet for the pause above; then she waits for your next sentence, no wake word needed.",
+  "audio.barge_in": "Let me interrupt her by talking",
+  "audio.barge_in_hint": "With headphones, just start talking and she stops to listen. On speakers the microphone hears her too, so this stands down by itself. Tapping the face always stops her.",
   "mem.title": "Memory & history",
   "mem.hint": "Lura keeps every conversation and what she learns about you, so she always remembers you. It all stays on this computer, in {path}. Nothing is uploaded except what each request needs.",
   "mem.enabled": "Remember conversations",

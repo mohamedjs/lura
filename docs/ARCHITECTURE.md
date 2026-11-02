@@ -20,7 +20,7 @@ src/lura/
 └── modules/
     ├── settings/     Settings, providers, voices, capability rules; JSON + 0600 key file
     ├── brain/        ChatModel port; OpenAI-compatible adapter (OpenAI, OpenRouter, Gemini), Anthropic adapter
-    ├── voice/        sentence chunker, Gemini TTS (direct / OpenRouter), transcriber, mic/speaker, Vosk wake word, Gemini Live
+    ├── voice/        sentence chunker, Gemini TTS (direct / OpenRouter, streamed), transcriber, mic/speaker, barge-in, Vosk wake word, Gemini Live
     ├── tools/        built-in tools + command guard; per-OS implementations; briefing
     ├── connectors/   MCP: stdio and Streamable HTTP clients, mcp.json repository, plan rule
     ├── memory/       history (SQLite), memory.md facts, running summary + compaction, memory tools

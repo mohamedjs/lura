@@ -43,6 +43,7 @@ function renderAudio() {
   follow.value = String(s.follow_up_seconds);
   if (follow.value === "") follow.append(el("option", { value: String(s.follow_up_seconds), textContent: `${s.follow_up_seconds} s`, selected: true }));
   follow.onchange = () => save({ follow_up_seconds: Number(follow.value) });
+  bindCheck("#barge-in", "barge_in");
 
   $("#mic-test").onclick = async () => {
     const btn = $("#mic-test"), out = $("#mic-result"), bar = $("#mic-meter i");

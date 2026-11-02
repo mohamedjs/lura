@@ -213,6 +213,33 @@ def check_end_of_turn():
     assert blip.start is not None and abs(blip.spoken_seconds - 0.1) < 1e-9, "a click is one block"
 
 
+def check_barge_in():
+    """Levels from a real laptop (speakers + built-in mic, Oct 2026): room 0.015,
+    her echo 0.04–0.24, the user's voice 0.02–0.04."""
+    from lura.modules.voice.domain import BargeIn
+
+    def run(mic, her, floor=0.015):
+        detector = BargeIn(floor, factor=2.0)
+        for i, (level, she) in enumerate(zip(mic, her)):
+            state = detector.feed(level, she)
+            if state in ("off", "barge"):
+                return state, i
+        return detector.state, None
+
+    speaking = [0.2] * 30
+    # Speakers: she is loud in the mic, so it stands down — even when the probe
+    # starts on a sentence's fading tail (the case that once slipped through).
+    assert run([0.06, 0.15, 0.2, 0.09, 0.1, 0.18, 0.12, 0.2] + [0.1] * 22, speaking)[0] == "off"
+    assert run([0.06, 0.024, 0.018, 0.013, 0.013, 0.077, 0.17, 0.058] + [0.06] * 22, speaking)[0] == "off"
+    # Headphones: the mic hears the room; the user's voice, held, takes the floor.
+    state, at = run([0.015] * 12 + [0.035] * 6, speaking)
+    assert state == "barge" and at == 14, (state, at)
+    assert run([0.015] * 12 + [0.04] + [0.015] * 17, speaking)[0] == "listen", "a cough is not the user"
+    assert run([0.015] * 30, speaking)[0] == "listen"
+    # Probe blocks count only while she is really speaking (what was played, full scale).
+    assert run([0.015] * 30, [0.0] * 30)[0] == "probe"
+
+
 def check_quiet_and_speech_band():
     import numpy as np
     from lura.modules.assistant.domain import could_be_quiet

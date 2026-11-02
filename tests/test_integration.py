@@ -240,6 +240,161 @@ def check_tts_and_hearing():
     httpd.shutdown()
 
 
+def check_tts_streaming():
+    """Google's streaming route: audio chunks as they are made; quota → Lite;
+    a refused request shape → whole clips from then on, not retried per sentence."""
+    from lura.modules.voice.infrastructure import tts
+
+    chunks = [b"\x01\x00" * 1200, b"\x02\x00" * 1200, b"\x03\x00" * 600]
+    mode = {"stream": "ok"}
+
+    def delta(pcm):
+        return {"event_type": "step.delta", "index": 0,
+                "delta": {"type": "audio", "data": base64.b64encode(pcm).decode(), "sample_rate": 24000}}
+
+    def gemini(h, body):
+        if h.path == "/interactions":
+            if mode["stream"] == "refused":
+                h.send_response(400)
+                h.end_headers()
+                h.wfile.write(b'{"error": {"message": "Invalid value at response_format"}}')
+                return
+            if mode["stream"] == "quota" and "lite" not in body["model"]:
+                sse(h, [{"event_type": "interaction.created", "interaction": {}},
+                        {"event_type": "error", "error": {"code": "RESOURCE_EXHAUSTED", "message": "retry in 1h"}}])
+                return
+            sse(h, [{"event_type": "interaction.created", "interaction": {}},
+                    {"event_type": "step.start", "index": 0, "step": {}}]
+                + [delta(c) for c in chunks]
+                + [{"event_type": "step.stop", "index": 0}, {"event_type": "interaction.completed", "interaction": {}},
+                   "[DONE]"])
+            return
+        data = {"candidates": [{"content": {"parts": [{"inlineData": {
+            "mimeType": "audio/L16;codec=pcm;rate=24000", "data": base64.b64encode(b"".join(chunks)).decode()}}]}}]}
+        out = json.dumps(data).encode()
+        h.send_response(200)
+        h.send_header("Content-Type", "application/json")
+        h.send_header("Content-Length", str(len(out)))
+        h.end_headers()
+        h.wfile.write(out)
+
+    httpd, url = serve(gemini)
+    tts.GEMINI_BASE = url
+    support = tts.StreamSupport()
+    voice = tts.GeminiTTS("g-key", "gemini-3.8-flash-tts", "Charon", streaming=support)
+    assert list(voice.stream("مرحبا")) == chunks, "chunks arrive one by one"
+    body = SEEN[-1]["body"]
+    assert SEEN[-1]["path"] == "/interactions" and body["stream"] is True and body["store"] is False
+    assert body["generation_config"]["speech_config"] == [{"voice": "Charon"}] and body["input"] == "مرحبا"
+    assert body["response_format"] == {"type": "audio", "mime_type": "audio/l16", "sample_rate": 24000}
+
+    mode["stream"] = "quota"
+    assert b"".join(voice.stream("hi")) == b"".join(chunks)
+    assert SEEN[-1]["path"] == "/models/gemini-3.8-flash-lite-tts:generateContent", "an error event counts as a 429"
+    no_lite = tts.GeminiTTS("g-key", "gemini-3.8-flash-tts", "Charon", lite_fallback=False, streaming=support)
+    try:
+        list(no_lite.stream("hi"))
+        raise AssertionError("a 429 must reach the provider fallback")
+    except tts.HttpError as exc:
+        assert exc.status == 429 and "retry in 1h" in str(exc)
+
+    mode["stream"] = "refused"
+    assert b"".join(voice.stream("hi")) == b"".join(chunks) and not support.ok
+    before = len(SEEN)
+    assert b"".join(voice.stream("again")) == b"".join(chunks)
+    assert [s["path"] for s in SEEN[before:]] == ["/models/gemini-3.8-flash-tts:generateContent"], \
+        "once refused, streaming is not tried again"
+    httpd.shutdown()
+
+    # OpenRouter: the body is raw audio, read as it arrives.
+    pcm = bytes(range(256)) * 30
+    reply = {"kind": "audio/pcm"}
+
+    def openrouter(h, body):
+        h.send_response(200)
+        h.send_header("Content-Type", reply["kind"])
+        h.end_headers()
+        if reply["kind"] == "audio/wav":
+            from lura.modules.voice.infrastructure.audio import pcm_to_wav
+            h.wfile.write(pcm_to_wav(pcm, 24000))
+            return
+        for piece in (pcm[:3], pcm[3:1001], pcm[1001:]):   # odd sizes: samples split across reads
+            h.wfile.write(piece)
+            h.wfile.flush()
+            time.sleep(0.02)
+
+    httpd, url = serve(openrouter)
+    tts.OPENROUTER_BASE = url
+    voice = tts.OpenRouterTTS("or-key", "google/gemini-3.8-flash-tts", "Puck")
+    got = list(voice.stream("hi"))
+    assert b"".join(got) == pcm and all(len(c) % 2 == 0 for c in got), "no sample split across chunks"
+    assert SEEN[-1]["body"]["response_format"] == "pcm"
+    reply["kind"] = "audio/wav"
+    assert b"".join(voice.stream("hi")) == pcm, "a WAV reply is decoded whole"
+    httpd.shutdown()
+
+
+def check_player_stream_and_interrupt():
+    """Chunks play in order as they come; an interrupt stops the sound at once,
+    even while the next sentence is stuck in synthesis, and ``heard`` keeps only
+    what started playing."""
+    from lura.modules.voice import SpeechPlayer
+    from lura.modules.voice.infrastructure import audio
+
+    written, closed = [], []
+
+    class FakeSpeaker:
+        def __init__(self, device=None, rate=24000, on_level=None, on_slice=None):
+            self._on_slice = on_slice
+
+        def write(self, pcm, cancelled=lambda: False):
+            for off in range(0, len(pcm), 2400):
+                if cancelled():
+                    return
+                written.append(pcm[off:off + 2400])
+                if self._on_slice:
+                    self._on_slice(pcm[off:off + 2400], time.monotonic())
+                time.sleep(0.01)
+
+        def close(self, abort=False):
+            closed.append(abort)
+
+    stuck = threading.Event()
+
+    class FakeSynth:
+        def stream(self, text):
+            if text.startswith("Second"):
+                stuck.set()
+                time.sleep(5)          # a stalled TTS call
+            for i in range(3):
+                yield bytes([len(text) % 250, i]) * 1200
+
+    real = audio.Speaker
+    audio.Speaker = FakeSpeaker
+    try:
+        player = SpeechPlayer(FakeSynth())
+        player.say("First sentence here. Another one follows.")
+        player.wait()
+        assert player.heard == ["First sentence here.", "Another one follows."], player.heard
+        assert len(written) == 6 and closed == [False] and not player.interrupted
+        assert written[0][0] == len("First sentence here.") and written[3][0] == len("Another one follows.")
+
+        written.clear()
+        player = SpeechPlayer(FakeSynth())
+        player.say("First sentence here. Second one hangs in synthesis.")
+        assert stuck.wait(3)
+        while not player.speaking:
+            time.sleep(0.01)
+        started = time.monotonic()
+        player.interrupt()
+        player.wait()
+        assert time.monotonic() - started < 0.5, "an interrupt never waits for a stalled TTS call"
+        assert player.interrupted and player.heard == ["First sentence here."], player.heard
+        assert closed[-1] is True, "the device buffer is dropped, not played out"
+    finally:
+        audio.Speaker = real
+
+
 def wait_ready(svc, name, timeout=20):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -381,6 +536,8 @@ def check_pipeline_turn():
     spoken = []
 
     class FakePlayer:
+
+        interrupted, heard, carry = False, [], None
         def __init__(self):
             self.chunker = __import__("lura.modules.voice", fromlist=["SentenceChunker"]).SentenceChunker()
 
@@ -401,7 +558,7 @@ def check_pipeline_turn():
             pass
 
     class FakeVoice:
-        def player(self, settings, presence=None):
+        def player(self, settings, presence=None, listen=False):
             return FakePlayer()
 
         def transcriber(self, settings):
@@ -412,6 +569,133 @@ def check_pipeline_turn():
     conv.run(initial_prompt="What is six times seven?")
     assert calls == [["user"], ["user", "assistant", "tool"]], calls
     assert spoken == ["Checking.", "The answer is 42.", "Anything else?"], spoken
+
+
+def check_pipeline_interrupted():
+    """The user takes the floor: history, memory and subtitle keep only what she
+    got to say, no further tool round starts, and their first words go on to
+    the recorder. Cut off before a word was said, the reply leaves no trace."""
+    from lura.modules.assistant import PipelineConversation
+    from lura.modules.brain import Done, Message, TextDelta, ToolCall
+    from lura.modules.settings import Settings
+    from lura.modules.tools import ToolService
+
+    rounds, recorded, kept, captions = [], [], [], []
+    case = {"cut": "speaking"}
+
+    class FakeModel:
+        provider, model = "anthropic", "claude-opus-5-5"
+
+        def stream(self, system, history, tools):
+            rounds.append([m.role for m in history])
+            yield TextDelta("Let me check that for you. ")
+            yield TextDelta("It takes a second. ")
+            yield Done(Message("assistant", "Let me check that for you. It takes a second.", tool_calls=[
+                ToolCall("t1", "run_command", {"command": "echo 42"})]), "tool_use")
+
+    class FakeBrain:
+        def model(self, settings):
+            return FakeModel()
+
+    class Player:
+        interrupted, heard, carry = False, [], None
+
+        def feed(self, text):
+            if case["cut"] == "thinking":
+                self.interrupted = True          # tapped before a word was said
+
+        def finish(self):
+            if case["cut"] == "speaking":
+                self.interrupted, self.heard, self.carry = True, ["Let me check that for you."], "first words"
+
+        wait = cancel = interrupt = say = lambda self, *a: None
+
+    class FakeVoice:
+        def player(self, settings, presence=None, listen=False):
+            assert listen, "a reply may be talked over"
+            return Player()
+
+        def transcriber(self, settings):
+            return None
+
+        def record(self, settings, should_stop=None, live=None, carry=None):
+            recorded.append(carry)
+            return b""
+
+    class Memory:
+        enabled = True
+
+        def context(self):
+            return "", []
+
+        def start(self):
+            return 1
+
+        def add(self, conv, role, text, model=""):
+            kept.append(["add", role, text])
+            return len(kept)
+
+        def update(self, row, text):
+            kept.append(["update", row, text])
+
+        def discard(self, row):
+            kept.append(["discard", row])
+
+        def end(self, conv):
+            pass
+
+    class Presence:
+        set_state = set_amplitude = lambda self, *a: None
+
+        def set_caption(self, who, text):
+            captions.append((who, text))
+
+    conv = PipelineConversation(Settings(brain_provider="anthropic", subtitles=False), FakeBrain(), FakeVoice(),
+                                ToolService(None), Presence(), threading.Event(), Memory())
+    conv.run(initial_prompt="What is six times seven?")
+    assert len(rounds) == 1, "no tool round after the user took the floor"
+    said = [m for m in conv._history if m.role == "assistant"]
+    assert said[0].text == "Let me check that for you. …" and said[0].tool_calls, said
+    assert conv._history[-1].role == "tool", "every tool call keeps its result"
+    assert ["update", 1, "Let me check that for you. …"] in kept, kept
+    assert ("lura", "Let me check that for you. …") in captions, captions
+    assert recorded == ["first words"], "the recording carries on from their first words"
+
+    rounds.clear(), recorded.clear(), kept.clear()
+    case["cut"] = "thinking"
+    conv = PipelineConversation(Settings(brain_provider="anthropic", subtitles=False), FakeBrain(), FakeVoice(),
+                                ToolService(None), Presence(), threading.Event(), Memory())
+    conv.run(initial_prompt="What is six times seven?")
+    assert [m.role for m in conv._history] == ["user"] and not any(k[1] == "assistant" for k in kept), kept
+    assert recorded == [None], "a tap: she listens, nothing carried"
+
+
+def check_cut_reply_reaches_the_brain():
+    """Each provider is sent its own copy of an assistant turn. After a cut, that
+    copy — not just the neutral text — says only what was heard, and the parts
+    that must go back untouched (thinking, signatures, tool calls) still do."""
+    from lura.modules.brain import Message, ToolCall, retext
+    from lura.modules.brain.infrastructure.anthropic_chat import AnthropicChat
+    from lura.modules.brain.infrastructure.openai_compat import OpenAICompatChat
+
+    thinking = {"type": "thinking", "thinking": "the user wants…", "signature": "sig=="}
+    use = {"type": "tool_use", "id": "t1", "name": "run_command", "input": {"command": "echo 42"}}
+    claude = Message("assistant", "Let me check. It takes a second.", tool_calls=[ToolCall("t1", "run_command", {})],
+                     native=("anthropic", [thinking, {"type": "text", "text": "Let me check. It takes a second."}, use]))
+    retext(claude, "Let me check. …")
+    sent = object.__new__(AnthropicChat)._messages([Message("user", "hi"), claude])[1]["content"]
+    assert sent == [thinking, {"type": "text", "text": "Let me check. …"}, use], sent
+
+    native = {"role": "assistant", "content": "Let me check. It takes a second.",
+              "reasoning_details": [{"type": "reasoning.encrypted", "data": "xyz"}]}
+    routed = Message("assistant", native["content"], native=("openrouter", native))
+    retext(routed, "Let me check. …")
+    wire = OpenAICompatChat("openrouter", "k", "google/gemini-3.8-flash")._wire(routed)
+    assert wire["content"] == "Let me check. …" and wire["reasoning_details"] == native["reasoning_details"]
+    assert native["content"] == "Let me check. It takes a second.", "the original is not mutated"
+
+    retext(claude, "")   # nothing heard, but the tool call stands
+    assert claude.native[1] == [thinking, use]
 
 
 def check_daily_briefing():
@@ -478,6 +762,8 @@ def check_daily_briefing():
             return FakeModel()
 
     class FakePlayer:
+
+        interrupted, heard, carry = False, [], None
         def feed(self, text):
             spoken.append(text)
 
@@ -494,13 +780,13 @@ def check_daily_briefing():
             spoken.append(text)
 
     class FakeVoice:
-        def player(self, settings, presence=None):
+        def player(self, settings, presence=None, listen=False):
             return FakePlayer()
 
         def transcriber(self, settings):
             return None
 
-        def record(self, settings, should_stop=None, live=None):
+        def record(self, settings, should_stop=None, live=None, carry=None):
             listened.append(1)
             return b""
 
@@ -542,6 +828,8 @@ def check_noise_and_live_captions():
             return FakeModel()
 
     class Player:
+
+        interrupted, heard, carry = False, [], None
         def feed(self, text):
             spoken.append(text)
         finish = wait = cancel = lambda self: None
@@ -558,7 +846,7 @@ def check_noise_and_live_captions():
     class FakeVoice:
         recorded = 0
 
-        def player(self, settings, presence=None):
+        def player(self, settings, presence=None, listen=False):
             return Player()
 
         def transcriber(self, settings):
@@ -568,7 +856,7 @@ def check_noise_and_live_captions():
         def to_wav(pcm):
             return pcm
 
-        def record(self, settings, should_stop, on_audio=None):
+        def record(self, settings, should_stop, on_audio=None, carry=None):
             self.recorded += 1
             if self.recorded > 2:
                 return b""

@@ -57,7 +57,26 @@ interface would hide exactly that.
 ### Audio
 - Gemini Live: input **16 kHz**, output **24 kHz**, as separate streams.
 - The mic is gated while Lura speaks in realtime mode. Without it she hears herself and
-  interrupts herself in a loop. The cost is no barge-in.
+  interrupts herself in a loop. The cost is no barge-in there.
+- **Pipeline barge-in needs the mic not to hear her.** Measured on Mohamed's laptop
+  (built-in mic + speakers, no OS echo cancel): her echo in the mic was **6× the room floor
+  (15× at p95)**, his normal voice only **1–2.5×**. No level margin separates them, and the
+  per-block echo ratio swings 0.45–1.65 (max 8.4). So `voice/domain.py: BargeIn` probes each
+  reply's first 1.2 s of her speech: her echo *ever* above 1.6× floor → stand down for that
+  reply; otherwise (headphones) 0.3 s of speech above both `silence_factor` × floor and 1.5×
+  the loudest echo the probe saw takes the floor. Tuned by replaying the real recordings with
+  her echo mixed in at every strength 0.05×–1× and a reply starting every 0.5 s: **0 false
+  barge-ins** at any strength, **13/13** hits with no echo; live on his speakers 8/8 replies
+  stood down (~1.4 s in). Shorter probes (0.8 s), a median or p75 instead of the max, or no
+  echo ceiling all cut her off at *moderate* echo (desktop speakers further away) — the probe
+  can land on a sentence's fading tail. Driver latency is reported loosely (0.3 s for a
+  measured 0.1 s echo), hence the wide 0.5 s / 0.2 s alignment window in `barge_in.py`.
+  Real echo *cancellation* (adaptive filter) is what would make speakers work; don't fake it
+  with a looser threshold. Tapping the face interrupts on any hardware.
+- **TTS streams on Google's route only** (Interactions API, `stream: true`, `store: false`;
+  `step.delta` events carry base64 PCM, then `[DONE]`): first sound ~1.0–1.8 s vs ~2.2–2.9 s
+  for a whole clip. **OpenRouter's `/audio/speech` buffers** the whole clip (first byte 3.8 s,
+  last 0.4 s later) — it is read as it arrives anyway, which costs nothing.
 - Pipeline end-of-turn (`voice/domain.py: EndOfTurn`): the noise floor is the 10th
   percentile of the last 5 s, **measured continuously**, never hardcoded (a quiet room vs a
   laptop fan differ by >10×). The old one-shot 0.5 s calibration took someone who spoke

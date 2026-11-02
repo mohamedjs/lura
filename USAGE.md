@@ -15,6 +15,12 @@ The face top-right shows what she is doing: calm while listening, turning while
 thinking, the mouth moving while speaking. Drag it anywhere. **Double-click it to
 open the dashboard.**
 
+**Interrupting her:** tap the face once while she talks — she stops at once and
+listens. (Tapping it when she is idle starts a conversation, like the wake word.)
+With headphones you can also just start talking over her. On the computer's own
+speakers the microphone hears her too, so talking over her is switched off for that
+reply by itself; the tap always works.
+
 ## The dashboard
 
 `lura dashboard` (or double-click the face, or use the tray menu). Everything is here:

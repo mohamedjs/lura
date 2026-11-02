@@ -17,24 +17,45 @@ log = logging.getLogger(__name__)
 _DONE = object()
 
 
+class _Piece(str):
+    """Marks where a sentence's audio starts in the playback queue."""
+
+
 class SpeechPlayer:
     """Speaks streamed text as it arrives.
 
     Three stages, so nothing waits on anything it does not need: the caller
-    feeds text; a synthesis thread turns finished sentences into audio; a
-    playback thread plays them in order. While sentence one plays, sentence
-    two is already being synthesised and sentence three still being written.
+    feeds text; a synthesis thread turns finished sentences into audio,
+    streamed as it is made; a playback thread plays it in order. While
+    sentence one plays, sentence two is already being synthesised and
+    sentence three still being written.
+
+    ``interrupt()`` stops the sound within one 50 ms slice and drops what the
+    device had buffered; ``heard`` is then what the listener actually got to
+    hear, which is what the history must say she said.
     """
 
-    def __init__(self, synth: SpeechSynthesizer, device=None, presence: Presence | None = None):
+    #: Audio synthesised ahead of the speaker, in bytes (30 s at 24 kHz). By
+    #: time, not by item: streamed chunks are ~70 ms, and a count of them would
+    #: stop sentence two from being fetched while sentence one plays.
+    MAX_AHEAD = 30 * 2 * 24_000
+
+    def __init__(self, synth: SpeechSynthesizer, device=None, presence: Presence | None = None,
+                 listener=None):
         self._synth = synth
         self._device = device
         self._presence = presence or NullPresence()
+        #: Hears the room while she speaks (barge-in); gets each played slice.
+        self._listener = listener
         self._chunker = SentenceChunker()
         self._text: queue.Queue = queue.Queue()
-        self._audio: queue.Queue = queue.Queue(maxsize=4)
+        self._audio: queue.Queue = queue.Queue()
+        self._room = threading.Condition()
+        self._ahead = 0
         self._cancelled = threading.Event()
+        self.interrupted = False
         self.spoken: list[str] = []
+        self.heard: list[str] = []
         self._threads = [threading.Thread(target=self._synth_loop, daemon=True, name="tts"),
                          threading.Thread(target=self._play_loop, daemon=True, name="playback")]
         for thread in self._threads:
@@ -54,12 +75,43 @@ class SpeechPlayer:
         self._text.put(_DONE)
 
     def wait(self) -> None:
-        for thread in self._threads:
-            thread.join()
+        # The playback thread ends after the synthesis thread's last piece, or
+        # at once when cancelled. Joining synthesis too would keep an
+        # interrupted Lura deaf for as long as an HTTP call takes to return.
+        self._threads[1].join()
+        if self._listener is not None:
+            self._listener.released.wait(0.3)   # its mic lets go before the recorder opens one
 
     def cancel(self) -> None:
         self._cancelled.set()
         self._text.put(_DONE)
+        with self._room:
+            self._room.notify_all()
+        self._audio.put(_DONE)
+
+    def interrupt(self) -> None:
+        """The user wants the floor: stop talking now."""
+        if not self._cancelled.is_set():
+            self.interrupted = True
+            log.info("Interrupted after: %r", " ".join(self.heard)[-80:])
+        self.cancel()
+
+    @property
+    def speaking(self) -> bool:
+        """Sound has started and not been stopped."""
+        return bool(self.heard) and not self._cancelled.is_set() and self._threads[1].is_alive()
+
+    @property
+    def carry(self):
+        """After a barge-in: the user's first words and the mic still open on
+        them, for ``VoiceService.record``. Opaque to everyone else."""
+        return self._listener.carry if self._listener is not None else None
+
+    def _queue_audio(self, pcm) -> None:
+        with self._room:
+            self._room.wait_for(lambda: self._ahead < self.MAX_AHEAD or self._cancelled.is_set())
+            self._ahead += len(pcm)
+        self._audio.put(pcm)
 
     def _synth_loop(self) -> None:
         while True:
@@ -67,15 +119,21 @@ class SpeechPlayer:
             if piece is _DONE or self._cancelled.is_set():
                 self._audio.put(_DONE)
                 return
+            started = False
             try:
-                pcm = self._synth.synthesize(piece)
+                for pcm in self._synth.stream(piece):
+                    if self._cancelled.is_set():
+                        break   # closes the HTTP stream
+                    if not pcm:
+                        continue
+                    if not started:
+                        started = True
+                        self.spoken.append(piece)
+                        self._audio.put(_Piece(piece))
+                    self._queue_audio(pcm)
             except Exception as exc:
                 # One sentence that cannot be spoken must not silence the rest.
                 log.warning("Could not speak %r: %s", piece[:40], exc)
-                continue
-            if pcm:
-                self.spoken.append(piece)
-                self._audio.put(pcm)
 
     def _play_loop(self) -> None:
         from .infrastructure.audio import Speaker
@@ -83,18 +141,29 @@ class SpeechPlayer:
         speaker = None
         try:
             while True:
-                pcm = self._audio.get()
-                if pcm is _DONE or self._cancelled.is_set():
+                item = self._audio.get()
+                if item is _DONE or self._cancelled.is_set():
                     return
+                if isinstance(item, _Piece):
+                    self.heard.append(str(item))
+                    continue
+                with self._room:
+                    self._ahead -= len(item)
+                    self._room.notify_all()
                 if speaker is None:
-                    speaker = Speaker(self._device, on_level=self._presence.set_amplitude)
+                    speaker = Speaker(self._device, on_level=self._presence.set_amplitude,
+                                      on_slice=self._listener.played if self._listener else None)
                     self._presence.set_state("speaking")
-                speaker.write(pcm, self._cancelled.is_set)
+                    if self._listener is not None:
+                        self._listener.start(self)
+                speaker.write(item, self._cancelled.is_set)
         except Exception as exc:
             log.warning("Playback failed: %s", exc)
         finally:
             if speaker is not None:
-                speaker.close()
+                speaker.close(abort=self._cancelled.is_set())
+            if self._listener is not None:
+                self._listener.stop()
 
 
 class _FallbackSynthesizer:
@@ -114,6 +183,21 @@ class _FallbackSynthesizer:
                 self._on_429(exc)
             log.warning("Primary TTS failed (%s); falling back to alternate voice provider.", exc.status or exc)
             return self._backup.synthesize(text)
+
+    def stream(self, text: str):
+        started = False
+        try:
+            for pcm in self._primary.stream(text):
+                started = True
+                yield pcm
+        except HttpError as exc:
+            # Mid-sentence, the backup would start the sentence over.
+            if started or not exc.retryable:
+                raise
+            if exc.status == 429:
+                self._on_429(exc)
+            log.warning("Primary TTS failed (%s); falling back to alternate voice provider.", exc.status or exc)
+            yield from self._backup.stream(text)
 
 
 class _FallbackTranscriber:
@@ -139,6 +223,7 @@ class VoiceService:
         self._key_for = key_for
         self._has_key = has_key
         self._cooldown_until: dict[str, float] = {}
+        self._streaming = None   # tts.StreamSupport, made on first use
 
     def _voice_providers(self, settings: Settings) -> list[str]:
         from ...shared.errors import NeedsSetup
@@ -160,12 +245,16 @@ class VoiceService:
         log.warning("%s voice is out of quota; using the other provider for %.0f min.", provider, wait / 60)
 
     def synthesizer(self, settings: Settings, voice: str | None = None) -> SpeechSynthesizer:
-        from .infrastructure.tts import GeminiTTS, OpenRouterTTS
+        from .infrastructure.tts import GeminiTTS, OpenRouterTTS, StreamSupport
+
+        if self._streaming is None:
+            self._streaming = StreamSupport()
 
         def build(p: str) -> SpeechSynthesizer:
-            cls = GeminiTTS if p == GEMINI else OpenRouterTTS
-            return cls(self._key_for(p), TTS_MODELS[p], voice or settings.voice_name, settings.tts_style,
-                       lite_fallback=len(providers) == 1)
+            args = (self._key_for(p), TTS_MODELS[p], voice or settings.voice_name, settings.tts_style)
+            if p == GEMINI:
+                return GeminiTTS(*args, lite_fallback=len(providers) == 1, streaming=self._streaming)
+            return OpenRouterTTS(*args, lite_fallback=len(providers) == 1)
 
         providers = self._voice_providers(settings)
         primary = build(providers[0])
@@ -185,8 +274,13 @@ class VoiceService:
             return primary
         return _FallbackTranscriber(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
 
-    def player(self, settings: Settings, presence: Presence | None = None) -> SpeechPlayer:
-        return SpeechPlayer(self.synthesizer(settings), settings.output_device, presence)
+    def player(self, settings: Settings, presence: Presence | None = None, listen: bool = False) -> SpeechPlayer:
+        """``listen``: a conversation reply — the user may talk over it (barge-in)."""
+        listener = None
+        if listen and settings.barge_in:
+            from .infrastructure.barge_in import BargeInListener
+            listener = BargeInListener(settings)
+        return SpeechPlayer(self.synthesizer(settings), settings.output_device, presence, listener)
 
     def preview(self, settings: Settings, voice: str, text: str) -> None:
         """Say a sample line in one voice — the dashboard's ▶ button."""
@@ -196,9 +290,9 @@ class VoiceService:
 
     # Thin re-exports so the assistant never imports voice infrastructure.
     @staticmethod
-    def record(settings: Settings, should_stop=lambda: False, on_audio=None) -> bytes:
+    def record(settings: Settings, should_stop=lambda: False, on_audio=None, carry=None) -> bytes:
         from .infrastructure.audio import record_utterance
-        return record_utterance(settings, should_stop, on_audio)
+        return record_utterance(settings, should_stop, on_audio, carry)
 
     @staticmethod
     def level(pcm: bytes) -> float:

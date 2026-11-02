@@ -100,6 +100,16 @@ def request_bytes(url: str, headers: dict[str, str] | None = None, payload: Any 
         return response.read(), response.headers.get("Content-Type", "")
 
 
+def stream_bytes(url: str, headers: dict[str, str] | None = None, payload: Any = None,
+                 timeout: float = 60, size: int = 4800) -> Iterator[tuple[bytes, str]]:
+    """``(chunk, content_type)`` as the body arrives — speech that plays while
+    it downloads. A server that sends it all at once just yields it late."""
+    with _open(_build(url, headers, payload, None), timeout) as response:
+        kind = response.headers.get("Content-Type", "")
+        while chunk := response.read1(size):
+            yield chunk, kind
+
+
 def stream_sse(url: str, headers: dict[str, str] | None = None, payload: Any = None,
                timeout: float = 120) -> Iterator[tuple[str, str]]:
     """Yield ``(event, data)`` for each server-sent event.

@@ -71,16 +71,44 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
     face_pos = [x, y]
     wide = [False]
 
+    pressed = [None]     # where the left button went down, until it moves (a drag) or lifts (a tap)
+    tap = [0]            # GLib source of the pending tap
+
+    def cancel_tap():
+        if tap[0]:
+            GLib.source_remove(tap[0])
+            tap[0] = 0
+
+    def fire_tap():
+        tap[0] = 0
+        actions["tap"]()   # tap: talk to her, or stop her and listen
+        return False
+
     def on_press(widget, event):
         if event.button == 3 and actions.get("subtitles"):
             actions["subtitles"]()   # right-click: show / hide the subtitles
             return
         if event.button != 1:
             return
-        if event.type == Gdk.EventType._2BUTTON_PRESS and actions.get("open"):
-            actions["open"]()   # double-click: open the dashboard
-        else:
-            win.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+        if event.type == Gdk.EventType._2BUTTON_PRESS:
+            cancel_tap()
+            pressed[0] = None
+            if actions.get("open"):
+                actions["open"]()   # double-click: open the dashboard
+        elif event.type == Gdk.EventType.BUTTON_PRESS:
+            pressed[0] = (event.x_root, event.y_root)
+
+    def on_motion(widget, event):
+        if pressed[0] and abs(event.x_root - pressed[0][0]) + abs(event.y_root - pressed[0][1]) > 4:
+            pressed[0] = None
+            win.begin_move_drag(1, int(event.x_root), int(event.y_root), event.time)
+
+    def on_release(widget, event):
+        if event.button == 1 and pressed[0] and actions.get("tap"):
+            cancel_tap()
+            # A second click within this is a double-click, not two taps.
+            tap[0] = GLib.timeout_add(Gtk.Settings.get_default().props.gtk_double_click_time, fire_tap)
+        pressed[0] = None
 
     offset = [0]
 
@@ -91,7 +119,10 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
 
     box = Gtk.EventBox()
     box.set_visible_window(False)
+    box.add_events(Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.BUTTON1_MOTION_MASK)
     box.connect("button-press-event", on_press)
+    box.connect("motion-notify-event", on_motion)
+    box.connect("button-release-event", on_release)
     win.connect("configure-event", on_configure)
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
     column.set_spacing(-30)   # tuck the subtitles up under the chin

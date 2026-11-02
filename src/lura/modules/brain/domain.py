@@ -44,6 +44,25 @@ class Message:
     native: tuple[str, Any] | None = None   # (provider, provider-shaped turn)
 
 
+def retext(message: Message, text: str) -> None:
+    """Change what an assistant turn says — in the neutral text *and* in the
+    provider's own copy, which is what gets replayed to that provider. Only
+    the text changes: thinking blocks, signatures, reasoning details and tool
+    calls must go back untouched, or the next request is refused."""
+    message.text = text
+    if message.native is None:
+        return
+    provider, turn = message.native
+    if isinstance(turn, list):        # Claude: content blocks
+        at = next((i for i, b in enumerate(turn) if b.get("type") in ("text", "tool_use")), len(turn))
+        kept = [b for b in turn if b.get("type") != "text"]
+        if text:
+            kept.insert(min(at, len(kept)), {"type": "text", "text": text})
+        message.native = (provider, kept)
+    elif isinstance(turn, dict):      # OpenAI-compatible: one message
+        message.native = (provider, {**turn, "content": text or None})
+
+
 @dataclass(frozen=True)
 class TextDelta:
     text: str

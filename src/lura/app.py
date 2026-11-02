@@ -90,9 +90,13 @@ def cmd_run(args) -> int:
     def toggle_subtitles():
         c.settings.update({"subtitles": not c.settings.current.subtitles})
 
+    def tap():
+        # A tap on the face: start talking, or — mid-conversation — stop her reply and listen.
+        c.bus.publish(events.INTERRUPT_REQUESTED if c.assistant.status == "talking" else events.TALK_REQUESTED)
+
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
                       actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
-                               "subtitles": toggle_subtitles, "quit": quit_from_tray},
+                               "tap": tap, "subtitles": toggle_subtitles, "quit": quit_from_tray},
                       labels=_overlay_labels(s.ui_language, s.assistant_name))
     c.assistant.presence = overlay.state
     overlay.state.subtitles_enabled = s.subtitles
