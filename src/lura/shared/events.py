@@ -22,6 +22,8 @@ KEYS_CHANGED = "keys.changed"
 CONNECTORS_CHANGED = "connectors.changed"
 TALK_REQUESTED = "assistant.talk"
 STOP_REQUESTED = "assistant.stop"
+#: Stop the reply being spoken and listen; the conversation goes on.
+INTERRUPT_REQUESTED = "assistant.interrupt"
 STATUS = "assistant.status"
 RESTART_REQUESTED = "app.restart"
 #: Quit so a newly downloaded version can take over (its installer starts it).

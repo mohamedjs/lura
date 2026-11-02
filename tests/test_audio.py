@@ -3,6 +3,7 @@
 import _setup  # noqa: F401
 import sys
 import threading
+import time
 import types
 
 import numpy as np
@@ -59,10 +60,77 @@ def install_fake():
     sys.modules["sounddevice"] = sd
 
 
+def tone(level, n=1600, rate=16000):
+    """A block whose speech-band level is ``level``."""
+    return (np.sin(np.arange(n) * 2 * np.pi * 1000 / rate) * level * 32768 * 1.414).astype(np.int16).tobytes()
+
+
+class FakeMic:
+    """Hands scripted 100 ms blocks to ``on_block``, ten times faster than real time."""
+    script: list = []
+
+    def __init__(self, device=None, block_seconds=0.1, on_block=None):
+        self._on_block, self.latency, self.closed = on_block, 0.0, threading.Event()
+
+    def __enter__(self):
+        def run():
+            for level in FakeMic.script:
+                if self.closed.is_set():
+                    return
+                self._on_block(tone(level))
+                time.sleep(0.01)
+        threading.Thread(target=run, daemon=True).start()
+        FakeMic.last = self
+        return self
+
+    def __exit__(self, *exc):
+        self.closed.set()
+
+
+def check_barge_in(Settings):
+    from lura.modules.voice.infrastructure import audio, barge_in
+
+    class Player:
+        interrupted = 0
+
+        def interrupt(self):
+            Player.interrupted += 1
+
+    def reply(script):
+        """She starts speaking after 10 blocks of the room; return the listener when it settles."""
+        FakeMic.script = script
+        listener = barge_in.BargeInListener(Settings(silence_factor=2.0))
+        time.sleep(0.12)                       # the brain thinks: the room is measured
+        listener.start(Player())
+        speaking = tone(0.2, 1200, 24000)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and listener.carry is None and not FakeMic.last.closed.is_set():
+            listener.played(speaking, time.monotonic())
+            time.sleep(0.005)
+        return listener
+
+    barge_in.MicStream = FakeMic
+    # Headphones: the mic hears the room (0.015) until the user talks (0.04) over her,
+    # after the 1.2 s probe of her first words.
+    listener = reply([0.015] * 32 + [0.04] * 40 + [0.015] * 40)
+    assert Player.interrupted == 1 and listener.carry is not None, "the user took the floor"
+    heard = listener.carry.heard
+    assert len(heard) <= 30 and audio.speech_level(heard[-1]) > 0.03 > audio.speech_level(heard[0])
+    s = Settings(silence_ms=500, silence_factor=2.0)
+    pcm = audio.record_utterance(s, carry=listener.carry)    # carries on from their first words
+    assert FakeMic.last.closed.is_set(), "the recorder closes the carried mic"
+    assert len(pcm) / 2 / 16000 > 3.0, len(pcm) / 32000   # 4 s of words, not cut at the hand-over
+    # Speakers: she is loud in the mic, so it stands down and lets the mic go.
+    Player.interrupted = 0
+    listener = reply([0.015] * 12 + [0.15] * 60)
+    assert FakeMic.last.closed.wait(2) and listener.carry is None and Player.interrupted == 0
+
+
 def main() -> int:
     install_fake()
     from lura.modules.settings import Settings
     from lura.modules.voice.infrastructure import audio
+    check_barge_in(Settings)
 
     audio.REVERB_SECONDS = 0
     s = Settings(input_device="USB Mic: Audio (hw:1,0)", silence_ms=1000)

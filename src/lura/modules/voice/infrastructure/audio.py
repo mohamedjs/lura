@@ -151,6 +151,11 @@ class MicStream:
         except queue.Empty:
             return None
 
+    @property
+    def latency(self) -> float:
+        """Seconds from sound reaching the mic to its block being handed over."""
+        return float(getattr(self._stream, "latency", 0.0) or 0.0)
+
     def __enter__(self) -> "MicStream":
         self._stream.start()
         return self
@@ -180,8 +185,15 @@ class OutputStream:
             pcm = np.repeat(np.frombuffer(pcm, np.int16), self.channels).tobytes()
         self._stream.write(pcm)
 
-    def close(self) -> None:
-        self._stream.stop()
+    @property
+    def latency(self) -> float:
+        """Seconds from a write to the sound leaving the speaker."""
+        return float(getattr(self._stream, "latency", 0.0) or 0.0)
+
+    def close(self, abort: bool = False) -> None:
+        # stop() plays out what the device has buffered; abort() drops it —
+        # an interrupted sentence must not keep talking for another 100 ms.
+        (self._stream.abort if abort else self._stream.stop)()
         self._stream.close()
 
 
@@ -264,9 +276,12 @@ class Speaker:
     the tail of each sentence as the buffer is torn down mid-drain.
     """
 
-    def __init__(self, device=None, rate: int = OUTPUT_RATE, on_level=None):
+    def __init__(self, device=None, rate: int = OUTPUT_RATE, on_level=None, on_slice=None):
         self._rate = rate
         self._on_level = on_level
+        #: ``on_slice(pcm, plays_at)``: each slice and when it will be heard
+        #: (monotonic seconds), so a listener can tell her echo from the user.
+        self._on_slice = on_slice
         self._stream = OutputStream(device, rate)
 
     def write(self, pcm: bytes, cancelled=lambda: False) -> None:
@@ -277,17 +292,19 @@ class Speaker:
             part = pcm[offset:offset + block]
             if self._on_level:
                 self._on_level(min(1.0, rms_of(part) * 4.0))
+            if self._on_slice:
+                self._on_slice(part, time.monotonic() + self._stream.latency)
             self._stream.write(part)
 
-    def close(self) -> None:
+    def close(self, abort: bool = False) -> None:
         try:
-            self._stream.close()
+            self._stream.close(abort)
         finally:
             if self._on_level:
                 self._on_level(0.0)  # or the mouth freezes half-open
 
 
-def record_utterance(settings, should_stop=lambda: False, on_audio=None) -> bytes:
+def record_utterance(settings, should_stop=lambda: False, on_audio=None, carry=None) -> bytes:
     """Record until the speaker stops; return 16 kHz mono PCM, or b"" for nothing.
 
     ``follow_up_seconds`` is how long to wait for the user to start; then
@@ -296,13 +313,23 @@ def record_utterance(settings, should_stop=lambda: False, on_audio=None) -> byte
     than tenfold. Leading silence is trimmed to a short pre-roll, so seconds
     of nothing are not sent to the brain as audio. ``on_audio(blocks, start)``
     is called after every block once speech has begun, for live captions.
+
+    ``carry`` (a barge-in): the user is already talking; the microphone is
+    still open on their first words, and the recording continues from them.
     """
     turn = EndOfTurn(BLOCK_SECONDS, settings.silence_ms, settings.silence_factor,
                      settings.follow_up_seconds, settings.max_utterance_seconds)
     captured: list[bytes] = []
     verdict = "wait"
-    time.sleep(REVERB_SECONDS)
-    with MicStream(settings.input_device) as mic:
+    if carry is None:
+        time.sleep(REVERB_SECONDS)
+        mic = MicStream(settings.input_device).__enter__()
+    else:
+        mic = carry
+        for block in carry.heard:      # the room first, so the floor is the room's
+            captured.append(block)
+            verdict = turn.feed(speech_level(block))
+    try:
         while verdict == "wait" and not should_stop():
             block = mic.read(timeout=1.0)
             if block is None:
@@ -312,6 +339,11 @@ def record_utterance(settings, should_stop=lambda: False, on_audio=None) -> byte
             verdict = turn.feed(speech_level(block))
             if on_audio is not None and turn.start is not None and verdict == "wait":
                 on_audio(captured, turn.start)
+    finally:
+        if carry is not None:
+            carry.close()
+        else:
+            mic.__exit__(None, None, None)
     # One block of slack: 100 ms blocks quantise a short "no" down to 0.3 s.
     if turn.start is None or turn.spoken_seconds < settings.min_utterance_seconds - BLOCK_SECONDS:
         if turn.start is not None:
@@ -382,4 +414,15 @@ def _rate_from(content_type: str) -> int | None:
                 return int(part[5:])
             except ValueError:
                 return None
+    return None
+
+
+def raw_pcm_rate(content_type: str, head: bytes) -> int | None:
+    """The sample rate if a body starting with ``head`` is raw 16-bit PCM
+    (playable as it arrives), else None (WAV or compressed: decode it whole)."""
+    kind = content_type.lower()
+    if head[:4] == b"RIFF" or _looks_compressed(head):
+        return None
+    if "pcm" in kind or "l16" in kind or not kind or kind == "application/octet-stream":
+        return _rate_from(kind) or OUTPUT_RATE
     return None

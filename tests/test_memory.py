@@ -120,10 +120,12 @@ def check_pipeline_remembers():
             return FakeModel()
 
     class FakePlayer:
+
+        interrupted, heard, carry = False, [], None
         feed = finish = say = wait = cancel = lambda self, *a: None
 
     class FakeVoice:
-        def player(self, settings, presence=None):
+        def player(self, settings, presence=None, listen=False):
             return FakePlayer()
 
         def transcriber(self, settings):

@@ -132,7 +132,12 @@ class Settings:
     #: start talking before she goes back to waiting for the wake word.
     follow_up_seconds: float = 8.0
     max_session_seconds: float = 3600.0
+    #: Realtime only: the mic is shut while she speaks there (no echo check).
     gate_mic_while_speaking: bool = True
+    #: Pipeline: talk over her and she stops to listen. Works when the mic does
+    #: not hear her (headphones); on speakers it stands down by itself — tapping
+    #: the face interrupts her either way.
+    barge_in: bool = True
     input_device: str | None = None
     output_device: str | None = None
 

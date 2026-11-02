@@ -21,60 +21,15 @@ from ...shared.events import EventBus
 from ...shared.http import HttpError
 from ...shared.i18n import t
 from ...shared.presence import NullPresence, Presence
-from ..brain import BrainService, Done, Message, TextDelta
+from ..brain import BrainService, Done, Message, TextDelta, retext
 from ..memory import MemoryService
 from ..settings import Settings, SettingsService, brain_hears_audio
 from ..tools import FIND_TOOLS, ToolService, ToolSession
 from ..voice import VoiceService
 from . import domain
+from .live_caption import LiveCaption
 
 log = logging.getLogger(__name__)
-
-
-class LiveCaption:
-    """What the user is saying, written under the face while they still speak.
-
-    Display only: every ~1.5 s of new speech the audio so far is transcribed in
-    the background and shown with a trailing "…". The final transcript never
-    comes from here. Each refresh is one hearing call, so they are spaced out
-    and capped per turn.
-    """
-
-    GAP = 1.5
-    MAX_CALLS = 8
-    MIN_BLOCKS = 10        # a second of speech before the first try
-
-    def __init__(self, transcriber, to_wav, presence: Presence):
-        self._transcriber = transcriber   # callable returning a Transcriber, made on first use
-        self._to_wav = to_wav
-        self._presence = presence
-        self._busy = threading.Event()
-        self._last = 0.0
-        self._calls = 0
-        self._closed = False
-
-    def __call__(self, blocks: list[bytes], start: int) -> None:
-        now = time.monotonic()
-        if (self._closed or self._busy.is_set() or self._calls >= self.MAX_CALLS
-                or now - self._last < self.GAP or len(blocks) - start < self.MIN_BLOCKS):
-            return
-        self._busy.set()
-        self._last, self._calls = now, self._calls + 1
-        pcm = b"".join(blocks[start:])
-        threading.Thread(target=self._run, args=(pcm,), daemon=True, name="live-caption").start()
-
-    def _run(self, pcm: bytes) -> None:
-        try:
-            text = self._transcriber().transcribe(self._to_wav(pcm))
-            if text and not self._closed:
-                self._presence.set_caption("you", f"{text} …")
-        except Exception as exc:
-            log.debug("Live caption failed: %s", exc)
-        finally:
-            self._busy.clear()
-
-    def close(self) -> None:
-        self._closed = True
 
 
 class PipelineConversation:
@@ -96,6 +51,9 @@ class PipelineConversation:
         self._history: list[Message] = []
         self._ending = False
         self._quiet = False          # the brain judged the last turn not meant for it
+        self._player = None          # the reply being spoken, for interrupt()
+        self._cut = False            # the user took the floor during this turn
+        self._carry = None           # their first words, heard while she spoke
         self._discarded: set = set()
         self._hears = brain_hears_audio(self._model.provider, self._model.model)
         self._transcriber = None if self._hears else voice.transcriber(settings)
@@ -125,16 +83,45 @@ class PipelineConversation:
             log.warning("Memory %s failed: %s", method, exc)
             return None
 
+    def interrupt(self) -> None:
+        """Stop the reply now and listen (a tap on the face)."""
+        if self._player is not None:
+            self._player.interrupt()
+
+    def _cut_short(self, player, message: Message | None, row: int | None = None) -> Message | None:
+        """The user took the floor: history, memory and subtitle keep only what
+        they actually heard her say, and no further tool round starts."""
+        player.wait()       # at once after a cut; also lets the barge-in mic go before the recorder opens it
+        self._cut, self._carry = True, player.carry
+        heard = " ".join(player.heard).strip()
+        text = f"{heard} …" if heard else ""
+        self._presence.set_caption("lura", text)
+        if message is None:                       # cut off while the brain was still writing
+            message = Message("assistant", text) if text else None
+            if message is not None:
+                self._history.append(message)
+                self._keep("add", self._conv, "assistant", text, self._model.model)
+            return message
+        retext(message, text)                     # the provider's replayed copy too, or the brain never learns
+        if text or message.tool_calls:
+            self._keep("update", row, text)
+        else:                                     # nothing was heard: as if never said
+            self._history.remove(message)
+            self._keep("discard", row)
+        return message
+
     # ── one model round ──
     def _stream(self, with_tools: bool) -> Message | None:
         self._presence.set_state("thinking")
-        player = self._voice.player(self.s, self._presence)
+        player = self._player = self._voice.player(self.s, self._presence, listen=True)
         done: Done | None = None
         said = ""
         fed = 0
         try:
             for event in self._model.stream(self._system, domain.fit_history(self._history, self._budget),
                                             self._tools.specs(self._session) if with_tools else []):
+                if player.interrupted:
+                    return self._cut_short(player, None)
                 if self._stopped.is_set():
                     player.cancel()
                     return None
@@ -171,8 +158,7 @@ class PipelineConversation:
             self._presence.set_caption("lura", final)
         player.finish()
         self._history.append(message)
-        if message.text:
-            self._keep("add", self._conv, "assistant", message.text, self._model.model)
+        row = self._keep("add", self._conv, "assistant", message.text, self._model.model) if message.text else None
         if done.stop_reason == "refusal" and not message.text:
             player.wait()
             self._say(t("assistant.refused", self.s.language))
@@ -181,6 +167,8 @@ class PipelineConversation:
             # Pre-tool words keep playing while the tools run.
             self._run_tools(message)
         player.wait()
+        if player.interrupted:
+            return self._cut_short(player, message, row)
         if message.text:
             log.info("lura: %s", message.text)
         return message
@@ -244,7 +232,7 @@ class PipelineConversation:
         rounds = 0
         while not self._stopped.is_set():
             message = self._stream(with_tools=True)
-            if message is None or not message.tool_calls:
+            if message is None or not message.tool_calls or self._cut:
                 return
             if self._ending:
                 # A user turn, not tool output: instructions inside a tool
@@ -268,6 +256,8 @@ class PipelineConversation:
         try:
             self._converse(initial_prompt, then_listen)
         finally:
+            if self._carry is not None:   # stopped with the user's words still in the mic
+                self._carry.close()
             self._keep("end", self._conv)
 
     def _converse(self, initial_prompt: str | None, then_listen: bool = False) -> None:
@@ -277,7 +267,7 @@ class PipelineConversation:
             self._presence.set_caption("lura", "")
             self._history.append(Message("user", initial_prompt))
             self._answer()
-            if not then_listen:
+            if not then_listen and not self._cut:   # interrupted: they want to say something
                 return
             # Then it is a conversation: she ended on a question, so listen
             # for the answer (follow_up_seconds of silence ends it as usual).
@@ -292,8 +282,9 @@ class PipelineConversation:
             self._presence.set_state("listening")
             live = LiveCaption(self._captioner, self._voice.to_wav, self._presence) \
                 if self.s.subtitles and self.s.live_captions else None
+            carry, self._carry, self._cut = self._carry, None, False
             try:
-                pcm = self._voice.record(self.s, self._stopped.is_set, live)
+                pcm = self._voice.record(self.s, self._stopped.is_set, live, carry)
             finally:
                 if live is not None:
                     live.close()
@@ -354,10 +345,13 @@ class Assistant:
         #: Set when the microphone or wake word changes, so the listener is
         #: rebuilt now instead of after the next conversation.
         self._reload = threading.Event()
+        self._conversation: PipelineConversation | None = None
         self.status = "starting"
         bus.subscribe(events.SETTINGS_CHANGED, self._on_settings)
         bus.subscribe(events.TALK_REQUESTED, lambda _: self._talk.set())
         bus.subscribe(events.STOP_REQUESTED, lambda _: self.interrupt())
+        bus.subscribe(events.INTERRUPT_REQUESTED,
+                      lambda _: (conv := self._conversation) is not None and conv.interrupt())
 
     def _set_status(self, status: str) -> None:
         self.status = status
@@ -387,10 +381,12 @@ class Assistant:
                 if settings.mode == "realtime":
                     self._realtime(settings, initial_prompt)
                 else:
-                    PipelineConversation(settings, self._brain, self._voice, self._tools,
-                                         self.presence, self._stopped, self._memory,
-                                         self._extra_prompt(), preload).run(initial_prompt, then_listen)
+                    self._conversation = PipelineConversation(settings, self._brain, self._voice, self._tools,
+                                                              self.presence, self._stopped, self._memory,
+                                                              self._extra_prompt(), preload)
+                    self._conversation.run(initial_prompt, then_listen)
             finally:
+                self._conversation = None
                 self.presence.set_state("idle")
                 self.presence.set_amplitude(0.0)
                 self._set_status("ready")
