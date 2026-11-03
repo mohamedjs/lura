@@ -283,28 +283,63 @@ function renderBrain() {
   $("#hearing-hint").textContent = t(hears ? "brain.hears" : "brain.transcribes");
 }
 
+let speechModels = null;   // OpenRouter's speech models with their voices, loaded once
+
+function voiceChip(name, on, pick) {
+  const chip = Object.assign(document.createElement("div"), { className: "voice" + (on ? " on" : "") });
+  chip.setAttribute("role", "button");
+  chip.tabIndex = 0;
+  chip.append(Object.assign(document.createElement("span"), { textContent: name }));
+  const play = Object.assign(document.createElement("button"), { className: "play", textContent: "▶", title: t("voice.preview") });
+  play.onclick = async (e) => {
+    e.stopPropagation();
+    try { await api("POST", "/api/voice/preview", { voice: name }); toast(t("voice.previewing", { name })); } catch (err) { fail(err); }
+  };
+  chip.append(play);
+  chip.onclick = pick;
+  chip.onkeydown = (e) => { if (e.key === "Enter") chip.click(); };
+  return chip;
+}
+
 function renderVoice() {
   const s = S.settings;
   const vp = $("#voice-provider");
   vp.value = s.voice_provider;
   vp.onchange = () => save({ voice_provider: vp.value });
   seg($("#gender"), s.voice_gender, (v) => save({ voice_gender: v }));
+
+  // Through OpenRouter: any of its speech models, each with its own voices.
+  const viaOR = s.voice_provider === "openrouter";
+  $("#or-voice-model-field").hidden = !viaOR;
+  const model = s.openrouter_voice_model || "google/gemini-3.8-flash-tts";
+  const gemini = !viaOR || /gemini.*tts/.test(model);
+  if (viaOR && speechModels === null) {
+    speechModels = [];
+    api("GET", "/api/voice/models").then((r) => { speechModels = r.models; renderVoice(); })
+      .catch((e) => { speechModels = null; fail(e); });
+  }
+  const sel = $("#or-voice-model");
+  const list = (speechModels || []).length ? speechModels : [{ id: model, name: model, voices: [] }];
+  if (document.activeElement !== sel) {
+    sel.replaceChildren(...list.map((m) => Object.assign(document.createElement("option"), {
+      value: m.id, textContent: m.name + (m.free ? ` · ${t("voice.free")}` : ""), selected: m.id === model })));
+    if (!list.some((m) => m.id === model)) sel.prepend(Object.assign(document.createElement("option"), { value: model, textContent: model, selected: true }));
+  }
+  sel.onchange = () => {
+    const m = list.find((x) => x.id === sel.value);
+    save({ openrouter_voice_model: sel.value, openrouter_voice: (m && m.voices[0]) || "" });
+  };
+
   const box = $("#voices");
-  box.replaceChildren(...S.voices[s.voice_gender].map((name) => {
-    const chip = Object.assign(document.createElement("div"), { className: "voice" + (name === s.voice_name ? " on" : "") });
-    chip.setAttribute("role", "button");
-    chip.tabIndex = 0;
-    chip.append(Object.assign(document.createElement("span"), { textContent: name }));
-    const play = Object.assign(document.createElement("button"), { className: "play", textContent: "▶", title: t("voice.preview") });
-    play.onclick = async (e) => {
-      e.stopPropagation();
-      try { await api("POST", "/api/voice/preview", { voice: name }); toast(t("voice.previewing", { name })); } catch (err) { fail(err); }
-    };
-    chip.append(play);
-    chip.onclick = () => save({ voice_name: name });
-    chip.onkeydown = (e) => { if (e.key === "Enter") chip.click(); };
-    return chip;
-  }));
+  if (gemini) {
+    box.replaceChildren(...S.voices[s.voice_gender].map((name) =>
+      voiceChip(name, name === s.voice_name, () => save({ voice_name: name }))));
+  } else {
+    const m = list.find((x) => x.id === model);
+    box.replaceChildren(...((m && m.voices) || []).map((name) =>
+      voiceChip(name, name === s.openrouter_voice, () => save({ openrouter_voice: name }))));
+  }
+  $("#tts-style").closest("label").hidden = !gemini;   // the style direction is Gemini's
   bindText("#tts-style", "tts_style");
 }
 

@@ -29,7 +29,8 @@ LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device"
         "persona", "user_name", "user_gender", "reasoning_effort", "voice_name", "voice_gender", "tts_style",
         "language", "brain_provider", "models", "voice_provider", "mode", "wake_word",
         "daily_briefing", "check_updates",
-        "overlay_style", "overlay_theme", "overlay_colors", "overlay_scale"}
+        "overlay_style", "overlay_theme", "overlay_colors", "overlay_scale",
+        "openrouter_voice_model", "openrouter_voice"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
@@ -79,6 +80,7 @@ class DashboardApi:
         r("DELETE", r"/api/keys/(\w+)", lambda b, m: self.remove_key(m[1]))
         r("GET", r"/api/models/(\w+)", lambda b, m: {"models": self.brain.list_models(m[1])})
         r("POST", "/api/voice/preview", lambda b, m: self.preview(b))
+        r("GET", "/api/voice/models", lambda b, m: self.voice_models())
         r("GET", "/api/audio/devices", lambda b, m: self.voice.devices())
         r("POST", "/api/audio/test-mic", lambda b, m: self.voice.mic_test(b.get("device")))
         r("POST", "/api/audio/test-speaker", lambda b, m: self.test_speaker(b))
@@ -194,10 +196,19 @@ class DashboardApi:
                 "capabilities": self.settings.capabilities().to_dict(),
                 "restart_pending": self.restart_pending}
 
+    def voice_models(self) -> dict:
+        try:
+            return {"models": self.voice.speech_models()}
+        except Exception as exc:
+            raise ApiError(502, f"Could not reach OpenRouter for its speech models: {exc}")
+
     def preview(self, body: dict) -> dict:
+        import re
+
         s = self.settings.current
         voice = str(body.get("voice") or s.voice_name)
-        if voice not in VOICES["female"] + VOICES["male"]:
+        # A Gemini voice, or one of the chosen OpenRouter speech model's own voices.
+        if voice not in VOICES["female"] + VOICES["male"] and not re.fullmatch(r"[\w.\-]{1,64}", voice):
             raise ApiError(400, f"unknown voice {voice}")
         text = PREVIEW.get(s.language, PREVIEW["en"]).format(name=s.assistant_name)
         # Spoken in the background: synthesis takes a second or two and the

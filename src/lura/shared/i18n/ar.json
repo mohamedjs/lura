@@ -46,7 +46,7 @@
   "voice.title": "الصوت",
   "voice.provider": "بيتكلم عن طريق",
   "voice.provider.auto": "تلقائي (Gemini الأول، وOpenRouter لما Gemini يبقى مشغول أو الكوتا تخلص)",
-  "voice.model_hint": "دايماً Gemini 3.8 Flash TTS — مباشرة أو عن طريق OpenRouter.",
+  "voice.model_hint": "Gemini 3.8 Flash TTS افتراضيًا — مباشرة أو عن طريق OpenRouter، وفي OpenRouter تقدر تختار موديل صوت تاني.",
   "voice.gender": "الصوت",
   "voice.female": "ست",
   "voice.male": "راجل",
@@ -259,5 +259,7 @@
   "look.color.glow": "التوهّج",
   "tray.look": "الشكل",
   "tray.style": "الشكل",
-  "tray.theme": "الألوان"
+  "tray.theme": "الألوان",
+  "voice.or_model": "موديل الصوت (OpenRouter)",
+  "voice.free": "مجاني"
 }

@@ -109,6 +109,11 @@ class Settings:
     voice_name: str = "Kore"
     #: Optional delivery direction for Gemini TTS, e.g. "warm and calm".
     tts_style: str = ""
+    #: The speech model when the voice goes through OpenRouter: Gemini 3.8 Flash TTS by
+    #: default, or any of OpenRouter's speech models (e.g. heygen/heygen-voice-1-turbo:free).
+    openrouter_voice_model: str = "google/gemini-3.8-flash-tts"
+    #: That model's voice, from its own list; Gemini models use ``voice_name`` instead.
+    openrouter_voice: str = ""
     realtime_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
 
     # ── who ──

@@ -441,7 +441,8 @@ def check_connectors():
     names = [c["name"] for c in svc.list()]
     assert names[:4] == ["chrome", "playwright", "web", "files"], names
     chrome_args = {c["name"]: c["args"] for c in svc.list()}
-    assert "--autoConnect" in chrome_args["chrome"], "the user's own Chrome, never a fresh profile"
+    from lura.modules.connectors import CHROME_ENDPOINT
+    assert chrome_args["chrome"][-2:] == ["--wsEndpoint", CHROME_ENDPOINT], "the user's own Chrome, never a fresh profile"
     fixture = os.path.join(os.path.dirname(__file__), "fixtures", "echo_mcp.py")
     svc.add_command("echo", f'"{sys.executable}" "{fixture}"')
     row = wait_ready(svc, "echo")

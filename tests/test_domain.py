@@ -280,6 +280,40 @@ def check_brain_catalog():
     assert bc("anthropic", {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"})["name"] == "Claude Sonnet 5.5"
 
 
+def check_chrome_found_on_its_own_profile_and_port():
+    from lura.modules.connectors.infrastructure import chrome
+    real = chrome.user_data_dirs, chrome._running_chrome, chrome._port_open, chrome._ws_url
+    try:
+        chrome.user_data_dirs = lambda: []
+        chrome._running_chrome = lambda: ([], [9333])
+        chrome._port_open = lambda port: port == 9333
+        chrome._ws_url = lambda port: f"ws://127.0.0.1:{port}/devtools/browser/x"
+        assert chrome.endpoint() == "ws://127.0.0.1:9333/devtools/browser/x", "a launcher's own port"
+        chrome._running_chrome = lambda: ([], [])
+        assert chrome.endpoint() is None
+    finally:
+        chrome.user_data_dirs, chrome._running_chrome, chrome._port_open, chrome._ws_url = real
+
+
+def check_openrouter_voice_model():
+    from lura.modules.voice import VoiceService
+    from lura.modules.voice.infrastructure.tts import _lite, is_gemini_tts
+    assert _lite("google/gemini-3.8-flash-tts") == "google/gemini-3.8-flash-lite-tts"
+    assert _lite("heygen/heygen-voice-1-turbo:free") == "", "no Lite model behind other speech models"
+    assert is_gemini_tts("google/gemini-3.8-flash-tts") and not is_gemini_tts("heygen/heygen-voice-1-turbo:free")
+    s = Settings()
+    apply_patch(s, {"voice_provider": "openrouter", "openrouter_voice_model": "heygen/heygen-voice-1-turbo:free",
+                    "openrouter_voice": "nadine", "tts_style": "warm"})
+    vs = VoiceService(lambda p: "k", lambda p: p == "openrouter")
+    synth = vs.synthesizer(s)
+    url, _, payload = synth._request(synth._model, "hello")
+    assert payload["model"] == "heygen/heygen-voice-1-turbo:free" and payload["voice"] == "nadine"
+    assert payload["input"] == "hello", "no Gemini-style direction for another model"
+    assert vs.synthesizer(s, "bram")._voice == "bram", "the dashboard previews the model's own voices"
+    s.openrouter_voice_model = "google/gemini-3.8-flash-tts"
+    assert vs.synthesizer(s)._voice == s.voice_name, "Gemini models keep the Gemini voice"
+
+
 def check_overlay_look():
     from lura.modules.overlay import STYLES, THEMES, settings_look
     from lura.modules.settings.domain import _CHOICES

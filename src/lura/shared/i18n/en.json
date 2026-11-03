@@ -46,7 +46,7 @@
   "voice.title": "Voice",
   "voice.provider": "Speaks through",
   "voice.provider.auto": "Automatic (Gemini first; OpenRouter when Gemini is busy or out of quota)",
-  "voice.model_hint": "Always Gemini 3.8 Flash TTS — directly, or through OpenRouter.",
+  "voice.model_hint": "Gemini 3.8 Flash TTS by default — directly, or through OpenRouter, where you can also pick another speech model.",
   "voice.gender": "Voice",
   "voice.female": "Female",
   "voice.male": "Male",
@@ -259,5 +259,7 @@
   "look.color.glow": "Glow",
   "tray.look": "Look",
   "tray.style": "Style",
-  "tray.theme": "Colours"
+  "tray.theme": "Colours",
+  "voice.or_model": "Speech model (OpenRouter)",
+  "voice.free": "free"
 }

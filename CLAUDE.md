@@ -4,7 +4,8 @@ Lura (لورا) is a voice-first desktop assistant: Linux (.deb), macOS (Homebre
 and Windows (installer .exe). Say "Lura", hear a chime, talk; she answers out loud in
 Arabic or English and can act on the machine (open apps/URLs, find files, run guarded
 commands, briefing, MCP connectors). Any of Gemini / OpenAI / Anthropic / OpenRouter
-can be the brain; the voice is always Gemini 3.8 Flash TTS (direct or via OpenRouter).
+can be the brain; the voice is Gemini 3.8 Flash TTS (direct or via OpenRouter) by default, or
+any OpenRouter speech model (e.g. `heygen/heygen-voice-1-turbo:free`) with its own voices.
 A floating transparent hologram face shows on every monitor; a local dashboard
 (calm, tabbed, AR/EN) configures everything. Free and open source (MIT), nothing
 locked; the maintainer approves every PR (CODEOWNERS). On Mohamed's machine it runs
@@ -78,6 +79,11 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   `Puck` (male), `reasoning_effort` minimal, language `en`.
 - **Rule:** any provider thinks; hearing + speaking need a Gemini or OpenRouter key.
   Gemini brains hear the WAV directly; Claude/GPT get a Gemini 3.8 Flash transcript.
+- **OpenRouter speech models (2.4):** with voice provider `openrouter`, `openrouter_voice_model`
+  picks the model and `openrouter_voice` its voice; the dashboard lists models + voices from
+  OpenRouter's public `/models?output_modalities=speech` (`supported_voices`, cached 1 h,
+  `GET /api/voice/models`). Non-Gemini models get no style direction and no Lite fallback;
+  `voice_gender` is then the user's choice (Arabic forms, the bust's figure).
 - **Streaming:** brain text streams into `SpeechPlayer` → first sentence synthesised
   while the rest is written. TTS falls back to the Lite TTS model on retryable errors only.
 - **2.3 — faster and interruptible (pipeline):**
@@ -104,7 +110,13 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Anthropic:** official SDK, default `claude-opus-5-5`, `output_config.effort`,
   `fallbacks: "default"`; turns replayed verbatim.
 - **Realtime:** Gemini Live `gemini-2.5-flash-native-audio-preview-12-2025`, mic gated.
-- **Connectors:** built-ins `chrome` (chrome-devtools-mcp `--autoConnect`), `playwright`
+- **Chrome (2.4.1):** `connectors/infrastructure/chrome.endpoint()` finds the user's Chrome in the
+  usual profile folders, in any `--user-data-dir`/`--remote-debugging-port` on a running Chrome's
+  command line (Mohamed's `~/.local/bin/google-chrome` starts `~/.config/google-chrome-debug` on
+  9222), then port 9222, via `/json/version`. The built-in `chrome` connector is handed that
+  address (`--wsEndpoint`), not `--autoConnect` (default profile only). The dashboard's Chrome
+  "Set up" button opens `chrome://inspect/#remote-debugging` in the user's Chrome.
+- **Connectors:** built-ins `chrome` (chrome-devtools-mcp `--wsEndpoint`), `playwright`
   (@playwright/mcp `--cdp-endpoint` from Chrome's `DevToolsActivePort`), `web`
   (mcp-fetch-server), `files` (server-filesystem ~) via `npx`; anyone can add more.
   Both browser ones drive the user's **own** running Chrome (profile, sign-ins), never a

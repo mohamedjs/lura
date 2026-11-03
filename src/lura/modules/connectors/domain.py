@@ -92,9 +92,10 @@ def builtin_connectors(home: Path | None = None, output_dir: Path | None = None)
     home = home or Path.home()
     pw_output = ["--output-dir", str(output_dir)] if output_dir else []
     return [
-        # --autoConnect: your running Chrome (profile, sign-ins, tabs), never a
-        # fresh one on an empty profile.
-        Connector("chrome", command="npx", args=["-y", "chrome-devtools-mcp@latest", "--autoConnect"],
+        # Your running Chrome (profile, sign-ins, tabs), never a fresh one on an empty
+        # profile. Given the address Lura found rather than --autoConnect, which only
+        # looks in the default profile folder and missed a Chrome started with its own.
+        Connector("chrome", command="npx", args=["-y", "chrome-devtools-mcp@latest", "--wsEndpoint", CHROME_ENDPOINT],
                   builtin=True, uses_chrome=True,
                   description="Drive your own Chrome (your profile and tabs): open pages and videos, "
                               "click, read, screenshot."),

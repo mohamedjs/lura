@@ -9,7 +9,7 @@ import time
 
 from ...shared.http import HttpError
 from ...shared.presence import NullPresence, Presence
-from ..settings import GEMINI, HEARING_MODELS, OPENROUTER, TTS_MODELS, Settings, resolve_voice_provider
+from ..settings import GEMINI, HEARING_MODELS, OPENROUTER, TTS_MODELS, VOICES, Settings, resolve_voice_provider
 from .domain import SentenceChunker, SpeechSynthesizer, Transcriber, retry_after
 
 log = logging.getLogger(__name__)
@@ -224,6 +224,7 @@ class VoiceService:
         self._has_key = has_key
         self._cooldown_until: dict[str, float] = {}
         self._streaming = None   # tts.StreamSupport, made on first use
+        self._models: tuple[float, list[dict]] | None = None
 
     def _voice_providers(self, settings: Settings) -> list[str]:
         from ...shared.errors import NeedsSetup
@@ -250,17 +251,36 @@ class VoiceService:
         if self._streaming is None:
             self._streaming = StreamSupport()
 
+        from .infrastructure.tts import is_gemini_tts
+
+        gemini_voice = voice if voice in VOICES["female"] + VOICES["male"] else settings.voice_name
+
         def build(p: str) -> SpeechSynthesizer:
-            args = (self._key_for(p), TTS_MODELS[p], voice or settings.voice_name, settings.tts_style)
             if p == GEMINI:
-                return GeminiTTS(*args, lite_fallback=len(providers) == 1, streaming=self._streaming)
-            return OpenRouterTTS(*args, lite_fallback=len(providers) == 1)
+                return GeminiTTS(self._key_for(p), TTS_MODELS[p], gemini_voice, settings.tts_style,
+                                 lite_fallback=len(providers) == 1, streaming=self._streaming)
+            model = settings.openrouter_voice_model or TTS_MODELS[p]
+            if is_gemini_tts(model):
+                return OpenRouterTTS(self._key_for(p), model, gemini_voice, settings.tts_style,
+                                     lite_fallback=len(providers) == 1)
+            # Another speech model: its own voices, and no Gemini-style direction in the text.
+            return OpenRouterTTS(self._key_for(p), model, voice or settings.openrouter_voice, "",
+                                 lite_fallback=False)
 
         providers = self._voice_providers(settings)
         primary = build(providers[0])
         if len(providers) == 1:
             return primary
         return _FallbackSynthesizer(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
+
+    def speech_models(self) -> list[dict]:
+        """OpenRouter's speech models with their voices, fetched at most once an hour."""
+        from .infrastructure.tts import speech_models
+
+        now = time.monotonic()
+        if self._models is None or now - self._models[0] > 3600:
+            self._models = (now, speech_models())
+        return self._models[1]
 
     def transcriber(self, settings: Settings) -> Transcriber:
         from .infrastructure.transcribe import ChatTranscriber

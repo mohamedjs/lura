@@ -31,7 +31,12 @@ TTS_TIMEOUT = 25
 
 
 def _lite(model: str) -> str:
-    return model.replace("flash-tts", "flash-lite-tts") if "lite" not in model else ""
+    """Gemini's cheaper TTS model to fall back on; other speech models have none."""
+    return model.replace("flash-tts", "flash-lite-tts") if "flash-tts" in model and "lite" not in model else ""
+
+
+def is_gemini_tts(model: str) -> bool:
+    return "gemini" in model and "tts" in model
 
 
 def _directed(text: str, style: str) -> str:
@@ -174,8 +179,9 @@ class OpenRouterTTS:
         self._format = "pcm"
 
     def _request(self, model: str, text: str) -> tuple[str, dict, dict]:
-        payload = {"model": model, "input": _directed(text, self._style), "voice": self._voice,
-                   "response_format": self._format}
+        payload = {"model": model, "input": _directed(text, self._style), "response_format": self._format}
+        if self._voice:                     # else the model's own default voice
+            payload["voice"] = self._voice
         headers = {"Authorization": f"Bearer {self._key}",
                    "HTTP-Referer": "https://github.com/mohamedjs/lura", "X-Title": "Lura"}
         return f"{OPENROUTER_BASE}/audio/speech", headers, payload
@@ -253,6 +259,14 @@ class OpenRouterTTS:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             yield self._once(_lite(self._model), text)
+
+
+def speech_models() -> list[dict]:
+    """OpenRouter's text-to-speech models and the voices each one has (public, no key)."""
+    data = request_json(f"{OPENROUTER_BASE}/models?output_modalities=speech", timeout=20).get("data", [])
+    return [{"id": m["id"], "name": m.get("name", m["id"]), "voices": list(m.get("supported_voices") or []),
+             "free": m["id"].endswith(":free") or str((m.get("pricing") or {}).get("prompt")) == "0"}
+            for m in data if "speech" in ((m.get("architecture") or {}).get("output_modalities") or [])]
 
 
 def _pcm_at(raw: bytes, mime: str) -> bytes:
