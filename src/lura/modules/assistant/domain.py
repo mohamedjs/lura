@@ -148,6 +148,14 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
     return "\n\n".join(parts)
 
 
+def day_names(now: float | None = None) -> tuple[str, str]:
+    """Today and yesterday as the briefing says them, e.g. "Thursday 29 October 2026"."""
+    import time
+    now = time.time() if now is None else now
+    return (time.strftime("%A %d %B %Y", time.localtime(now)),
+            time.strftime("%A %d %B %Y", time.localtime(now - 86400)))
+
+
 def now_text() -> str:
     """The date and time, as the prompt states it (local, with the weekday)."""
     import time
@@ -223,22 +231,55 @@ def recent_lines(turns: list[tuple[str, str]], limit: int = 2000) -> str:
     return f"The conversation so far:\n{text[-limit:]}" if text else ""
 
 
-def briefing_prompt(data: dict[str, str], language: str, user_name: str, user_gender: str = "") -> str:
+#: How the briefing names each kind of source when it tells the model what to look for.
+SOURCE_ASK = {
+    "code": "commits, pull requests, reviews and issues by or for the user",
+    "tasks": "tasks or tickets assigned to the user: done yesterday, due or in progress today, overdue",
+    "calendar": "yesterday's and today's events and meetings",
+    "notes": "pages and notes edited yesterday, and any to-do or plan pages",
+    "messages": "unread or important messages and mentions since yesterday",
+    "other": "anything about the user's work yesterday and today, if this service has it",
+}
+
+
+def briefing_prompt(data: dict[str, str], language: str, user_name: str, user_gender: str = "",
+                    sources: list[dict] | None = None, today: str = "", yesterday: str = "") -> str:
+    """The first turn of the day: she gathers yesterday and today from whatever
+    the user connected (GitHub, Jira, Trello, Notion, a calendar…), sums it up,
+    suggests what to do, and opens a conversation about it."""
     readings = "\n".join(f"- {k.replace('_', ' ')}: {v}" for k, v in data.items())
-    if language == "ar":
-        her = user_gender == "female"
-        who = user_name or ("صاحبتي" if her else "صاحبي")
-        on, to, ask, wants = (("عليها", "ادّيلها", "بسؤالها", "تحب تبدأ") if her
-                              else ("عليه", "ادّيله", "بسؤاله", "يحب يبدأ"))
-        return (f"الجهاز لسه فاتح. ابدأ الكلام من نفسك مع {who}: سلّم {on} بالمصري بشكل طبيعي وودود، "
-                f"وبعدين {to} ملخص سريع لحالة الجهاز واليوم من البيانات دي بس (ما تخترعش أرقام):\n"
-                f"{readings}\nلو في آخر كوميت، اشرح معناه في جملة. اختم {ask} {wants} بإيه. "
-                f"كلام صوتي طبيعي من غير قوائم أو رموز.")
-    who = user_name or "there"
-    return (f"The computer just started. Speak first: greet {who} warmly and naturally, then give a "
-            f"quick spoken summary of the day and the machine from these readings only (never invent "
-            f"numbers):\n{readings}\nIf there is a latest commit, say what it means in one sentence. "
-            f"End by asking what they want to start with. Natural speech, no lists or symbols.")
+    who = user_name or "the user"
+    lang = "Egyptian Arabic" if language == "ar" else "English"
+    when = f"Today is {today}; yesterday was {yesterday}." if today else ""
+    lines = [f"This is the first time {who} called you today. Open the day with them, speaking {lang}. {when}"]
+    if sources:
+        listing = "\n".join(f"- {s['name']} ({s['kind']}): look for {SOURCE_ASK.get(s['kind'], SOURCE_ASK['other'])}. "
+                            f"Tools: {', '.join(s['tools'])}" for s in sources)
+        lines.append(
+            "First say one short, warm greeting that tells them you are checking their day (it is "
+            "spoken while you work). Then gather, with these tools, which are already available to "
+            f"call (no find_tools needed):\n{listing}\n"
+            "Ask each service only for yesterday and today, and only what concerns this user: find "
+            "out who they are first where a service needs it (a get_me or similar tool), filter by "
+            "date and assignee or author, and keep each call small. Skip a service that fails or "
+            "has nothing. Use what you remember about them and your recent conversations too.")
+        lines.append(
+            "Then speak a short morning briefing, about thirty seconds, in natural sentences without "
+            "lists or symbols: what they got done yesterday, what is on today (meetings, due and "
+            "open tasks, reviews waiting), and two or three concrete suggestions for what to tackle "
+            "first and why, with an idea or two if something stands out. Name real items (a pull "
+            "request, a ticket, a meeting) but never invent any. End with one specific question "
+            "that starts the conversation, for example which of those to begin with, and keep "
+            "going with them from there.")
+    else:
+        lines.append(
+            "No work services are connected yet (such as GitHub, GitLab, Jira, Trello, Notion or a "
+            "calendar), so give a short, warm start to the day from what you remember about them "
+            "and these readings, and mention in one sentence that if they connect their tools in "
+            "the dashboard you can tell them what they did yesterday and what is due today. End "
+            "with a question about what they want to start with.")
+    lines.append(f"About the computer and the day (never invent numbers):\n{readings}")
+    return "\n\n".join(lines)
 
 
 # In no particular language on purpose: she answers in the one the

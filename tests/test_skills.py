@@ -97,6 +97,48 @@ def check_import_and_tools():
     assert svc.remove("tea") and not svc.remove("tea") and [s["name"] for s in svc.list()] == ["release-notes"]
 
 
+def check_linked_skill():
+    """A skill folder linked in from elsewhere (``skills/x -> ~/.agents/skills/x``, as skill
+    installers do) works — it once crashed every conversation. Reads stay inside it, and
+    removing or replacing it never touches the original."""
+    import shutil
+    from lura.modules.skills import SkillsService
+    from lura.modules.skills.infrastructure import SkillRepository
+
+    home = Path(tempfile.mkdtemp())
+    original = home / "agents" / "release-notes"
+    (original / "reference").mkdir(parents=True)
+    (original / "SKILL.md").write_text(SKILL, encoding="utf-8")
+    (original / "reference" / "style.md").write_text("Short.", encoding="utf-8")
+    (home / "secret.txt").write_text("keys", encoding="utf-8")
+    root = home / "skills"
+    root.mkdir()
+    try:
+        (original / "leak").symlink_to(home / "secret.txt")          # a link inside the skill, pointing out
+        (root / "release-notes").symlink_to(original, target_is_directory=True)
+    except OSError:
+        print("  (symlinks not permitted here — skipped)")
+        return
+    (root / "broken").mkdir()
+    (root / "broken" / "SKILL.md").write_text("no front matter", encoding="utf-8")
+
+    svc = SkillsService(SkillRepository(root))
+    assert [s["name"] for s in svc.list()] == ["release-notes"], "the linked skill is listed, a broken one skipped"
+    assert "release-notes" in svc.prompt_block()
+    assert svc.call("use_skill", {"name": "release-notes"}).startswith("# Release notes")
+    assert svc.call("read_skill_file", {"name": "release-notes", "path": "reference/style.md"}) == "Short."
+    for escape in ("../../secret.txt", "leak", "reference/../../../secret.txt"):
+        assert svc.call("read_skill_file", {"name": "release-notes", "path": escape}).startswith("Error"), escape
+
+    assert svc.add("paste", {"text": SKILL.replace("Run", "Now run")}) == "release-notes"
+    assert not (root / "release-notes").is_symlink(), "a pasted skill replaces the link…"
+    assert (original / "SKILL.md").read_text(encoding="utf-8") == SKILL, "…and leaves the linked original alone"
+    shutil.rmtree(root / "release-notes")
+    (root / "release-notes").symlink_to(original, target_is_directory=True)
+    assert svc.remove("release-notes") and not (root / "release-notes").exists()
+    assert (original / "SKILL.md").exists(), "removing unlinks; the original folder stays"
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):

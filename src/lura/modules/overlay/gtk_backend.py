@@ -79,28 +79,51 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
     cur = [OVERLAY_SIZE]   # the face's size now; the dashboard can change it live
     wide = [False]
 
+    pressed = [None]     # where the left button went down, until it moves (a drag) or lifts (a tap)
+    tap = [0]            # GLib source of the pending tap
+
+    def cancel_tap():
+        if tap[0]:
+            GLib.source_remove(tap[0])
+            tap[0] = 0
+
+    def fire_tap():
+        tap[0] = 0
+        actions["tap"]()   # tap: talk to her, or stop her and listen
+        return False
+
     def on_press(widget, event):
         if event.button == 3 and actions.get("subtitles"):
             actions["subtitles"]()   # right-click: show / hide the subtitles
             return
         if event.button != 1:
             return
-        if event.type == Gdk.EventType._2BUTTON_PRESS and actions.get("open"):
-            drag[0] = None
-            actions["open"]()   # double-click: open the dashboard
+        if event.type == Gdk.EventType._2BUTTON_PRESS:
+            cancel_tap()
+            pressed[0] = drag[0] = None
+            if actions.get("open"):
+                actions["open"]()   # double-click: open the dashboard
         elif event.type == Gdk.EventType.BUTTON_PRESS:
-            # Dragged by hand: window managers refuse begin_move_drag on DOCK windows.
+            pressed[0] = (event.x_root, event.y_root)
             wx, wy = win.get_position()
             drag[0] = (event.x_root - wx, event.y_root - wy)
 
     def on_motion(widget, event):
-        if drag[0] is not None:
+        # Past a few pixels it is a drag, not a tap. Moved by hand: window managers
+        # refuse begin_move_drag on DOCK windows, so the face could not be moved.
+        if pressed[0] and abs(event.x_root - pressed[0][0]) + abs(event.y_root - pressed[0][1]) > 4:
+            pressed[0] = None
+        if drag[0] is not None and pressed[0] is None:
             nx, ny = int(event.x_root - drag[0][0]), int(event.y_root - drag[0][1])
             win.move(nx, ny)
             face_pos[0], face_pos[1] = nx + offset[0], ny
 
     def on_release(widget, event):
-        drag[0] = None
+        if event.button == 1 and pressed[0] and actions.get("tap"):
+            cancel_tap()
+            # A second click within this is a double-click, not two taps.
+            tap[0] = GLib.timeout_add(Gtk.Settings.get_default().props.gtk_double_click_time, fire_tap)
+        pressed[0] = drag[0] = None
 
     offset = [0]
     drag = [None]
@@ -112,7 +135,7 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
 
     box = Gtk.EventBox()
     box.set_visible_window(False)
-    box.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
+    box.add_events(Gdk.EventMask.BUTTON_RELEASE_MASK | Gdk.EventMask.BUTTON1_MOTION_MASK)
     box.connect("button-press-event", on_press)
     box.connect("motion-notify-event", on_motion)
     box.connect("button-release-event", on_release)

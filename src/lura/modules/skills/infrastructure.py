@@ -48,22 +48,39 @@ class SkillRepository:
         (self.root / "skills.json").write_text(json.dumps(flags, indent=2) + "\n", encoding="utf-8")
 
     def all(self) -> list[tuple[Skill, bool, list[str]]]:
-        """(skill, enabled, its other files) for every readable skill folder."""
+        """(skill, enabled, its other files) for every readable skill folder.
+        One broken skill is skipped: it must never cost every conversation."""
         flags = self._flags()
         out = []
         for folder in sorted(self.root.glob("*/SKILL.md")):
             try:
                 skill = parse(folder.read_text(encoding="utf-8"), folder.parent.name)
+                out.append((skill, flags.get(folder.parent.name, True), self.files(folder.parent.name)))
             except (OSError, ValueError, UnicodeDecodeError):
                 continue
-            out.append((skill, flags.get(folder.parent.name, True), self.files(folder.parent.name)))
         return out
 
     def get(self, name: str) -> Skill:
-        return parse(inside(self.root, f"{name}/SKILL.md").read_text(encoding="utf-8"), name)
+        return parse(inside(self.folder(name), "SKILL.md").read_text(encoding="utf-8"), name)
+
+    def _entry(self, name: str) -> Path:
+        """The skill's own entry in the skills folder — one plain name, never a path."""
+        if not name or name in (".", "..") or PurePosixPath(name).name != name or "\\" in name:
+            raise ValueError(f"{name!r} is not a skill name")
+        return self.root / name
 
     def folder(self, name: str) -> Path:
-        return inside(self.root, name)
+        """Where a skill's files are read from. A folder the user linked in
+        (``skills/x -> ~/.agents/skills/x``) is followed; everything read from
+        it is still confined to it (``inside``). For reading only: writing or
+        removing goes through ``_entry``, so a link is never followed into."""
+        return self._entry(name).resolve()
+
+    def _clear(self, entry: Path) -> None:
+        if entry.is_symlink():
+            entry.unlink()          # the link, never the folder it points to
+        elif entry.is_dir():
+            shutil.rmtree(entry)
 
     def files(self, name: str) -> list[str]:
         base = self.folder(name)
@@ -78,10 +95,10 @@ class SkillRepository:
         return target.read_bytes()[:limit].decode("utf-8", errors="replace")
 
     def remove(self, name: str) -> bool:
-        folder = self.folder(name)
-        if not folder.is_dir():
+        entry = self._entry(name)
+        if not (entry.is_symlink() or entry.is_dir()):
             return False
-        shutil.rmtree(folder)
+        self._clear(entry)
         flags = self._flags()
         if flags.pop(name, None) is not None:
             self.root.mkdir(parents=True, exist_ok=True)
@@ -91,7 +108,9 @@ class SkillRepository:
     # ── adding ──
     def add_text(self, text: str) -> str:
         skill = parse(text)
-        folder = self.folder(skill.name)
+        folder = self._entry(skill.name)
+        if folder.is_symlink():
+            folder.unlink()         # a pasted skill replaces the link, not the linked original
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "SKILL.md").write_text(text, encoding="utf-8")
         return skill.name
@@ -127,9 +146,8 @@ class SkillRepository:
                 target = inside(staging, str(rel))   # zip-slip: "../x" or "/etc/x" stops here
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(archive.read(member))
-            final = self.folder(skill.name)
-            if final.exists():
-                shutil.rmtree(final)
+            final = self._entry(skill.name)
+            self._clear(final)
             shutil.move(str(staging), final)
         return skill.name
 

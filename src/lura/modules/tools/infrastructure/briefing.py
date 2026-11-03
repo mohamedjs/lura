@@ -107,7 +107,7 @@ def as_text(data: dict[str, str]) -> str:
     return "\n".join(f"{k.replace('_', ' ').title()}: {v}" for k, v in data.items()) or "No readings."
 
 
-# ── once per boot ───────────────────────────────────────────────────────────
+# ── once per boot / per day ───────────────────────────────────────────────────────────
 
 def _flag() -> Path:
     return paths.data_dir() / "last_briefing"
@@ -130,11 +130,15 @@ def boot_time() -> float:
     return time.time() - 3600
 
 
-def due() -> bool:
+def due(per: str = "boot") -> bool:
+    """Not given since the computer booted (``"boot"``) or since midnight (``"day"``)."""
     try:
-        return float(_flag().read_text().strip()) < boot_time()
+        last = float(_flag().read_text().strip())
     except (OSError, ValueError):
         return True
+    if per == "day":
+        return time.localtime(last)[:3] != time.localtime()[:3]
+    return last < boot_time()
 
 
 def mark_done() -> None:

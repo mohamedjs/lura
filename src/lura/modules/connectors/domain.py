@@ -23,6 +23,9 @@ from pathlib import Path
 from typing import Any
 
 STDIO, HTTP = "stdio", "http"
+#: In a built-in's args: replaced at start by the address of the user's own
+#: running Chrome (see infrastructure/chrome.py).
+CHROME_ENDPOINT = "{chrome-endpoint}"
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
 
@@ -39,6 +42,9 @@ class Connector:
     enabled: bool = True
     builtin: bool = False
     description: str = ""
+    #: Drives the user's own Chrome: start it if closed, and reconnect when
+    #: it was restarted, instead of opening a Chrome of its own.
+    uses_chrome: bool = False
 
     def validate(self) -> None:
         if not _NAME.match(self.name):
@@ -80,12 +86,23 @@ class Connector:
         return entry
 
 
-def builtin_connectors(home: Path | None = None) -> list[Connector]:
-    """Installed with the app, always available, always free."""
+def builtin_connectors(home: Path | None = None, output_dir: Path | None = None) -> list[Connector]:
+    """Installed with the app, always available, always free. ``output_dir``
+    takes Playwright's snapshots and screenshots (otherwise the working folder)."""
     home = home or Path.home()
+    pw_output = ["--output-dir", str(output_dir)] if output_dir else []
     return [
-        Connector("chrome", command="npx", args=["-y", "chrome-devtools-mcp@latest"], builtin=True,
-                  description="Drive Google Chrome: open tabs, pages and videos, click, read, screenshot."),
+        # --autoConnect: your running Chrome (profile, sign-ins, tabs), never a
+        # fresh one on an empty profile.
+        Connector("chrome", command="npx", args=["-y", "chrome-devtools-mcp@latest", "--autoConnect"],
+                  builtin=True, uses_chrome=True,
+                  description="Drive your own Chrome (your profile and tabs): open pages and videos, "
+                              "click, read, screenshot."),
+        Connector("playwright", command="npx",
+                  args=["-y", "@playwright/mcp@latest", "--cdp-endpoint", CHROME_ENDPOINT, *pw_output],
+                  builtin=True, uses_chrome=True,
+                  description="Playwright on that same Chrome window: type into fields, fill forms, "
+                              "click, wait for pages."),
         Connector("web", command="npx", args=["-y", "mcp-fetch-server"], builtin=True,
                   description="Fetch live web pages, news and YouTube transcripts as text."),
         Connector("files", command="npx",

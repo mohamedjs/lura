@@ -21,66 +21,22 @@ from ...shared.events import EventBus
 from ...shared.http import HttpError
 from ...shared.i18n import t
 from ...shared.presence import NullPresence, Presence
-from ..brain import BrainService, Done, Message, TextDelta
+from ..brain import BrainService, Done, Message, TextDelta, retext
 from ..memory import MemoryService
 from ..settings import Settings, SettingsService, brain_hears_audio
 from ..tools import FIND_TOOLS, ToolService, ToolSession
 from ..voice import VoiceService
 from . import domain
+from .live_caption import LiveCaption
 
 log = logging.getLogger(__name__)
-
-
-class LiveCaption:
-    """What the user is saying, written under the face while they still speak.
-
-    Display only: every ~1.5 s of new speech the audio so far is transcribed in
-    the background and shown with a trailing "…". The final transcript never
-    comes from here. Each refresh is one hearing call, so they are spaced out
-    and capped per turn.
-    """
-
-    GAP = 1.5
-    MAX_CALLS = 8
-    MIN_BLOCKS = 10        # a second of speech before the first try
-
-    def __init__(self, transcriber, to_wav, presence: Presence):
-        self._transcriber = transcriber   # callable returning a Transcriber, made on first use
-        self._to_wav = to_wav
-        self._presence = presence
-        self._busy = threading.Event()
-        self._last = 0.0
-        self._calls = 0
-        self._closed = False
-
-    def __call__(self, blocks: list[bytes], start: int) -> None:
-        now = time.monotonic()
-        if (self._closed or self._busy.is_set() or self._calls >= self.MAX_CALLS
-                or now - self._last < self.GAP or len(blocks) - start < self.MIN_BLOCKS):
-            return
-        self._busy.set()
-        self._last, self._calls = now, self._calls + 1
-        pcm = b"".join(blocks[start:])
-        threading.Thread(target=self._run, args=(pcm,), daemon=True, name="live-caption").start()
-
-    def _run(self, pcm: bytes) -> None:
-        try:
-            text = self._transcriber().transcribe(self._to_wav(pcm))
-            if text and not self._closed:
-                self._presence.set_caption("you", f"{text} …")
-        except Exception as exc:
-            log.debug("Live caption failed: %s", exc)
-        finally:
-            self._busy.clear()
-
-    def close(self) -> None:
-        self._closed = True
 
 
 class PipelineConversation:
     def __init__(self, settings: Settings, brain: BrainService, voice: VoiceService,
                  tools: ToolService, presence: Presence, stopped: threading.Event,
-                 memory: MemoryService | None = None, extra_prompt: str = ""):
+                 memory: MemoryService | None = None, extra_prompt: str = "",
+                 preload: list | None = None):
         self.s = settings
         self._model = brain.model(settings)
         self._voice = voice
@@ -88,9 +44,16 @@ class PipelineConversation:
         self._presence = presence
         self._stopped = stopped
         self._session = ToolSession()
+        if preload:
+            # Tools this conversation needs from the start (the daily briefing's
+            # sources), so the model calls them without a find_tools round first.
+            self._session.add(preload)
         self._history: list[Message] = []
         self._ending = False
         self._quiet = False          # the brain judged the last turn not meant for it
+        self._player = None          # the reply being spoken, for interrupt()
+        self._cut = False            # the user took the floor during this turn
+        self._carry = None           # their first words, heard while she spoke
         self._discarded: set = set()
         self._hears = brain_hears_audio(self._model.provider, self._model.model)
         self._transcriber = None if self._hears else voice.transcriber(settings)
@@ -120,16 +83,45 @@ class PipelineConversation:
             log.warning("Memory %s failed: %s", method, exc)
             return None
 
+    def interrupt(self) -> None:
+        """Stop the reply now and listen (a tap on the face)."""
+        if self._player is not None:
+            self._player.interrupt()
+
+    def _cut_short(self, player, message: Message | None, row: int | None = None) -> Message | None:
+        """The user took the floor: history, memory and subtitle keep only what
+        they actually heard her say, and no further tool round starts."""
+        player.wait()       # at once after a cut; also lets the barge-in mic go before the recorder opens it
+        self._cut, self._carry = True, player.carry
+        heard = " ".join(player.heard).strip()
+        text = f"{heard} …" if heard else ""
+        self._presence.set_caption("lura", text)
+        if message is None:                       # cut off while the brain was still writing
+            message = Message("assistant", text) if text else None
+            if message is not None:
+                self._history.append(message)
+                self._keep("add", self._conv, "assistant", text, self._model.model)
+            return message
+        retext(message, text)                     # the provider's replayed copy too, or the brain never learns
+        if text or message.tool_calls:
+            self._keep("update", row, text)
+        else:                                     # nothing was heard: as if never said
+            self._history.remove(message)
+            self._keep("discard", row)
+        return message
+
     # ── one model round ──
     def _stream(self, with_tools: bool) -> Message | None:
         self._presence.set_state("thinking")
-        player = self._voice.player(self.s, self._presence)
+        player = self._player = self._voice.player(self.s, self._presence, listen=True)
         done: Done | None = None
         said = ""
         fed = 0
         try:
             for event in self._model.stream(self._system, domain.fit_history(self._history, self._budget),
                                             self._tools.specs(self._session) if with_tools else []):
+                if player.interrupted:
+                    return self._cut_short(player, None)
                 if self._stopped.is_set():
                     player.cancel()
                     return None
@@ -166,8 +158,7 @@ class PipelineConversation:
             self._presence.set_caption("lura", final)
         player.finish()
         self._history.append(message)
-        if message.text:
-            self._keep("add", self._conv, "assistant", message.text, self._model.model)
+        row = self._keep("add", self._conv, "assistant", message.text, self._model.model) if message.text else None
         if done.stop_reason == "refusal" and not message.text:
             player.wait()
             self._say(t("assistant.refused", self.s.language))
@@ -176,6 +167,8 @@ class PipelineConversation:
             # Pre-tool words keep playing while the tools run.
             self._run_tools(message)
         player.wait()
+        if player.interrupted:
+            return self._cut_short(player, message, row)
         if message.text:
             log.info("lura: %s", message.text)
         return message
@@ -239,7 +232,7 @@ class PipelineConversation:
         rounds = 0
         while not self._stopped.is_set():
             message = self._stream(with_tools=True)
-            if message is None or not message.tool_calls:
+            if message is None or not message.tool_calls or self._cut:
                 return
             if self._ending:
                 # A user turn, not tool output: instructions inside a tool
@@ -257,20 +250,27 @@ class PipelineConversation:
                 self._stream(with_tools=False)
                 return
 
-    def run(self, initial_prompt: str | None = None) -> None:
+    def run(self, initial_prompt: str | None = None, then_listen: bool = False) -> None:
+        """``then_listen``: after answering the prompt, keep the conversation
+        going (the daily briefing ends on a question)."""
         try:
-            self._converse(initial_prompt)
+            self._converse(initial_prompt, then_listen)
         finally:
+            if self._carry is not None:   # stopped with the user's words still in the mic
+                self._carry.close()
             self._keep("end", self._conv)
 
-    def _converse(self, initial_prompt: str | None) -> None:
+    def _converse(self, initial_prompt: str | None, then_listen: bool = False) -> None:
         started = time.monotonic()
         if initial_prompt:
             self._presence.set_caption("you", "")
             self._presence.set_caption("lura", "")
             self._history.append(Message("user", initial_prompt))
             self._answer()
-            return
+            if not then_listen and not self._cut:   # interrupted: they want to say something
+                return
+            # Then it is a conversation: she ended on a question, so listen
+            # for the answer (follow_up_seconds of silence ends it as usual).
         ignored = 0
         while not self._ending and not self._stopped.is_set():
             if time.monotonic() - started > self.s.max_session_seconds:
@@ -282,8 +282,9 @@ class PipelineConversation:
             self._presence.set_state("listening")
             live = LiveCaption(self._captioner, self._voice.to_wav, self._presence) \
                 if self.s.subtitles and self.s.live_captions else None
+            carry, self._carry, self._cut = self._carry, None, False
             try:
-                pcm = self._voice.record(self.s, self._stopped.is_set, live)
+                pcm = self._voice.record(self.s, self._stopped.is_set, live, carry)
             finally:
                 if live is not None:
                     live.close()
@@ -344,10 +345,13 @@ class Assistant:
         #: Set when the microphone or wake word changes, so the listener is
         #: rebuilt now instead of after the next conversation.
         self._reload = threading.Event()
+        self._conversation: PipelineConversation | None = None
         self.status = "starting"
         bus.subscribe(events.SETTINGS_CHANGED, self._on_settings)
         bus.subscribe(events.TALK_REQUESTED, lambda _: self._talk.set())
         bus.subscribe(events.STOP_REQUESTED, lambda _: self.interrupt())
+        bus.subscribe(events.INTERRUPT_REQUESTED,
+                      lambda _: (conv := self._conversation) is not None and conv.interrupt())
 
     def _set_status(self, status: str) -> None:
         self.status = status
@@ -361,7 +365,8 @@ class Assistant:
         """End the current conversation (not the daemon)."""
         self._stopped.set()
 
-    def converse(self, initial_prompt: str | None = None) -> None:
+    def converse(self, initial_prompt: str | None = None, preload: list | None = None,
+                 then_listen: bool = False) -> None:
         settings = self._settings.current
         caps = self._settings.capabilities()
         if not caps.can_talk:
@@ -376,10 +381,12 @@ class Assistant:
                 if settings.mode == "realtime":
                     self._realtime(settings, initial_prompt)
                 else:
-                    PipelineConversation(settings, self._brain, self._voice, self._tools,
-                                         self.presence, self._stopped, self._memory,
-                                         self._extra_prompt()).run(initial_prompt)
+                    self._conversation = PipelineConversation(settings, self._brain, self._voice, self._tools,
+                                                              self.presence, self._stopped, self._memory,
+                                                              self._extra_prompt(), preload)
+                    self._conversation.run(initial_prompt, then_listen)
             finally:
+                self._conversation = None
                 self.presence.set_state("idle")
                 self.presence.set_amplitude(0.0)
                 self._set_status("ready")
@@ -415,9 +422,18 @@ class Assistant:
                     log.warning("Could not save the conversation: %s", exc)
 
     def briefing(self) -> None:
+        """Open the day: what the user did yesterday and has today, from every
+        connected work service (code, tasks, calendar, notes, messages), then a
+        conversation about it."""
         settings = self._settings.current
         data = self._tools.briefing_data()
-        self.converse(domain.briefing_prompt(data, settings.language, settings.user_name, settings.user_gender))
+        sources = self._tools.briefing_sources()
+        log.info("Daily briefing from: %s",
+                 ", ".join(f"{s['name']} ({s['kind']})" for s in sources) or "no work services connected")
+        today, yesterday = domain.day_names()
+        prompt = domain.briefing_prompt(data, settings.language, settings.user_name, settings.user_gender,
+                                        sources, today, yesterday)
+        self.converse(prompt, preload=[spec for s in sources for spec in s["specs"]], then_listen=True)
 
     def _wait_until_ready(self, stop: threading.Event) -> bool:
         """Block while setup is incomplete — the dashboard is how it gets fixed."""
@@ -456,7 +472,7 @@ class Assistant:
                     continue
             if not briefed:
                 briefed = True
-                if settings.briefing_on_boot and self._tools.briefing_due():
+                if settings.daily_briefing == "boot" and self._tools.briefing_due("boot"):
                     self._tools.mark_briefing_done()
                     try:
                         self.briefing()
@@ -473,7 +489,17 @@ class Assistant:
                 log.info("Woken.")
                 self.presence.set_state("listening")
                 self._voice.chime(settings, up=True)
-                self.converse()
+                if settings.daily_briefing == "first_wake" and self._tools.briefing_due("day"):
+                    self._tools.mark_briefing_done()
+                    try:
+                        self.briefing()
+                    except NeedsSetup:
+                        raise
+                    except Exception as exc:
+                        log.warning("Daily briefing failed (%s); talking normally.", exc)
+                        self.converse()
+                else:
+                    self.converse()
                 self._voice.chime(settings, up=False)
                 listener.cooldown()
             except NeedsSetup as exc:

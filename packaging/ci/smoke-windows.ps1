@@ -59,6 +59,18 @@ Copy-Item (Join-Path $PSScriptRoot "shoot_dashboard.mjs") .
 node shoot_dashboard.mjs $urlFile $shots
 Pop-Location
 
+Write-Host "== update in place (what the dashboard's Update now runs)"
+# Same installer over the running Lura, the way the updater starts it: it must
+# close this Lura and start the newly installed one by itself.
+Start-Process $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/LURAUPDATE=1", "/CURRENTUSER"
+$restarted = $null
+for ($i = 0; $i -lt 90 -and -not $restarted; $i++) {
+  Start-Sleep 1
+  $restarted = Get-Process LuraApp -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne $proc.Id -and $_.Id -ne $win.Id } | Select-Object -First 1
+}
+if ($restarted) { Write-Host "update: the new Lura is running (pid $($restarted.Id)); the old one exited: $((Get-Process -Id $proc.Id -ErrorAction SilentlyContinue) -eq $null)" }
+else { Write-Host "::warning::update: no new LuraApp started after the in-place install" }
+
 Write-Host "== log"
 Get-Content (Join-Path $env:LOCALAPPDATA "Lura\lura.log")
-Stop-Process -Id $proc.Id -Force
+Get-Process LuraApp -ErrorAction SilentlyContinue | Stop-Process -Force

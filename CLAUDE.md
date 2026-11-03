@@ -71,7 +71,7 @@ mcp.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.2.0, Oct 2026)
+## Current behaviour (2.3.0, Nov 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
@@ -80,12 +80,42 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   Gemini brains hear the WAV directly; Claude/GPT get a Gemini 3.8 Flash transcript.
 - **Streaming:** brain text streams into `SpeechPlayer` → first sentence synthesised
   while the rest is written. TTS falls back to the Lite TTS model on retryable errors only.
+- **2.3 — faster and interruptible (pipeline):**
+  - TTS audio streams too (`SpeechSynthesizer.stream`; `GeminiTTS` via the Interactions API;
+    OpenRouter is read as it arrives but buffers server-side). A refused streaming request
+    (400/404) latches whole clips for the session (`tts.StreamSupport`, held by
+    `VoiceService`); failures before any audio fall back, after some audio they are raised.
+    The playback queue is bounded by seconds of audio (30 s), not items.
+  - `SpeechPlayer.interrupt()` stops within one 50 ms slice and **aborts** the device buffer;
+    `wait()` joins only playback, so a stalled TTS call never keeps her deaf. `heard` =
+    pieces whose playback started; on a cut, history, memory row and subtitle keep only
+    that + " …", no further tool round runs, and the conversation goes back to listening
+    (`PipelineConversation._cut_short`). A briefing that is interrupted keeps listening.
+  - Tap the face (Qt + GTK: press without moving > 4 px, fired after the double-click
+    interval): idle → talk; in a conversation → `INTERRUPT_REQUESTED` → `interrupt()`.
+  - Voice barge-in (`barge_in`, default on, live): `voice/infrastructure/barge_in.py` opens
+    the mic when a reply starts, probes her echo for 1.2 s, and on speakers stands down per
+    reply (AGENTS.md → Audio has the measurements). On a barge-in the open mic and the last
+    3 s go to `record_utterance(carry=…)`, so no syllable is lost. `SpeechPlayer.wait()`
+    waits (≤0.3 s) for the listener to let the mic go before the recorder opens it.
+  - A cut reply is rewritten with `brain.retext()`: the neutral text **and** the provider's
+    replayed copy (`Message.native`), keeping thinking/signatures/tool calls untouched —
+    otherwise the brain is still sent the whole answer.
 - **Anthropic:** official SDK, default `claude-opus-5-5`, `output_config.effort`,
   `fallbacks: "default"`; turns replayed verbatim.
 - **Realtime:** Gemini Live `gemini-2.5-flash-native-audio-preview-12-2025`, mic gated.
-- **Connectors:** built-ins `chrome` (chrome-devtools-mcp), `web` (mcp-fetch-server),
-  `files` (server-filesystem ~) via `npx`; anyone can add more. Pipeline mode pulls MCP
-  schemas only via `find_tools`.
+- **Connectors:** built-ins `chrome` (chrome-devtools-mcp `--autoConnect`), `playwright`
+  (@playwright/mcp `--cdp-endpoint` from Chrome's `DevToolsActivePort`), `web`
+  (mcp-fetch-server), `files` (server-filesystem ~) via `npx`; anyone can add more.
+  Both browser ones drive the user's **own** running Chrome (profile, sign-ins), never a
+  fresh guest one: the user switches on `chrome://inspect/#remote-debugging` once; a call
+  that finds Chrome closed starts it and re-attaches (`connectors/infrastructure/chrome.py`).
+  Pipeline mode pulls MCP schemas only via `find_tools`.
+- **Dashboard key fields:** an `on…` handler must never return `false` (it cancels the
+  keystroke — the old `e.key === "Enter" && …` blocked all typing and pasting). Key rows
+  are built once and updated, so polls never wipe what is being typed.
+- **TLS in frozen builds:** `shared/http.use_bundled_certificates()` points SSL_CERT_FILE at
+  certifi when the OS bundle is unreachable (the macOS build could not verify any HTTPS).
 - **Settings migration:** a 1.x settings.json (`provider`, `openrouter_model`, …) is
   converted on load (`settings/domain.py: migrate_legacy`).
 - **Command guard** also blocks Windows/macOS destructive commands. Test:
@@ -120,8 +150,26 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Skills** (Free): paste / zip / https URL in the dashboard; listed in the prompt, body via
   `use_skill`, files via `read_skill_file` (confined to the folder); scripts only through
   the guarded `run_command`.
-- **Briefing** once per boot, in the conversation language; GitHub line only if a
-  connector named `github` is connected.
+- **Daily briefing** (`daily_briefing`: `first_wake` default / `boot` / `off`; a 2.2
+  `briefing_on_boot: false` migrates to `off`): the first time she is called each day
+  she picks the connected work services (`tools/domain.py: briefing_sources` — code,
+  tasks, calendar, notes, messages, or "other" custom ones; read tools only, ≤8 each,
+  ≤28 total), pre-loads those tools into the conversation, greets while she gathers
+  yesterday + today, sums up, suggests where to start, ends on a question and keeps
+  listening (`run(..., then_listen=True)`). No work services → she says they can be
+  connected.
+- **Updates from inside the app** (`modules/updates/`): the daemon asks GitHub's
+  `releases/latest` a minute after start and every 6 h (`check_updates`); the dashboard
+  shows a banner with "Update now". The file for this install (Setup.exe / macOS zip /
+  .deb / tar.gz) is downloaded only from this repo's release URLs and checked against
+  the release's `SHA256SUMS.txt`, then: Windows runs the Inno installer silently (lura.iss
+  closes the running Lura and starts the new one), macOS swaps Lura.app after exit and
+  reopens it, .deb goes through `pkexec apt-get install` then a restart, tar.gz is
+  swapped in place. Installs from source only get the notice. Versions before 2.2.1
+  have no updater, so 2.2.1 must be installed by hand once.
+- **macOS install:** `Casks/lura.rb` in this repo (no separate tap) installs the latest
+  release from the fixed-name zips `Lura-macos-<arch>.zip` and clears the quarantine
+  flag (not notarised). Landing page `#mac-first` explains "Lura" Not Opened → Open Anyway.
 - **2.2 (Oct 2026):**
   - Voice falls back Gemini ⇄ OpenRouter on 429/5xx/timeouts (hearing gives up after
     20 s) and skips an exhausted provider for as long as its "retry in 4h…" says.

@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Protocol
 
 from ..brain import ToolSpec
-from .domain import BUILTIN_TOOLS, END_SESSION, FIND_TOOLS
+from .domain import BUILTIN_TOOLS, END_SESSION, FIND_TOOLS, briefing_sources
 
 log = logging.getLogger(__name__)
+
+
+def _brain_name(connector: str, tool: str) -> str:
+    """How the connectors module names a server's tool for the brain."""
+    return f"mcp_{connector.replace('-', '_')}_{re.sub(r'[^A-Za-z0-9_-]', '_', tool)}"[:64]
 
 
 class ConnectorTools(Protocol):
@@ -132,9 +138,30 @@ class ToolService:
         return machine_context()
 
     # ── briefing ──
-    def briefing_due(self) -> bool:
+    def briefing_due(self, per: str = "boot") -> bool:
+        """Not yet given this boot (``per="boot"``) or this calendar day (``"day"``)."""
         from .infrastructure import briefing
-        return briefing.due()
+        return briefing.due(per)
+
+    def briefing_sources(self) -> list[dict[str, Any]]:
+        """The connected services that know about the user's day (code, tasks,
+        calendar, notes, messages, or other custom ones), each with its
+        read-only tools as brain-facing names and as specs to pre-load."""
+        if not self._connectors:
+            return []
+        try:
+            rows = self._connectors.connected()
+            specs = {s.name: s for s in self._connectors.all_tools()}
+        except Exception as exc:
+            log.debug("Connector summary unavailable: %s", exc)
+            return []
+        out = []
+        for source in briefing_sources(rows):
+            names = [n for t in source["tools"] if (n := _brain_name(source["name"], t)) in specs]
+            if names:
+                out.append({"name": source["name"], "kind": source["kind"], "tools": names,
+                            "specs": [specs[n] for n in names]})
+        return out
 
     def mark_briefing_done(self) -> None:
         from .infrastructure import briefing

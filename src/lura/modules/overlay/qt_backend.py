@@ -89,6 +89,12 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             self._offset = 0
             self._image = None
             self._drag = None
+            self._pressed = None
+            #: A click is a tap only once no second click follows: a double-click opens the dashboard.
+            self._tap = QtCore.QTimer(self)
+            self._tap.setSingleShot(True)
+            if actions.get("tap"):
+                self._tap.timeout.connect(actions["tap"])
             self._caption_html = ""
             self.label = QtWidgets.QLabel(self)
             self.label.setWordWrap(True)
@@ -190,20 +196,28 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
 
         def mousePressEvent(self, event):
             if event.button() == QtCore.Qt.LeftButton:
-                self._drag = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                self._pressed = event.globalPosition().toPoint()
+                self._drag = self._pressed - self.frameGeometry().topLeft()
             elif event.button() == QtCore.Qt.RightButton and (toggle := actions.get("subtitles")):
                 toggle()   # right-click: show / hide the subtitles
 
         def mouseMoveEvent(self, event):
             if self._drag is not None and event.buttons() & QtCore.Qt.LeftButton:
-                top_left = event.globalPosition().toPoint() - self._drag
+                at = event.globalPosition().toPoint()
+                if self._pressed is not None and (at - self._pressed).manhattanLength() <= 4:
+                    return   # a hand's tremor, not a drag: it can still be a tap
+                self._pressed = None
+                top_left = at - self._drag
                 self.move(top_left)
                 self._face_pos = top_left + QtCore.QPoint(self._offset, 0)
 
-        def mouseReleaseEvent(self, _event):
-            self._drag = None
+        def mouseReleaseEvent(self, event):
+            if event.button() == QtCore.Qt.LeftButton and self._pressed is not None and actions.get("tap"):
+                self._tap.start(QtWidgets.QApplication.doubleClickInterval())   # tap: talk / interrupt
+            self._drag = self._pressed = None
 
         def mouseDoubleClickEvent(self, _event):
+            self._tap.stop()
             if open_dashboard := actions.get("open"):
                 open_dashboard()
 

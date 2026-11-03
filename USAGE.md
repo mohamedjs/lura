@@ -21,6 +21,12 @@ and the size. Changes show at once, no restart. While she uses a connector (GitH
 Notion…) a badge with its first letters appears beside her. Only the drawn hologram
 catches clicks; the empty space around it lets them through.
 
+**Interrupting her:** tap the face once while she talks — she stops at once and
+listens. (Tapping it when she is idle starts a conversation, like the wake word.)
+With headphones you can also just start talking over her. On the computer's own
+speakers the microphone hears her too, so talking over her is switched off for that
+reply by itself; the tap always works.
+
 ## The dashboard
 
 `lura dashboard` (or double-click the face, or use the tray menu). Everything is here:

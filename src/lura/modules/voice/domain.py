@@ -9,6 +9,7 @@ written, not after the whole answer and the whole synthesis.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from typing import Protocol
 
 #: Mic in. Gemini Live fixes it; Vosk and the recorder use the same.
@@ -25,9 +26,12 @@ _MARKDOWN = re.compile(r"[*_`#>]+|^\s*[-•]\s+", re.MULTILINE)
 
 
 class SpeechSynthesizer(Protocol):
-    """Text in, 16-bit mono PCM at ``OUTPUT_RATE`` out."""
+    """Text in, 16-bit mono PCM at ``OUTPUT_RATE`` out — whole, or in pieces
+    as it is made (a route that cannot stream yields the whole clip once)."""
 
     def synthesize(self, text: str) -> bytes: ...
+
+    def stream(self, text: str) -> Iterator[bytes]: ...
 
 
 class Transcriber(Protocol):
@@ -212,3 +216,65 @@ class EndOfTurn:
         elif elapsed >= self._wait:
             return "nothing"
         return "wait"
+
+
+# ── barge-in ───────────────────────────────────────────────────────────────
+
+class BargeIn:
+    """Decides, one mic block at a time while she speaks, whether the user has
+    started talking over her.
+
+    The mic hears her too, and a level detector cannot tell her echo from a
+    voice that is quieter than it. Measured on a laptop's own speakers and mic
+    (Oct 2026): her echo was 6× the room's noise floor (15× at p95), the user's
+    normal voice only 1–2.5× — no margin separates them. So each reply starts
+    with a probe: while she says her first words, how loud is she in the mic?
+    Ever clearly audible (speakers) → stand down for this reply; it would cut
+    her off at random. Not audible (headphones) → the mic hears only the room,
+    and speech held above both its floor and the loudest echo the probe saw is
+    the user.
+
+    Tuned on real recordings, her echo mixed in at every strength from 0.05×
+    to 1× (laptop speakers) and a reply starting every 0.5 s: no false
+    barge-in at any strength, and the user's voice caught 13 times in 13 with
+    no echo. A shorter probe (0.8 s) or a percentile instead of the maximum
+    cut her off at moderate echo — the probe can land on a sentence's fading
+    tail, where her echo is already gone.
+    """
+
+    PROBE_BLOCKS = 12    # 1.2 s of her speaking, to measure her echo
+    NEED_BLOCKS = 3      # 0.3 s of speech before it counts: a cough is one block
+    ECHO_LIMIT = 1.6     # her echo ever above this × the floor = she is audible
+    CEILING = 1.5        # the user must also beat the loudest echo the probe saw by this much
+    SPEAKING = 0.05      # what is played, at full digital scale: she is clearly saying something
+
+    def __init__(self, floor: float, factor: float = 2.0, min_floor: float = 0.0005):
+        #: The room before she spoke, measured while the brain was thinking.
+        self._floor = max(floor, min_floor)
+        #: The recorder's own speech factor, so both judge speech the same way.
+        self._factor = factor
+        self._probe: list[float] = []
+        self._threshold = 0.0
+        self._run = 0
+        self.state = "probe"            # → "listen" or "off"; "barge" once fired
+
+    def feed(self, level: float, her_level: float) -> str:
+        """``level``: the mic block's speech level; ``her_level``: how loud she
+        was in the same moment (what was played, aligned for latency)."""
+        if self.state == "probe":
+            if her_level > self.SPEAKING:     # count only blocks where she is really speaking
+                self._probe.append(level)
+            if len(self._probe) >= self.PROBE_BLOCKS:
+                ceiling = max(self._probe)
+                if ceiling > self._floor * self.ECHO_LIMIT:
+                    self.state = "off"
+                else:
+                    self.state = "listen"
+                    self._threshold = max(self._floor * self._factor, ceiling * self.CEILING)
+            return self.state
+        if self.state != "listen":
+            return self.state
+        self._run = self._run + 1 if level > self._threshold else 0
+        if self._run >= self.NEED_BLOCKS:
+            self.state = "barge"
+        return self.state

@@ -74,7 +74,8 @@ def cmd_run(args) -> int:
     s = c.settings.current
     stop = threading.Event()
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
-                                          c.bus, lambda: c.assistant.status, c.memory, c.skills), s.dashboard_port)
+                                          c.bus, lambda: c.assistant.status, c.memory, c.skills,
+                                          c.updates), s.dashboard_port)
     try:
         server.start()
     except OSError as exc:
@@ -91,9 +92,13 @@ def cmd_run(args) -> int:
     def toggle_subtitles():
         c.settings.update({"subtitles": not c.settings.current.subtitles})
 
+    def tap():
+        # A tap on the face: start talking, or — mid-conversation — stop her reply and listen.
+        c.bus.publish(events.INTERRUPT_REQUESTED if c.assistant.status == "talking" else events.TALK_REQUESTED)
+
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
                       actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
-                               "subtitles": toggle_subtitles, "quit": quit_from_tray,
+                               "tap": tap, "subtitles": toggle_subtitles, "quit": quit_from_tray,
                                "style": lambda v: c.settings.update({"overlay_style": v}),
                                "theme": lambda v: c.settings.update({"overlay_theme": v})},
                       labels=_overlay_labels(s.ui_language, s.assistant_name))
@@ -128,6 +133,15 @@ def cmd_run(args) -> int:
         stop.set()
 
     c.bus.subscribe(events.RESTART_REQUESTED, on_restart)
+
+    def on_exit(_payload):
+        # A new version's installer is waiting for this Lura to quit; it starts
+        # the new one itself.
+        log.info("Quitting so the update can install.")
+        stop.set()
+
+    c.bus.subscribe(events.EXIT_REQUESTED, on_exit)
+    threading.Thread(target=c.updates.watch, args=(stop,), daemon=True, name="updates").start()
     c.connectors.start_all()
 
     # First run, or nothing works yet: the dashboard is where that gets fixed.
@@ -420,6 +434,8 @@ def _utf8_console() -> None:
 
 def main(argv=None) -> int:
     _utf8_console()
+    from .shared.http import use_bundled_certificates
+    use_bundled_certificates()
     parser = argparse.ArgumentParser(prog="lura", description="Lura — a voice-first desktop assistant.")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"lura {__version__}")

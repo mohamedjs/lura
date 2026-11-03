@@ -61,7 +61,7 @@ def main() -> int:
         status, state, _ = call(server, "GET", "/api/state")
         assert status == 200 and state["capabilities"]["can_talk"] is False
         assert set(state["i18n"]) == {"en", "ar"} and "plan" not in state
-        assert [x["name"] for x in state["connectors"]][:3] == ["chrome", "web", "files"]
+        assert [x["name"] for x in state["connectors"]][:4] == ["chrome", "playwright", "web", "files"]
 
         status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"language": "ar", "voice_gender": "male"}})
         assert status == 200 and res["settings"]["voice_name"] == "Puck"
@@ -121,6 +121,8 @@ def main() -> int:
         assert call(server, "DELETE", "/api/skills/tea")[0] == 200
         assert call(server, "DELETE", "/api/skills/tea")[0] == 404
 
+        status, res, _ = call(server, "GET", "/api/chrome")
+        assert status == 200 and res["connected"] in (True, False) and "remote-debugging" in res["hint"]
         status, res, _ = call(server, "GET", "/api/catalog")
         assert status == 200 and res["catalog"] == {}, "no keys → no providers in the picker"
     finally:
