@@ -14,6 +14,7 @@ from ...shared.platform import os_name
 from ..brain import BrainService
 from ..connectors import ConnectorService
 from ..memory import MemoryService
+from ..overlay import THEMES as OVERLAY_THEMES
 from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, SettingsService
 from ..skills import SkillsService
 from ..voice import VoiceService
@@ -24,7 +25,8 @@ from .server import ApiError
 LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device", "silence_ms",
         "silence_factor", "follow_up_seconds", "memory_enabled", "context_budget_tokens", "live_captions",
         "persona", "user_name", "user_gender", "reasoning_effort", "voice_name", "voice_gender", "tts_style",
-        "language", "brain_provider", "models", "voice_provider", "mode", "wake_word"}
+        "language", "brain_provider", "models", "voice_provider", "mode", "wake_word",
+        "overlay_style", "overlay_theme", "overlay_colors", "overlay_scale"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
@@ -105,6 +107,9 @@ class DashboardApi:
             "providers": list(PROVIDERS), "voice_providers": list(VOICE_PROVIDERS),
             "suggested_models": {k: list(v) for k, v in SUGGESTED_MODELS.items()},
             "voices": {k: list(v) for k, v in VOICES.items()},
+            "overlay_themes": {name: {k: "#" + "".join(f"{round(c * 255):02x}" for c in rgb)
+                                      for k, rgb in pal._asdict().items()}
+                               for name, pal in OVERLAY_THEMES.items()},
             "connectors": self.connectors.list(),
             "languages": LANGUAGES, "i18n": {lang: catalog(lang) for lang in LANGUAGES},
             "paths": {"config": str(self.settings.settings_path.parent)},

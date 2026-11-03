@@ -10,8 +10,9 @@ import logging
 import threading
 
 from .captions import CAPTION_HEIGHT, CAPTION_WIDTH, caption_lines
-from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, render_surface, surface_rgba
+from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, hit_rects, render_surface, surface_rgba
 from .state import OverlayState, StateBlender
+from .workspaces import x11_input_shape
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,11 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
     gi.require_version("Gtk", "3.0")
     gi.require_version("GdkPixbuf", "2.0")
     from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
+    try:
+        gi.require_version("GdkX11", "3.0")
+        from gi.repository import GdkX11  # noqa: F401  (gives Gdk windows get_xid)
+    except (ValueError, ImportError):
+        pass
 
     win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
     win.set_title("Lura")
@@ -67,8 +73,8 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
                        b" border-radius: 14px; padding: 8px 14px; font-size: 15px; }")
     Gtk.StyleContext.add_provider_for_screen(screen, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-    side = (CAPTION_WIDTH - OVERLAY_SIZE) // 2
     face_pos = [x, y]
+    cur = [OVERLAY_SIZE]   # the face's size now; the dashboard can change it live
     wide = [False]
 
     def on_press(widget, event):
@@ -118,14 +124,14 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
             if not wide[0]:
                 offset[0] = 0
                 img.set_margin_start(0)
-                win.resize(OVERLAY_SIZE, OVERLAY_SIZE)
+                win.resize(cur[0], cur[0])
                 win.move(int(face_pos[0]), int(face_pos[1]))
         if lines is None:
             return False
         # Centred under the face but kept on this monitor, measured from the
         # width GTK actually gave the window (it sizes to the wrapped text).
         width = max(win.get_size()[0], CAPTION_WIDTH)
-        half = (width - OVERLAY_SIZE) // 2
+        half = (width - cur[0]) // 2
         left = max(geo.x, min(int(face_pos[0]) - half, geo.x + geo.width - width))
         if offset[0] != int(face_pos[0]) - left:
             offset[0] = int(face_pos[0]) - left
@@ -145,32 +151,88 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
             caption.set_markup(markup)
         return False
 
+    def resize_face(size):
+        """Grow or shrink keeping the right edge where it was. With subtitles
+        showing, drop back to the plain layout; the next frame widens it again
+        from the new size (resizing in place upset GtkImage's allocation)."""
+        face_pos[0] += cur[0] - size
+        cur[0] = size
+        wide[0] = False
+        caption.set_visible(False)
+        offset[0] = 0
+        img.set_margin_start(0)
+        win.resize(size, size)
+        win.move(int(face_pos[0]), int(face_pos[1]))
+        return False
+
+    shape = [None]
+
+    def set_input(rects):
+        """Clicks land only on the drawn pixels and the subtitles."""
+        boxes = [(x + offset[0], y, w, h) for x, y, w, h in rects]
+        if caption.get_visible():
+            a = caption.get_allocation()
+            boxes.append((a.x, a.y, a.width, a.height))
+        if boxes == shape[0]:
+            return
+        shape[0] = boxes
+        gdk_win = win.get_window()
+        if gdk_win is not None and hasattr(gdk_win, "get_xid"):
+            x11_input_shape(gdk_win.get_xid(), boxes)
+
+    def show(pix, size, rects):
+        """Called on the GTK loop with this frame, shared by every monitor."""
+        img.set_from_pixbuf(pix)
+        if size != cur[0]:
+            resize_face(size)
+        update_caption()
+        if rects is not None:
+            set_input(rects)
+        return False
+
+    win.show_frame = show
+    return win
+
+
+def _frames(shared: OverlayState, windows: dict) -> None:
+    """One render per frame, shown on every monitor (as the Qt backend does).
+
+    Rendering per window saturated the loop on two monitors once the face
+    was scaled up: idle callbacks never ran and the picture froze.
+    """
+    import time
+
+    from gi.repository import GdkPixbuf, GLib
+
     blender = StateBlender()
     phase = [0.0]
-    alive = [True]
-    win.connect("destroy", lambda *_: alive.__setitem__(0, False))   # monitor unplugged
+    frame = [0]
 
     def tick():
-        if not alive[0]:
-            return False
+        start = time.monotonic()
         blender.update(shared.state, dt=0.033)
         # Idle motion slows to 60%; scale the increment so the phase stays
         # monotonic and the motion never jumps across a state blend.
         phase[0] += 0.033 * (0.60 * blender.wl + blender.wt + blender.ws)
-        surface = render_surface(phase[0], blender, size=OVERLAY_SIZE, amp=shared.amplitude)
+        look = shared.look
+        size = round(OVERLAY_SIZE * look.scale)
+        surface = render_surface(phase[0], blender, size=size, amp=shared.amplitude, look=look,
+                                 tools=shared.tools())
         pix = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(surface_rgba(surface)),
-                                              GdkPixbuf.Colorspace.RGB, True, 8,
-                                              OVERLAY_SIZE, OVERLAY_SIZE, OVERLAY_SIZE * 4)
+                                              GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
+        frame[0] += 1
+        rects = hit_rects(surface, threshold=40) if frame[0] % 5 == 1 else None
         # idle_add, not a direct call: Gtk.main() runs in a daemon thread and
         # setting the pixbuf inline leaves the overlay blank on screen.
-        GLib.idle_add(img.set_from_pixbuf, pix)
-        GLib.idle_add(update_caption)
-        return True
+        for win in list(windows.values()):
+            GLib.idle_add(win.show_frame, pix, size, rects)
+        # ponytail: ~30fps; a big face that takes longer to draw slows the
+        # rate rather than starving GTK's repaints.
+        cost = int((time.monotonic() - start) * 1000)
+        GLib.timeout_add(max(33, cost * 2), tick)
+        return False
 
-    # ponytail: 30fps, not 60. One timeout runs per monitor and a frame costs
-    # ~11 ms; at 16 ms the main loop saturates and GTK never repaints.
     GLib.timeout_add(33, tick)
-    return win
 
 
 def start(shared: OverlayState, actions: dict | None = None, labels: dict | None = None) -> threading.Thread:
@@ -201,6 +263,7 @@ def start(shared: OverlayState, actions: dict | None = None, labels: dict | None
 
             for i in range(display.get_n_monitors()):
                 add(display, display.get_monitor(i))
+            _frames(shared, windows)
             # A monitor that wakes up later (second GPU, dock) gets a face too.
             display.connect("monitor-added", add)
             display.connect("monitor-removed", remove)

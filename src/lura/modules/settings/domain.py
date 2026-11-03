@@ -11,6 +11,7 @@ Pure: no files, no network. Infrastructure persists it; application applies it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
@@ -152,6 +153,15 @@ class Settings:
     #: Write what you say while you are still saying it (one extra hearing
     #: call every ~1.5 s of speech).
     live_captions: bool = True
+    #: The hologram: face, orb (a ball of light), bust (head, shoulders,
+    #: arms) or ring (an equaliser). Applied live.
+    overlay_style: str = "face"
+    #: Colour theme, or "custom" to use ``overlay_colors``.
+    overlay_theme: str = "lura"
+    #: Custom colours, "#rrggbb" each: wire, fill, accent, glow.
+    overlay_colors: dict[str, str] = field(default_factory=dict)
+    #: Size of the hologram, 0.6–2.0 × the default 260 px.
+    overlay_scale: float = 1.0
     dashboard_port: int = 47321
     onboarded: bool = False
 
@@ -174,7 +184,10 @@ _CHOICES: dict[str, tuple[str, ...]] = {
     "voice_gender": tuple(VOICES), "reasoning_effort": EFFORTS,
     "context_budget_tokens": (32_000, 64_000, 128_000, 200_000),
     "user_gender": ("", "male", "female"),
+    "overlay_style": ("face", "orb", "bust", "ring"),
+    "overlay_theme": ("lura", "aurora", "rose", "gold", "ice", "custom"),
 }
+OVERLAY_COLOR_NAMES = ("wire", "fill", "accent", "glow")
 
 
 def _coerce(default: Any, value: Any, name: str) -> Any:
@@ -222,6 +235,13 @@ def apply_patch(settings: Settings, patch: dict[str, Any]) -> list[str]:
             if unknown:
                 raise ValueError(f"unknown provider in models: {', '.join(sorted(unknown))}")
             coerced = {**settings.models, **{k: v for k, v in coerced.items() if v}}
+        if name == "overlay_colors":
+            for k, v in coerced.items():
+                if k not in OVERLAY_COLOR_NAMES or not re.fullmatch(r"#[0-9a-fA-F]{6}", v):
+                    raise ValueError(f"overlay_colors: {k} must be a #rrggbb colour")
+            coerced = {**settings.overlay_colors, **coerced}
+        if name == "overlay_scale" and not 0.6 <= coerced <= 2.0:
+            raise ValueError("overlay_scale must be between 0.6 and 2.0")
         if name == "voice_name" and coerced not in VOICES["female"] + VOICES["male"]:
             raise ValueError(f"unknown voice {coerced!r}")
         staged[name] = coerced

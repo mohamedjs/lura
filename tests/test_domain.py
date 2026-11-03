@@ -253,6 +253,27 @@ def check_brain_catalog():
     assert bc("anthropic", {"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5"})["name"] == "Claude Sonnet 5.5"
 
 
+def check_overlay_look():
+    from lura.modules.overlay import STYLES, THEMES, settings_look
+    from lura.modules.settings.domain import _CHOICES
+    assert set(_CHOICES["overlay_style"]) == set(STYLES), "settings and overlay disagree on styles"
+    assert set(_CHOICES["overlay_theme"]) == {*THEMES, "custom"}, "settings and overlay disagree on themes"
+    s = Settings()
+    assert apply_patch(s, {"overlay_style": "bust", "overlay_scale": "1.5"}) == ["overlay_style", "overlay_scale"]
+    apply_patch(s, {"overlay_theme": "custom", "overlay_colors": {"wire": "#ff0000"}})
+    apply_patch(s, {"overlay_colors": {"glow": "#00ff00"}})
+    assert s.overlay_colors == {"wire": "#ff0000", "glow": "#00ff00"}, "colours merge, one at a time"
+    for bad in ({"overlay_scale": 3}, {"overlay_colors": {"wire": "red"}}, {"overlay_colors": {"x": "#000000"}},
+                {"overlay_style": "cube"}):
+        try:
+            apply_patch(s, bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad}")
+    look = settings_look(s)
+    assert look.style == "bust" and look.scale == 1.5 and look.palette.wire == (1.0, 0.0, 0.0)
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):

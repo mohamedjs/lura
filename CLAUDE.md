@@ -145,7 +145,8 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 
 - Look Mohamed approved: the promo video's face — MediaPipe mesh as **indigo
   wireframe over translucent lavender facets**, teal blinking eyes, teal lips and
-  jaw lines, dotted cyan orbit ring, cyan light band sweeping down.
+  jaw lines, cyan light band sweeping down. (The dotted orbit ring was removed
+  at Mohamed's request, Nov 2026.)
   **Fully transparent background** — no disc, halo or rings behind it (he asked
   for "only the face").
 - Palette constants: `INDIGO`, `LAVENDER`, `TEAL`, `CYAN` near the top of the
@@ -160,6 +161,21 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   a PNG round-trip** — it cost ~15 ms/frame for this detailed mesh. Keep cairo
   calls batched by alpha bucket (`_bucket_stroke`) and iterate `.tolist()`, not
   numpy scalars.
+- **Looks (since 2.3):** `overlay/looks.py` — styles `face` / `orb` / `bust` / `ring`,
+  themes `lura` (default, the approved palette) `aurora` `rose` `gold` `ice` or `custom`
+  (`overlay_colors`: wire/fill/accent/glow hex), `overlay_scale` 0.6–2.0. All live
+  (`OverlayState.look`, read every frame); dashboard "Look" tab + Qt tray submenu. The
+  bust (after Mohamed's second reference image): head, neck and shoulders, no arms;
+  the body is fine horizontal contour lines over a translucent skin with a glowing
+  rim, standing on perspective rings of light with sound-wave bars (tall with her
+  voice), short waveforms by the ears while speaking, specks drifting off the head.
+  **Tool badges:** `ConnectorService.call` publishes `events.TOOL_USED`; `app.py` calls
+  `OverlayState.set_tool(connector)`; every style draws a flowing line to a circle with
+  the connector's first two letters ("Gi", "No") for 5 s (`TOOL_LINGER`).
+  **Click-through:** only cells with drawn pixels take clicks (`render.hit_rects`) —
+  GTK via XShape (`workspaces.x11_input_shape`; the venv's PyGObject has no cairo
+  bindings), Qt via `setMask` grown one cell so the glow isn't clipped. Both backends render **once per frame for
+  all monitors** — per-window rendering froze GTK on two screens at 150 %.
 - Self-check (no display needed): `cd src && python3 -m lura.modules.overlay` →
   `overlay self-check OK`.
 

@@ -97,3 +97,41 @@ def on_every_workspace(win_id: int) -> None:
             _x11(win_id)
     except Exception as exc:
         log.debug("Could not put the face on every workspace: %s", exc)
+
+
+class _XRect(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_short), ("y", ctypes.c_short),
+                ("width", ctypes.c_ushort), ("height", ctypes.c_ushort)]
+
+
+_shape: dict = {}
+
+
+def x11_input_shape(window: int, rects) -> bool:
+    """Let clicks land only inside ``rects`` (x, y, w, h) of an X11 window —
+    the GTK route, whose own call needs PyGObject's cairo bindings, which a
+    venv often lacks. False when it could not be done (Wayland, no libXext)."""
+    if not (IS_LINUX and os.environ.get("DISPLAY")):
+        return False
+    try:
+        if "x" not in _shape:
+            x = ctypes.cdll.LoadLibrary(ctypes.util.find_library("X11") or "libX11.so.6")
+            ext = ctypes.cdll.LoadLibrary(ctypes.util.find_library("Xext") or "libXext.so.6")
+            x.XOpenDisplay.restype = ctypes.c_void_p
+            x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+            x.XFlush.argtypes = [ctypes.c_void_p]
+            ext.XShapeCombineRectangles.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int,
+                                                    ctypes.c_int, ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+                                                    ctypes.c_int]
+            _shape.update(x=x, ext=ext, display=x.XOpenDisplay(None))
+        x, ext, display = _shape["x"], _shape["ext"], _shape["display"]
+        if not display:
+            return False
+        arr = (_XRect * max(1, len(rects)))(*[_XRect(*r) for r in rects])
+        # ShapeInput = 2, ShapeSet = 0, Unsorted = 0
+        ext.XShapeCombineRectangles(display, window, 2, 0, 0, arr, len(rects), 0, 0)
+        x.XFlush(display)
+        return True
+    except Exception as exc:
+        log.debug("Could not set the face's click area: %s", exc)
+        return False

@@ -11,11 +11,21 @@ import os
 import threading
 
 from ...shared.platform import FROZEN, IS_LINUX
+from .looks import STYLES, THEMES, Look, look_from
 from .state import OverlayState, State, StateBlender
 
 log = logging.getLogger(__name__)
 
-__all__ = ["Overlay", "OverlayState", "State", "StateBlender"]
+__all__ = ["Overlay", "OverlayState", "State", "StateBlender", "Look", "look_from", "STYLES", "THEMES",
+           "LOOK_SETTINGS", "settings_look"]
+
+#: The settings that make up the look, all applied live.
+LOOK_SETTINGS = ("overlay_style", "overlay_theme", "overlay_colors", "overlay_scale")
+
+
+def settings_look(s) -> Look:
+    """The Look for a Settings object."""
+    return look_from(s.overlay_style, s.overlay_theme, s.overlay_colors, s.overlay_scale)
 
 
 class Overlay:

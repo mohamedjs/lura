@@ -44,7 +44,9 @@ def _logging(verbose: bool) -> None:
 
 def _overlay_labels(lang: str, assistant_name: str = "") -> dict:
     from .shared.i18n import t
-    labels = {k: t(f"tray.{k}", lang) for k in ("open", "talk", "subtitles", "quit")}
+    labels = {k: t(f"tray.{k}", lang) for k in ("open", "talk", "subtitles", "look", "style", "theme", "quit")}
+    labels.update({f"style.{k}": t(f"look.style.{k}", lang) for k in ("face", "orb", "bust", "ring")})
+    labels.update({f"theme.{k}": t(f"look.theme.{k}", lang) for k in ("lura", "aurora", "rose", "gold", "ice")})
     # The caption says whatever the user named her, not "Lura".
     labels.update(you=t("caption.you", lang), lura=assistant_name.strip() or t("caption.lura", lang))
     return labels
@@ -59,7 +61,7 @@ def _container(presence=None):
 
 def cmd_run(args) -> int:
     from .modules.dashboard import DashboardApi, DashboardServer, running_url
-    from .modules.overlay import Overlay
+    from .modules.overlay import LOOK_SETTINGS, Overlay, settings_look
     from .shared.i18n import t
 
     if url := running_url():
@@ -91,17 +93,24 @@ def cmd_run(args) -> int:
 
     overlay = Overlay(enabled=s.overlay_enabled and not args.no_overlay,
                       actions={"open": server.open, "talk": lambda: c.bus.publish(events.TALK_REQUESTED),
-                               "subtitles": toggle_subtitles, "quit": quit_from_tray},
+                               "subtitles": toggle_subtitles, "quit": quit_from_tray,
+                               "style": lambda v: c.settings.update({"overlay_style": v}),
+                               "theme": lambda v: c.settings.update({"overlay_theme": v})},
                       labels=_overlay_labels(s.ui_language, s.assistant_name))
     c.assistant.presence = overlay.state
     overlay.state.subtitles_enabled = s.subtitles
+    overlay.state.look = settings_look(s)
 
     def on_settings(payload):
-        # Applied live, no restart: the subtitles switch.
-        if "subtitles" in payload.get("changed", ()):
+        # Applied live, no restart: the subtitles switch and the look.
+        changed = payload.get("changed", ())
+        if "subtitles" in changed:
             overlay.state.subtitles_enabled = c.settings.current.subtitles
+        if any(k in changed for k in LOOK_SETTINGS):
+            overlay.state.look = settings_look(c.settings.current)
 
     c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
+    c.bus.subscribe(events.TOOL_USED, lambda p: overlay.state.set_tool(p["connector"]))
 
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)
@@ -308,14 +317,17 @@ def cmd_models(args) -> int:
 # ── talking ─────────────────────────────────────────────────────────────────
 
 def _talk(initial: bool) -> int:
-    from .modules.overlay import Overlay
+    from .modules.overlay import Overlay, settings_look
     from .shared.errors import NeedsSetup
 
     from .modules.settings import SettingsService
     lang = SettingsService().current
     overlay = Overlay(enabled=True, labels=_overlay_labels(lang.ui_language))
     overlay.state.subtitles_enabled = lang.subtitles
+    overlay.state.look = settings_look(lang)
     c = _container(overlay.state)
+    from .shared import events
+    c.bus.subscribe(events.TOOL_USED, lambda p: overlay.state.set_tool(p["connector"]))
     c.connectors.start_all()
     stop = threading.Event()
     result = [0]

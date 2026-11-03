@@ -23,7 +23,8 @@ lura:  "Opening it now… done, it's playing."
 - **Connectors:** Chrome DevTools, live web pages and your files are built in.
   Add any other MCP server by URL + token or by pasting its `mcp.json`.
 - **The face:** an animated hologram floats top-right on every monitor while she
-  listens, thinks and speaks.
+  listens, thinks and speaks. Pick its style (face, orb, bust with hands, ring),
+  colours (five themes or your own) and size (60–200 %) in the dashboard's Look tab.
 - **Memory:** every conversation is kept on your computer; each new one starts
   from what she knows about you, a running summary and the recent turns.
 - **Skills:** add Agent Skills (`SKILL.md`) and use them with any model.

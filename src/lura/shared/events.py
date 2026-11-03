@@ -24,6 +24,8 @@ TALK_REQUESTED = "assistant.talk"
 STOP_REQUESTED = "assistant.stop"
 STATUS = "assistant.status"
 RESTART_REQUESTED = "app.restart"
+#: A connector tool is being called: ``connector`` names the MCP server (shown on the face).
+TOOL_USED = "connectors.tool_used"
 
 
 class EventBus:

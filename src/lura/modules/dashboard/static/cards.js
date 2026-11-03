@@ -248,6 +248,49 @@ function renderCards() {
   if (lastStatus === "talking" && S.status !== "talking") { loadMemory(); loadHistory(); }
   lastStatus = S.status;
   renderAudio();
+  renderLook();
   renderMemory();
   renderSkills();
+}
+
+// ── look: the hologram's style, colours and size (all applied live)
+const LOOK_GLYPHS = { face: "☺", orb: "●", bust: "♙", ring: "◎" };
+
+function renderLook() {
+  const s = S.settings, themes = S.overlay_themes || {};
+  $("#look-style").replaceChildren(...Object.keys(LOOK_GLYPHS).map((name) => {
+    const b = el("button", { type: "button", className: s.overlay_style === name ? "on" : "" },
+      el("span", { className: "glyph", textContent: LOOK_GLYPHS[name] }),
+      el("b", { textContent: t(`look.style.${name}`) }),
+      el("small", { textContent: t(`look.style.${name}.hint`) }));
+    b.onclick = () => save({ overlay_style: name });
+    return b;
+  }));
+
+  const swatch = (name, pal) => {
+    const b = el("button", { type: "button", className: s.overlay_theme === name ? "on" : "" },
+      el("i", { style: `background: conic-gradient(${pal.wire}, ${pal.fill}, ${pal.accent}, ${pal.glow}, ${pal.wire})` }),
+      t(`look.theme.${name}`));
+    b.onclick = () => save({ overlay_theme: name });
+    return b;
+  };
+  const custom = { ...(themes.lura || {}), ...s.overlay_colors };
+  $("#look-theme").replaceChildren(...Object.entries(themes).map(([n, p]) => swatch(n, p)), swatch("custom", custom));
+
+  const box = $("#look-colors");
+  box.hidden = s.overlay_theme !== "custom";
+  if (!box.hidden && !box.contains(document.activeElement)) {
+    box.replaceChildren(...["wire", "fill", "accent", "glow"].map((k) => {
+      const input = el("input", { type: "color", value: custom[k] || "#7068e6" });
+      input.onchange = () => save({ overlay_colors: { [k]: input.value } });
+      return el("label", {}, input, t(`look.color.${k}`));
+    }));
+  }
+
+  const size = $("#look-size");
+  const show = () => ($("#look-size-value").textContent = `${Math.round(size.value * 100)}%`);
+  if (document.activeElement !== size) size.value = s.overlay_scale;
+  show();
+  size.oninput = show;
+  size.onchange = () => save({ overlay_scale: Number(size.value) });
 }

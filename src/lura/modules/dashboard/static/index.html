@@ -35,6 +35,7 @@
       <button data-tab="brain" role="tab"><span class="ico" aria-hidden="true">✦</span><span data-i18n="tab.brain"></span></button>
       <button data-tab="voice" role="tab"><span class="ico" aria-hidden="true">♪</span><span data-i18n="tab.voice"></span></button>
       <button data-tab="audio" role="tab"><span class="ico" aria-hidden="true">🎙</span><span data-i18n="tab.audio"></span></button>
+      <button data-tab="look" role="tab"><span class="ico" aria-hidden="true">◐</span><span data-i18n="tab.look"></span></button>
       <button data-tab="you" role="tab"><span class="ico" aria-hidden="true">☺</span><span data-i18n="tab.you"></span></button>
       <button data-tab="memory" role="tab"><span class="ico" aria-hidden="true">❖</span><span data-i18n="tab.memory"></span></button>
       <button data-tab="skills" role="tab"><span class="ico" aria-hidden="true">✎</span><span data-i18n="tab.skills"></span></button>
@@ -166,6 +167,21 @@
         </div>
       </section>
 
+      <!-- Look: the hologram's style, colours and size -->
+      <section class="panel" data-tab="look">
+        <div class="card" id="look-card">
+          <h3 data-i18n="look.title"></h3>
+          <p class="hint" data-i18n="look.hint"></p>
+          <div class="field"><span data-i18n="look.style"></span>
+            <div class="looks" id="look-style"></div></div>
+          <div class="field"><span data-i18n="look.theme"></span>
+            <div class="swatches" id="look-theme"></div></div>
+          <div class="custom-colors" id="look-colors" hidden></div>
+          <label class="field"><span><span data-i18n="look.size"></span> <b id="look-size-value"></b></span>
+            <input id="look-size" type="range" min="0.6" max="2" step="0.1"></label>
+        </div>
+      </section>
+
       <!-- You & Lura -->
       <section class="panel" data-tab="you">
         <div class="card">
@@ -182,7 +198,6 @@
             <div class="seg" id="user-gender" role="group">
               <button data-value="male" data-i18n="lang.gender.male"></button>
               <button data-value="female" data-i18n="lang.gender.female"></button>
-              <button data-value="" data-i18n="lang.gender.unset"></button>
             </div>
           </label>
           <p class="hint" data-i18n="lang.user_gender_hint"></p>

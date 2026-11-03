@@ -2,8 +2,8 @@
 
 Look (approved; matches the promo video's head): the MediaPipe face mesh (468
 vertices, 898 triangles) as an indigo wireframe over translucent lavender
-facets lit from the upper left, glowing teal blinking eyes, teal lips and jaw,
-a dotted cyan orbit ring and a cyan light band sweeping down. Nothing else:
+facets lit from the upper left, glowing teal blinking eyes, teal lips and jaw
+and a cyan light band sweeping down. Nothing else:
 the background is fully transparent.
 
 Performance: ~9 ms draw + ~2 ms conversion per frame. Frames leave as raw
@@ -19,6 +19,7 @@ import math
 import numpy as np
 
 from .face_mp import TRIANGLES, VERTICES
+from .looks import THEMES, Look, Palette
 from .state import StateBlender
 
 # ── Dimensions & Placement ──────────────────────────────────────────────────
@@ -94,11 +95,8 @@ _ring_an = np.arange(0, 80) / 80.0 * math.pi * 2
 _LIGHT = np.array([-0.5, 0.55, 0.68])
 _LIGHT /= np.linalg.norm(_LIGHT)
 
-# Palette (taken from the reference frame).
-INDIGO = (0.44, 0.41, 0.90)       # wireframe
-LAVENDER = (0.62, 0.60, 0.94)     # facet shading
-TEAL = (0.05, 0.68, 0.80)         # eyes, lips, jaw lines
-CYAN = (0.13, 0.75, 0.88)         # orbit ring, light band
+# Palette (taken from the reference frame) — the "lura" theme; others in looks.py.
+INDIGO, LAVENDER, TEAL, CYAN = THEMES["lura"]
 
 
 def _rot(p: np.ndarray, yaw: float, pitch: float) -> np.ndarray:
@@ -111,16 +109,17 @@ def _rot(p: np.ndarray, yaw: float, pitch: float) -> np.ndarray:
     return np.stack([x2, y3, z3], -1)
 
 
+
+
 # ── Cairo renderer ──────────────────────────────────────────────────────────
 
-def render_png(
-    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
-) -> bytes:
+def render_png(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0,
+               look: Look | None = None) -> bytes:
     """Render one frame to PNG bytes."""
     import io
 
     bio = io.BytesIO()
-    render_surface(t, blender, size, amp).write_to_png(bio)
+    render_surface(t, blender, size, amp, look).write_to_png(bio)
     return bio.getvalue()
 
 
@@ -140,6 +139,38 @@ def surface_rgba(surface) -> bytes:
     return out.tobytes()
 
 
+def hit_rects(surface, cell: int = 12, threshold: int = 24, grow: int = 0) -> tuple:
+    """Rectangles (x, y, w, h) over the cells that hold visible pixels.
+
+    The window takes clicks only there; everywhere else they reach whatever is
+    behind it, so the transparent square around Lura never blocks the desktop.
+    ``grow`` widens the cells by that many on every side.
+    """
+    surface.flush()
+    w, h, stride = surface.get_width(), surface.get_height(), surface.get_stride()
+    a = np.frombuffer(surface.get_data(), np.uint8).reshape(h, stride)[:, 3: w * 4: 4]
+    hc, wc = h // cell, w // cell
+    on = a[: hc * cell, : wc * cell].reshape(hc, cell, wc, cell).max((1, 3)) > threshold
+    for _ in range(grow):
+        g = on.copy()
+        g[1:] |= on[:-1]
+        g[:-1] |= on[1:]
+        g[:, 1:] |= on[:, :-1]
+        g[:, :-1] |= on[:, 1:]
+        on = g
+    rects = []
+    for r, row in enumerate(on.tolist()):
+        c = 0
+        while c < wc:
+            if row[c]:
+                c0 = c
+                while c < wc and row[c]:
+                    c += 1
+                rects.append((c0 * cell, r * cell, (c - c0) * cell, cell))
+            c += 1
+    return tuple(rects)
+
+
 def _bucket_stroke(cr, segs, alphas, rgb, levels=7):
     """Stroke many segments with few cairo calls by grouping alpha levels."""
     if len(segs) == 0:
@@ -156,13 +187,20 @@ def _bucket_stroke(cr, segs, alphas, rgb, levels=7):
         cr.stroke()
 
 
-def render_surface(
-    t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0
-):
-    """Draw one frame of the head. ``amp`` (0..1 voice loudness) opens the jaw."""
+def _projector(cx: float, cy: float, fs: float, cam: float = 3.4):
+    def proj(v):
+        k = cam / (cam - v[..., 2])
+        return np.stack([cx + v[..., 0] * fs * k, cy - v[..., 1] * fs * k], -1)
+    return proj
+
+
+def render_surface(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0,
+                   look: Look | None = None, tools: list[tuple[str, float]] | None = None):
+    """Draw one frame in the chosen style. ``amp`` (0..1 voice loudness) drives the mouth / pulse;
+    ``tools`` are (connector, seconds since used) shown as badges."""
     import cairo
 
-    wl, wt, ws = blender.wl, blender.wt, blender.ws
+    look = look or Look()
     surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, size, size)
     cr = cairo.Context(surface)
     cr.set_operator(cairo.OPERATOR_CLEAR)
@@ -170,19 +208,33 @@ def render_surface(
     cr.set_operator(cairo.OPERATOR_OVER)
     cr.set_line_cap(cairo.LINE_CAP_ROUND)
     cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    _STYLES.get(look.style, _face_style)(cr, t, blender, size, amp, look.palette)
+    if tools:
+        _tool_badges(cr, size, look.palette, tools, t, _ORIGIN.get(look.style, (0.5, 0.5)))
+    return surface
 
-    cx, cy = size * 0.5, size * 0.47
-    fs = size * 0.26                                   # model unit -> pixels
-    glow = 0.65 * wl + 1.0 * wt + 1.25 * ws
 
-    yaw = 0.26 * math.sin(t * 0.45) + wt * 0.22 * math.sin(t * 1.3)
+def _motion(t: float, b: StateBlender, amp: float):
+    """Head turn, mouth opening and glow shared by the styles with a face."""
+    glow = 0.65 * b.wl + 1.0 * b.wt + 1.25 * b.ws
+    yaw = 0.26 * math.sin(t * 0.45) + b.wt * 0.22 * math.sin(t * 1.3)
     pitch = 0.07 * math.sin(t * 0.31) - 0.06
-    mouth = ws * max(amp, 0.10 * abs(math.sin(t * 7.0)))
-    scan_y = 1.25 - (((t * (0.55 + 0.6 * wt)) % 2.0) / 2.0) * 2.7
+    mouth = b.ws * max(amp, 0.10 * abs(math.sin(t * 7.0)))
+    return glow, yaw, pitch, mouth
 
-    def proj(v):
-        k = 3.4 / (3.4 - v[..., 2])
-        return np.stack([cx + v[..., 0] * fs * k, cy - v[..., 1] * fs * k], -1)
+
+# ── style: the face ─────────────────────────────────────────────────────────
+
+def _face_style(cr, t, b, size, amp, pal: Palette):
+    glow, yaw, pitch, mouth = _motion(t, b, amp)
+    scan_y = 1.25 - (((t * (0.55 + 0.6 * b.wt)) % 2.0) / 2.0) * 2.7
+    _face(cr, t, size / OVERLAY_SIZE, pal, _projector(size * 0.5, size * 0.47, size * 0.26),
+          size * 0.26, yaw, pitch, scan_y, glow, mouth)
+
+
+def _face(cr, t, u, pal: Palette, proj, fs, yaw, pitch, scan_y, glow, mouth):
+    """The MediaPipe head. ``u`` scales line widths and dots with the frame size."""
+    import cairo
 
     # Deform (jaw) and transform the mesh.
     V = V0.copy()
@@ -206,13 +258,14 @@ def render_surface(
     sal = (0.10 + 0.25 * _smooth(-0.2, 0.6, sv[front, 2])
            + 0.45 * _gauss(SHELL[front, 1] - scan_y, 0.04))
     q = np.clip((sal * 4).astype(int), 1, 4)
+    d1 = 0.8 * u
     for lv in range(1, 5):
         for x, y in sp[q == lv].tolist():
-            cr.rectangle(x - 0.8, y - 0.8, 1.6, 1.6)
-        cr.set_source_rgba(*LAVENDER, lv / 4 * 0.8)
+            cr.rectangle(x - d1, y - d1, 2 * d1, 2 * d1)
+        cr.set_source_rgba(*pal.fill, lv / 4 * 0.8)
         cr.fill()
 
-    # Shaded facets: a translucent lavender skin that reads on dark and light wallpapers.
+    # Shaded facets: a translucent skin that reads on dark and light wallpapers.
     shade = 0.10 + 0.16 * (1.0 - TL) + 0.12 * TL
     qf = np.clip((shade * 10).astype(int), 0, 10)
     tri_xy = S[TRI].reshape(-1, 6)
@@ -225,10 +278,10 @@ def render_surface(
             cr.line_to(x2, y2)
             cr.line_to(x3, y3)
             cr.close_path()
-        cr.set_source_rgba(*LAVENDER, lv / 10)
+        cr.set_source_rgba(*pal.fill, lv / 10)
         cr.fill()
 
-    # Wireframe: indigo, teal below the mouth, cyan where the light band passes.
+    # Wireframe: wire colour, accent below the mouth, glow where the light band passes.
     el = np.zeros(len(EDGES))
     np.maximum.at(el, _EDGE_OWN, TL[_TRI_OWN])
     band = np.maximum(_gauss(V0[EDGES[:, 0], 1] - scan_y, 0.022),
@@ -237,45 +290,46 @@ def render_surface(
     segs = np.concatenate([S[EDGES[:, 0]], S[EDGES[:, 1]]], 1)
     teal = EDGE_TEAL > 0.5
     hot = band > 0.5
-    cr.set_line_width(0.75)
-    _bucket_stroke(cr, segs[~teal & ~hot], alpha[~teal & ~hot], INDIGO)
-    _bucket_stroke(cr, segs[teal & ~hot], np.clip(alpha[teal & ~hot] + 0.15, 0, 1), TEAL)
-    cr.set_line_width(1.1)
-    _bucket_stroke(cr, segs[hot], np.clip(0.55 * band[hot] * glow, 0, 1), CYAN)
+    cr.set_line_width(0.75 * u)
+    _bucket_stroke(cr, segs[~teal & ~hot], alpha[~teal & ~hot], pal.wire)
+    _bucket_stroke(cr, segs[teal & ~hot], np.clip(alpha[teal & ~hot] + 0.15, 0, 1), pal.accent)
+    cr.set_line_width(1.1 * u)
+    _bucket_stroke(cr, segs[hot], np.clip(0.55 * band[hot] * glow, 0, 1), pal.glow)
 
     # Vertex dots on the front-facing half.
     d = _smooth(-0.3, 0.8, VV[:, 2])
+    d2 = 0.7 * u
     for x, y in S[d > 0.55].tolist():
-        cr.rectangle(x - 0.7, y - 0.7, 1.4, 1.4)
-    cr.set_source_rgba(*INDIGO, 0.55)
+        cr.rectangle(x - d2, y - d2, 2 * d2, 2 * d2)
+    cr.set_source_rgba(*pal.wire, 0.55)
     cr.fill()
 
-    # Lips: teal outline, dark glowing mouth opening while speaking.
-    cr.set_line_width(1.2)
+    # Lips: accent outline, dark glowing mouth opening while speaking.
+    cr.set_line_width(1.2 * u)
     for loop, al in ((OUTER_LIP, 0.75), (INNER_LIP, 0.9)):
         pts = S[loop].tolist()
         cr.move_to(*pts[0])
         for p in pts[1:]:
             cr.line_to(*p)
         cr.close_path()
-        cr.set_source_rgba(*TEAL, al)
+        cr.set_source_rgba(*pal.accent, al)
         if loop is INNER_LIP and mouth > 0.03:
             cr.stroke_preserve()
-            cr.set_source_rgba(0.0, 0.32, 0.42, min(0.6, 0.2 + 0.5 * mouth))
+            cr.set_source_rgba(*(c * 0.5 for c in pal.accent), min(0.6, 0.2 + 0.5 * mouth))
             cr.fill()
         else:
             cr.stroke()
 
-    # Eyes: teal glow, blinking.
+    # Eyes: accent glow, blinking.
     blink = 1.0 - max(0.0, math.sin(t * 0.9 + 1.3)) ** 80
     for e in _rot(EYES, yaw, pitch):
         ex, ey = proj(e).tolist()
         rx = fs * 0.09
         ry = max(0.8, rx * 0.6 * blink)
         g = cairo.RadialGradient(ex, ey, 0, ex, ey, rx)
-        g.add_color_stop_rgba(0.0, *TEAL, min(1.0, 0.85 + 0.15 * glow))
-        g.add_color_stop_rgba(0.45, *TEAL, 0.55)
-        g.add_color_stop_rgba(1.0, *TEAL, 0.0)
+        g.add_color_stop_rgba(0.0, *pal.accent, min(1.0, 0.85 + 0.15 * glow))
+        g.add_color_stop_rgba(0.45, *pal.accent, 0.55)
+        g.add_color_stop_rgba(1.0, *pal.accent, 0.0)
         cr.save()
         cr.translate(ex, ey)
         cr.scale(1.0, ry / rx)
@@ -285,17 +339,441 @@ def render_surface(
         cr.fill()
         cr.restore()
 
-    # Dotted orbit ring around the head, back half dimmer.
-    an = _ring_an + t * 0.5
-    ring = np.stack([np.cos(an) * 1.5, np.full_like(an, -0.05), np.sin(an) * 1.5], -1)
-    rv = _rot(ring, yaw * 0.4, 0.22 + pitch)
-    rp = proj(rv)
-    for back in (True, False):
-        sel = (rv[:, 2] <= 0) if back else (rv[:, 2] > 0)
-        for x, y in rp[sel].tolist():
-            cr.arc(x, y, 1.15, 0, 2 * math.pi)
-            cr.new_sub_path()
-        cr.set_source_rgba(*CYAN, (0.25 if back else 0.75) * min(1.0, glow))
+
+# ── style: the orb (a Siri-like ball of light) ──────────────────────────────
+
+_ORB_TH = np.linspace(0.0, 2.0 * math.pi, 97)
+
+
+def _orb_style(cr, t, b, size, amp, pal: Palette):
+    import cairo
+
+    u = size / OVERLAY_SIZE
+    cx = cy = size * 0.5
+    energy = 0.25 * b.wl + 0.6 * b.wt + b.ws * (0.45 + 1.1 * amp)
+    r = size * 0.27 * (1.0 + 0.035 * math.sin(t * 1.6) + 0.08 * b.ws * amp)
+
+    # Soft halo.
+    g = cairo.RadialGradient(cx, cy, r * 0.7, cx, cy, r * 1.75)
+    g.add_color_stop_rgba(0.0, *pal.glow, 0.22 + 0.25 * energy)
+    g.add_color_stop_rgba(1.0, *pal.glow, 0.0)
+    cr.set_source(g)
+    cr.arc(cx, cy, r * 1.75, 0, 2 * math.pi)
+    cr.fill()
+
+    # A tinted glass body, so it reads on light wallpapers too.
+    g = cairo.RadialGradient(cx - r * 0.25, cy - r * 0.3, r * 0.1, cx, cy, r)
+    g.add_color_stop_rgba(0.0, *pal.fill, 0.18)
+    g.add_color_stop_rgba(1.0, *pal.wire, 0.55)
+    cr.set_source(g)
+    cr.arc(cx, cy, r, 0, 2 * math.pi)
+    cr.fill()
+
+    # Flowing colour ribbons inside, added together like light.
+    cr.save()
+    cr.arc(cx, cy, r * 0.985, 0, 2 * math.pi)
+    cr.clip()
+    cr.set_operator(cairo.OPERATOR_ADD)
+    th = _ORB_TH
+    layers = ((pal.accent, 0.9, 3), (pal.wire, -0.7, 2), (pal.glow, 1.3, 4), (pal.fill, -1.1, 5))
+    for i, (rgb, speed, k) in enumerate(layers):
+        ph = t * speed * (1.0 + 1.2 * b.wt) + i * 1.7
+        wob = (0.05 + 0.20 * energy) * (0.6 * np.sin(k * th + ph) + 0.4 * np.sin((k + 1) * th - 1.3 * ph + i))
+        rr = r * (0.62 + 0.07 * i + wob)
+        ox = r * 0.16 * math.cos(ph * 0.6 + i)
+        oy = r * 0.16 * math.sin(ph * 0.5 - i)
+        pts = np.stack([cx + ox + rr * np.cos(th), cy + oy + rr * np.sin(th)], -1).tolist()
+        cr.move_to(*pts[0])
+        for p in pts[1:]:
+            cr.line_to(*p)
+        cr.close_path()
+        g = cairo.RadialGradient(cx + ox, cy + oy, 0, cx + ox, cy + oy, r * 0.9)
+        g.add_color_stop_rgba(0.0, *rgb, 0.50)
+        g.add_color_stop_rgba(1.0, *rgb, 0.04)
+        cr.set_source(g)
+        cr.fill()
+    cr.restore()
+
+    # Rim and a glassy highlight.
+    cr.set_line_width(1.3 * u)
+    cr.set_source_rgba(*pal.glow, 0.55 + 0.3 * min(1.0, energy))
+    cr.arc(cx, cy, r, 0, 2 * math.pi)
+    cr.stroke()
+    hx, hy = cx - r * 0.38, cy - r * 0.42
+    g = cairo.RadialGradient(hx, hy, 0, hx, hy, r * 0.35)
+    g.add_color_stop_rgba(0.0, 1, 1, 1, 0.45)
+    g.add_color_stop_rgba(1.0, 1, 1, 1, 0.0)
+    cr.set_source(g)
+    cr.arc(hx, hy, r * 0.35, 0, 2 * math.pi)
+    cr.fill()
+
+    # Thinking: a comet circling the orb.
+    if b.wt > 0.02:
+        a0 = t * 3.2
+        cr.set_line_width(2.4 * u)
+        for j in range(6):
+            cr.set_source_rgba(*pal.glow, b.wt * (0.85 - j * 0.13))
+            cr.arc(cx, cy, r * 1.22, a0 - (j + 1) * 0.16, a0 - j * 0.16)
+            cr.stroke()
+    # Speaking: ripples going out with the voice.
+    if b.ws > 0.02:
+        for j in range(2):
+            f = ((t * 0.9) + j * 0.5) % 1.0
+            cr.set_line_width(1.6 * u)
+            cr.set_source_rgba(*pal.accent, b.ws * (0.25 + 0.6 * amp) * (1.0 - f))
+            cr.arc(cx, cy, r * (1.05 + 0.5 * f), 0, 2 * math.pi)
+            cr.stroke()
+
+
+# ── style: the ring (a circular equaliser) ──────────────────────────────────
+
+_RING_N = 72
+_RING_AN = np.arange(_RING_N) / _RING_N * 2.0 * math.pi
+
+
+def _ring_style(cr, t, b, size, amp, pal: Palette):
+    import cairo
+
+    u = size / OVERLAY_SIZE
+    cx = cy = size * 0.5
+    R = size * 0.27
+    an = _RING_AN
+    lev = (0.05 + 0.08 * b.wl * (0.5 + 0.5 * np.sin(an * 3 + t * 1.2))
+           + b.wt * 0.18 * (0.5 + 0.5 * np.sin(an * 2 - t * 5.0))
+           + b.ws * (0.08 + 0.5 * amp) * (0.35 + 0.65 * np.abs(np.sin(an * 5 + t * 6.0) * np.sin(an * 2 - t * 3.1))))
+
+    # Faint disc and inner line.
+    g = cairo.RadialGradient(cx, cy, 0, cx, cy, R)
+    g.add_color_stop_rgba(0.0, *pal.fill, 0.0)
+    g.add_color_stop_rgba(1.0, *pal.fill, 0.28)
+    cr.set_source(g)
+    cr.arc(cx, cy, R, 0, 2 * math.pi)
+    cr.fill()
+    cr.set_line_width(1.0 * u)
+    cr.set_source_rgba(*pal.wire, 0.75)
+    cr.arc(cx, cy, R * 0.9, 0, 2 * math.pi)
+    cr.stroke()
+
+    # The bars.
+    c, s = np.cos(an), np.sin(an)
+    r0, r1 = R, R * (1.0 + lev)
+    segs = np.stack([cx + c * r0, cy + s * r0, cx + c * r1, cy + s * r1], -1)
+    cr.set_line_width(max(1.5, 2.0 * math.pi * R / _RING_N * 0.55))
+    _bucket_stroke(cr, segs, np.clip(0.45 + 1.4 * lev, 0, 1), pal.accent)
+
+    # Dotted orbit, and the thinking comet.
+    cr.set_source_rgba(*pal.glow, 0.6)
+    for a in (_ring_an[::2] + t * 0.4).tolist():
+        cr.arc(cx + math.cos(a) * R * 1.55, cy + math.sin(a) * R * 1.55, 1.1 * u, 0, 2 * math.pi)
+        cr.new_sub_path()
+    cr.fill()
+    if b.wt > 0.02:
+        a0 = t * 3.2
+        cr.set_line_width(2.4 * u)
+        for j in range(6):
+            cr.set_source_rgba(*pal.glow, b.wt * (0.85 - j * 0.13))
+            cr.arc(cx, cy, R * 0.78, a0 - (j + 1) * 0.16, a0 - j * 0.16)
+            cr.stroke()
+
+
+# ── style: the bust (a statue-like hologram on a ring of light) ──────────────
+#
+# Head, neck and shoulders, no arms, cut in a curve under the chest. The body
+# is drawn as fine horizontal contour lines over a translucent skin whose
+# edges glow (a hologram's rim), standing on rings of light with sound-wave
+# bars around it and specks drifting off the back of the head.
+
+# Profile from just under the chin down, in head units: (y, half width, half depth).
+_TORSO = np.array([
+    (-0.80, 0.36, 0.32), (-1.10, 0.40, 0.35), (-1.28, 0.72, 0.43), (-1.40, 1.15, 0.50),
+    (-1.55, 1.50, 0.56), (-1.75, 1.70, 0.62), (-2.00, 1.78, 0.66), (-2.30, 1.76, 0.68),
+    (-2.60, 1.70, 0.68), (-2.85, 1.62, 0.66)])
+_ROWS, _COLS = 40, 56
+_BOTTOM = -2.85
+
+
+def _bust_mesh():
+    k = np.linspace(0, len(_TORSO) - 1, _ROWS)
+    prof = np.stack([np.interp(k, np.arange(len(_TORSO)), _TORSO[:, i]) for i in range(3)], -1)
+    th = np.arange(_COLS)[None, :] / _COLS * 2.0 * math.pi
+    sx = np.sign(np.sin(th)) * np.abs(np.sin(th)) ** 0.75          # rounded, square-ish shoulders
+    y, wx, wz = prof[:, :1], prof[:, 1:2], prof[:, 2:3]
+    z0 = np.where(y > -1.3, -0.12, 0.0)                              # the neck sits back
+    yy = np.repeat(y, _COLS, 1)
+    V = np.stack([wx * sx, yy, wz * np.cos(th) + z0], -1)
+    core = np.stack([np.zeros_like(yy), yy, np.broadcast_to(z0, yy.shape)], -1)
+    return V.reshape(-1, 3), core.reshape(-1, 3)
+
+
+BUST_V, BUST_CORE = _bust_mesh()
+_i = np.arange(_ROWS - 1)[:, None] * _COLS
+_j = np.arange(_COLS)[None, :]
+BUST_Q = np.stack([(_i + _j).ravel(), (_i + (_j + 1) % _COLS).ravel(),
+                   (_i + _COLS + (_j + 1) % _COLS).ravel(), (_i + _COLS + _j).ravel()], -1)
+_r = np.arange(_ROWS)[:, None] * _COLS
+#: Horizontal contour segments (every ring) and vertical ones (every 4th column).
+BUST_H = np.stack([(_r + _j).ravel(), (_r + (_j + 1) % _COLS).ravel()], -1)
+BUST_HROW = np.repeat(np.arange(_ROWS), _COLS)
+_jv = np.arange(0, _COLS, 4)[None, :]
+BUST_VE = np.stack([(_i + _jv).ravel(), (_i + _COLS + _jv).ravel()], -1)
+_SPARKS = np.random.default_rng(7).random((90, 4))
+_WAVE_N = 72
+_WAVE_AN = np.arange(_WAVE_N) / _WAVE_N * 2.0 * math.pi
+
+
+def _norm(v):
+    return v / (np.linalg.norm(v, axis=-1, keepdims=True) + 1e-9)
+
+
+def _ellipse(cr, cx, cy, rx, ry):
+    cr.save()
+    cr.translate(cx, cy)
+    cr.scale(1.0, ry / rx)
+    cr.new_sub_path()
+    cr.arc(0, 0, rx, 0, 2 * math.pi)
+    cr.restore()
+
+
+def _bust_body(cr, V, core, proj, pal: Palette, u, scan_y, glow):
+    """Translucent skin with a glowing rim, contour lines and a few verticals."""
+    S = proj(V)
+    A, B, C = V[BUST_Q[:, 0]], V[BUST_Q[:, 1]], V[BUST_Q[:, 2]]
+    n = _norm(np.cross(B - A, C - A))
+    out = (A + B + C) / 3 - core[BUST_Q[:, :3]].mean(1)
+    n *= np.sign((n * out).sum(1, keepdims=True) + 1e-9)
+    facing = n[:, 2]
+    front = facing > 0
+    rim = (1.0 - np.clip(facing, 0, 1)) ** 2.5                      # bright where the surface turns away
+    lam = np.clip(n @ _LIGHT, 0.0, 1.0)
+    shade = 0.06 + 0.10 * lam + 0.42 * rim
+    qf = np.where(front, np.clip((shade * 10).astype(int), 0, 10), 0)
+    xy = S[BUST_Q].reshape(-1, 8)
+    for lv in range(1, 11):
+        sel = xy[qf == lv].tolist()
+        if not sel:
+            continue
+        for x1, y1, x2, y2, x3, y3, x4, y4 in sel:
+            cr.move_to(x1, y1)
+            cr.line_to(x2, y2)
+            cr.line_to(x3, y3)
+            cr.line_to(x4, y4)
+            cr.close_path()
+        cr.set_source_rgba(*pal.fill, lv / 10)
         cr.fill()
 
-    return surface
+    # Per-vertex facing (from the quads around it) decides each line's brightness.
+    vf = np.full(len(V), -1.0)
+    np.maximum.at(vf, BUST_Q.ravel(), np.repeat(facing, 4))
+    vrim = (1.0 - np.clip(vf, 0, 1)) ** 2.5
+
+    def strength(edges):
+        f = np.minimum(vf[edges[:, 0]], vf[edges[:, 1]])
+        r = np.maximum(vrim[edges[:, 0]], vrim[edges[:, 1]])
+        return np.where(f > -0.05, 0.22 + 0.55 * r, 0.06), f
+
+    hs, hf = strength(BUST_H)
+    segs = np.concatenate([S[BUST_H[:, 0]], S[BUST_H[:, 1]]], 1)
+    band = _gauss(V[BUST_H[:, 0], 1] - scan_y, 0.04)
+    hot = (band > 0.4) & (hf > 0)
+    cr.set_line_width(0.7 * u)
+    _bucket_stroke(cr, segs[~hot], hs[~hot], pal.wire)
+    cr.set_line_width(1.2 * u)
+    _bucket_stroke(cr, segs[hot], np.clip(0.7 * band[hot] * glow, 0, 1), pal.glow)
+    vs, _ = strength(BUST_VE)
+    cr.set_line_width(0.5 * u)
+    _bucket_stroke(cr, np.concatenate([S[BUST_VE[:, 0]], S[BUST_VE[:, 1]]], 1), vs * 0.6, pal.wire)
+
+    # The outline glows: the bottom ring and the silhouette.
+    bottom = S[(_ROWS - 1) * _COLS:].tolist()
+    cr.move_to(*bottom[0])
+    for p in bottom[1:]:
+        cr.line_to(*p)
+    cr.close_path()
+    cr.set_line_width(1.6 * u)
+    cr.set_source_rgba(*pal.glow, 0.8)
+    cr.stroke()
+    sil = (hf > -0.15) & (hf < 0.18)
+    cr.set_line_width(1.5 * u)
+    _bucket_stroke(cr, segs[sil], np.full(int(sil.sum()), 0.75), pal.glow)
+
+
+def _base(cr, proj, y0, u, pal: Palette, t, glow):
+    """Flat rings of light under the bust, in the same perspective as the body."""
+    import cairo
+
+    R = 2.55
+    cx, cy = proj(np.array([0.0, y0, 0.0])).tolist()
+    rx = proj(np.array([R, y0, 0.0]))[0] - cx
+    ry = (proj(np.array([0.0, y0, R]))[1] - proj(np.array([0.0, y0, -R]))[1]) / 2
+    cy = (proj(np.array([0.0, y0, R]))[1] + proj(np.array([0.0, y0, -R]))[1]) / 2
+    cr.save()
+    cr.translate(cx, cy)
+    cr.scale(1.0, ry / rx)
+    g = cairo.RadialGradient(0, 0, 0, 0, 0, rx * 1.15)
+    g.add_color_stop_rgba(0.0, *pal.glow, 0.40 * min(1.0, glow))
+    g.add_color_stop_rgba(0.5, *pal.accent, 0.12)
+    g.add_color_stop_rgba(1.0, *pal.accent, 0.0)
+    cr.set_source(g)
+    cr.arc(0, 0, rx * 1.15, 0, 2 * math.pi)
+    cr.fill()
+    cr.restore()
+    for k, f in enumerate((1.0, 0.86, 0.70, 0.52, 0.34)):
+        _ellipse(cr, cx, cy, rx * f, ry * f)
+        cr.set_line_width((1.6 if k in (0, 2) else 0.8) * u)
+        cr.set_source_rgba(*(pal.glow if k % 2 == 0 else pal.accent), 0.85 - k * 0.1)
+        cr.stroke()
+    for f, speed, dash in ((0.93, 25, (14, 10)), (0.61, -35, (5, 8))):
+        _ellipse(cr, cx, cy, rx * f, ry * f)
+        cr.set_dash([dash[0] * u, dash[1] * u], -t * speed * u)
+        cr.set_line_width(2.2 * u)
+        cr.set_source_rgba(*pal.glow, 0.75)
+        cr.stroke()
+    cr.set_dash([])
+
+
+def _wave_bars(cr, proj, pal: Palette, u, t, b, amp, yaw, y0, front: bool):
+    """Sound-wave bars standing on the base ring: a calm shimmer while she
+    listens, a sweep while thinking, tall with her voice."""
+    an = _WAVE_AN
+    h = (0.10 + 0.10 * b.wl * (0.5 + 0.5 * np.sin(an * 5 + t * 2.0))
+         + b.wt * 0.35 * np.clip(np.cos(an - t * 3.0), 0, 1) ** 4
+         + b.ws * (0.15 + 1.3 * amp) * np.abs(np.sin(an * 7 + t * 9.0) * np.sin(an * 3 - t * 4.0)))
+    R = 2.35
+    foot = np.stack([np.cos(an + yaw) * R, np.full_like(an, y0), np.sin(an + yaw) * R], -1)
+    head = foot.copy()
+    head[:, 1] += h
+    sel = (foot[:, 2] > 0) if front else (foot[:, 2] <= 0)
+    segs = np.concatenate([proj(foot), proj(head)], 1)[sel]
+    cr.set_line_width(1.6 * u)
+    _bucket_stroke(cr, segs, np.clip((0.35 if front else 0.15) + 0.5 * h[sel], 0, 1), pal.glow)
+
+
+def _ear_waves(cr, proj, pal: Palette, u, t, b, amp, yaw, pitch):
+    """While she speaks, short waveforms beside the head, like the voice leaving it."""
+    if b.ws < 0.05:
+        return
+    for side in (-1, 1):
+        c = proj(_rot(np.array([side * 1.25, 0.05, 0.0]), yaw, pitch)).tolist()
+        for k in range(9):
+            x = c[0] + side * k * 3.2 * u
+            hgt = (4 + 22 * amp * abs(math.sin(t * 11 + k * 1.3 + side))) * u * (1 - k / 11)
+            cr.move_to(x, c[1] - hgt)
+            cr.line_to(x, c[1] + hgt)
+        cr.set_line_width(1.4 * u)
+        cr.set_source_rgba(*pal.glow, 0.75 * b.ws)
+        cr.stroke()
+
+
+def _drift(cr, proj, pal: Palette, u, t, yaw, pitch):
+    """Specks of light drifting off the back of the head and shoulder."""
+    sp = _SPARKS
+    ph = (t * (0.06 + 0.10 * sp[:, 1]) + sp[:, 0]) % 1.0
+    start = np.stack([-0.35 - 0.5 * sp[:, 2], 1.0 - 2.2 * sp[:, 3], -0.2 - 0.3 * sp[:, 1]], -1)
+    pos = start + np.stack([-1.1 * ph, 0.5 * ph, -0.3 * ph], -1) * (0.6 + sp[:, 2:3])
+    S = proj(_rot(pos, yaw, pitch))
+    al = np.sin(ph * math.pi) * (0.3 + 0.6 * sp[:, 3])
+    q = np.clip((al * 4).astype(int), 0, 4)
+    for lv in range(1, 5):
+        for (x, y), r in zip(S[q == lv].tolist(), (0.5 + sp[q == lv, 1]).tolist()):
+            cr.arc(x, y, r * u, 0, 2 * math.pi)
+            cr.new_sub_path()
+        cr.set_source_rgba(*pal.glow, lv / 4)
+        cr.fill()
+
+
+def _bust_style(cr, t, b, size, amp, pal: Palette):
+    import cairo
+
+    glow, yaw, pitch, mouth = _motion(t, b, amp)
+    u = size / OVERLAY_SIZE
+    fs = size * 0.155
+    cx, cy = size * 0.5, size * 0.24
+    proj = _projector(cx, cy, fs, cam=12.0)
+    scan_y = 1.25 - (((t * (0.45 + 0.5 * b.wt)) % 2.0) / 2.0) * 4.3
+    body_yaw = 0.35 * yaw
+    tilt = -0.02 + 0.015 * math.sin(t * 0.5)
+    base_y = _BOTTOM - 0.12
+
+    # Halo behind the figure.
+    g = cairo.RadialGradient(cx, size * 0.45, 0, cx, size * 0.45, size * 0.45)
+    g.add_color_stop_rgba(0.0, *pal.glow, 0.14 * min(1.0, glow))
+    g.add_color_stop_rgba(1.0, *pal.glow, 0.0)
+    cr.set_source(g)
+    cr.arc(cx, size * 0.45, size * 0.45, 0, 2 * math.pi)
+    cr.fill()
+
+    _base(cr, proj, base_y, u, pal, t, glow)
+    _wave_bars(cr, proj, pal, u, t, b, amp, body_yaw, base_y, front=False)
+    _bust_body(cr, _rot(BUST_V, body_yaw, tilt), _rot(BUST_CORE, body_yaw, tilt), proj, pal, u, scan_y, glow)
+    _face(cr, t, u, pal, proj, fs, yaw, pitch, scan_y, glow, mouth)
+    _drift(cr, proj, pal, u, t, yaw, pitch)
+    _ear_waves(cr, proj, pal, u, t, b, amp, yaw, pitch)
+    _wave_bars(cr, proj, pal, u, t, b, amp, body_yaw, base_y, front=True)
+
+
+# ── tools in use: a line out to a badge per connector ───────────────────────
+
+#: Where the lines leave Lura (the left edge of the head / orb), as fractions of the frame.
+_ORIGIN = {"face": (0.29, 0.42), "orb": (0.24, 0.5), "ring": (0.22, 0.5), "bust": (0.37, 0.24)}
+
+
+def _tool_badges(cr, size, pal: Palette, tools, t, origin):
+    """Each connector in use (e.g. github) as two letters in a holographic
+    circle, with a stream of light running out to it from Lura."""
+    import cairo
+
+    from .state import TOOL_LINGER
+
+    u = size / OVERLAY_SIZE
+    ox, oy = size * origin[0], size * origin[1]
+    r = max(11.0, size * 0.062)
+    for i, (name, age) in enumerate(tools[-4:]):
+        alpha = min(1.0, age / 0.3, (TOOL_LINGER - age) / 0.8)
+        if alpha <= 0:
+            continue
+        bx, by = r + 4 * u, size * 0.14 + i * (2 * r + 8 * u)
+        pulse = max(0.0, 1.0 - age / 0.7)
+
+        # The stream: a curve out of Lura, dashes flowing towards the badge.
+        mx, my = (ox + bx) / 2, min(oy, by) - size * 0.05
+        cr.move_to(ox, oy)
+        cr.curve_to(mx, my, mx, by, bx + r, by)
+        cr.set_line_width(2.6 * u)
+        cr.set_source_rgba(*pal.glow, 0.18 * alpha)
+        cr.stroke_preserve()
+        cr.set_line_width(1.2 * u)
+        cr.set_dash([4 * u, 6 * u], -t * 40 * u)
+        cr.set_source_rgba(*pal.glow, 0.85 * alpha)
+        cr.stroke()
+        cr.set_dash([])
+
+        # The badge.
+        g = cairo.RadialGradient(bx, by, 0, bx, by, r * (1.5 + 0.5 * pulse))
+        g.add_color_stop_rgba(0.0, *pal.glow, 0.35 * alpha)
+        g.add_color_stop_rgba(1.0, *pal.glow, 0.0)
+        cr.set_source(g)
+        cr.arc(bx, by, r * (1.5 + 0.5 * pulse), 0, 2 * math.pi)
+        cr.fill()
+        cr.arc(bx, by, r, 0, 2 * math.pi)
+        cr.set_source_rgba(*pal.wire, 0.45 * alpha)
+        cr.fill_preserve()
+        cr.set_line_width(1.4 * u)
+        cr.set_source_rgba(*pal.glow, 0.95 * alpha)
+        cr.stroke()
+        cr.set_line_width(1.0 * u)
+        cr.set_dash([2 * u, 4 * u], t * 12 * u)
+        cr.arc(bx, by, r * 1.25, 0, 2 * math.pi)
+        cr.set_source_rgba(*pal.accent, 0.8 * alpha)
+        cr.stroke()
+        cr.set_dash([])
+
+        label = (name[:1].upper() + name[1:2].lower()) if name else "?"
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(r * 0.85)
+        ext = cr.text_extents(label)
+        cr.move_to(bx - ext.width / 2 - ext.x_bearing, by - ext.height / 2 - ext.y_bearing)
+        cr.set_source_rgba(1, 1, 1, alpha)
+        cr.show_text(label)
+
+
+_STYLES = {"face": _face_style, "orb": _orb_style, "ring": _ring_style, "bust": _bust_style}

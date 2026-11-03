@@ -6,6 +6,8 @@ import enum
 import threading
 import time
 
+from .looks import Look
+
 
 class State(enum.Enum):
     LISTENING = "listening"    # Stable, gentle idle pulse/glow
@@ -14,6 +16,10 @@ class State(enum.Enum):
     # Backward compatibility aliases
     IDLE = "idle"
     CONNECTING = "connecting"
+
+
+#: How long a used connector's badge stays next to the face.
+TOOL_LINGER = 5.0
 
 
 class OverlayState:
@@ -25,6 +31,7 @@ class OverlayState:
         self._caption_ts = 0.0
         self._amp = 0.0
         self._amp_ts = 0.0
+        self._tools: dict[str, float] = {}
         self._lock = threading.Lock()
 
     @property
@@ -70,6 +77,19 @@ class OverlayState:
             self._captions[who] = text.strip()
             self._caption_ts = time.monotonic()
 
+    def set_tool(self, name: str) -> None:
+        """A connector (MCP server) is being used; the face shows it for a few seconds."""
+        with self._lock:
+            self._tools[name] = time.monotonic()
+
+    def tools(self, linger: float = TOOL_LINGER) -> list[tuple[str, float]]:
+        """(connector, seconds since last used) for the ones used lately, oldest first."""
+        now = time.monotonic()
+        with self._lock:
+            for name in [n for n, ts in self._tools.items() if now - ts > linger]:
+                del self._tools[name]
+            return sorted(((n, now - ts) for n, ts in self._tools.items()), key=lambda x: -x[1])
+
     def captions(self) -> tuple[str, str, float]:
         """(what you said, what Lura is saying, seconds since either changed)."""
         with self._lock:
@@ -78,6 +98,8 @@ class OverlayState:
 
     #: Subtitles under the face, switched live from the dashboard or the tray.
     subtitles_enabled: bool = True
+    #: Style, colours and size, switched live from the dashboard or the tray.
+    look: Look = Look()
 
 
 class StateBlender:

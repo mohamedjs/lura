@@ -238,6 +238,8 @@ class ConnectorService:
         if not run or not run.client:
             return f"Error: connector {target[0]} is not running."
         log.info("connector %s → %s", target[0], target[1])
+        if self._bus:
+            self._bus.publish(events.TOOL_USED, connector=target[0], tool=target[1])
         try:
             with run.lock:
                 return call(run.client, target[1], arguments)[:6000]
