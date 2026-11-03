@@ -71,7 +71,7 @@ mcp.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.3.0, Nov 2026)
+## Current behaviour (2.4.0, Nov 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
@@ -213,7 +213,7 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   a PNG round-trip** — it cost ~15 ms/frame for this detailed mesh. Keep cairo
   calls batched by alpha bucket (`_bucket_stroke`) and iterate `.tolist()`, not
   numpy scalars.
-- **Looks (since 2.3):** `overlay/looks.py` — styles `face` / `orb` / `bust` / `ring`,
+- **Looks (since 2.4):** `overlay/looks.py` — styles `face` / `orb` / `bust` / `ring`,
   themes `lura` (default, the approved palette) `aurora` `rose` `gold` `ice` or `custom`
   (`overlay_colors`: wire/fill/accent/glow hex), `overlay_scale` 0.6–2.0. All live
   (`OverlayState.look`, read every frame); dashboard "Look" tab + Qt tray submenu. The
