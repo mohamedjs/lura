@@ -9,6 +9,7 @@ written, not after the whole answer and the whole synthesis.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterator
 from typing import Protocol
 
@@ -111,6 +112,9 @@ def retry_after(message: str, default: float = 300.0) -> float:
     A free-tier daily quota says hours; trying again every few minutes only
     pays a failed round trip each time.
     """
+    reset = re.search(r'X-RateLimit-Reset"?\s*:\s*"?(\d{12,})', message, re.I)   # OpenRouter: epoch ms
+    if reset:
+        return max(60.0, int(reset.group(1)) / 1000 - time.time())
     match = re.search(r"retry in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:([\d.]+)s)?", message, re.I)
     if not match or not any(match.groups()):
         return default

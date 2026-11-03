@@ -46,7 +46,7 @@
   "voice.title": "الصوت",
   "voice.provider": "بيتكلم عن طريق",
   "voice.provider.auto": "تلقائي (Gemini الأول، وOpenRouter لما Gemini يبقى مشغول أو الكوتا تخلص)",
-  "voice.model_hint": "Gemini 3.8 Flash TTS افتراضيًا — مباشرة أو عن طريق OpenRouter، وفي OpenRouter تقدر تختار موديل صوت تاني.",
+  "voice.model_hint": "Gemini 3.8 Flash TTS افتراضيًا — مباشرة أو عن طريق OpenRouter، وفي OpenRouter تقدر تختار موديل صوت تاني. ولو عندك مفتاح ElevenLabs، ElevenLabs يسمع ويتكلم بأصوات حسابك.",
   "voice.gender": "الصوت",
   "voice.female": "ست",
   "voice.male": "راجل",
@@ -261,5 +261,6 @@
   "tray.style": "الشكل",
   "tray.theme": "الألوان",
   "voice.or_model": "موديل الصوت (OpenRouter)",
-  "voice.free": "مجاني"
+  "voice.free": "مجاني",
+  "voice.el_model": "موديل الصوت (ElevenLabs)"
 }

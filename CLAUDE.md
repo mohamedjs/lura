@@ -84,6 +84,26 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   OpenRouter's public `/models?output_modalities=speech` (`supported_voices`, cached 1 h,
   `GET /api/voice/models`). Non-Gemini models get no style direction and no Lite fallback;
   `voice_gender` is then the user's choice (Arabic forms, the bust's figure).
+- **ElevenLabs voice:** `voice/infrastructure/elevenlabs.py`. `KEY_PROVIDERS` = the brains +
+  `elevenlabs` (stored, checked with `GET /v2/voices`, never a brain: `PROVIDER_INFO["brain"]=False`);
+  it is in `VOICE_PROVIDERS` but `auto` never picks it — saving its key switches `auto` to it.
+  Speaks via `POST /v1/text-to-speech/{voice}/stream?output_format=pcm_24000` (`xi-api-key`,
+  `elevenlabs_model`, default `eleven_flash_v2_5`), hears via Scribe `scribe_v2` multipart
+  (`shared/http.request_json(raw=…)`, `tag_audio_events=false`). Voices from `/v2/voices` with
+  their gender label (`/api/voice/elevenlabs`, cached 1 h); `elevenlabs_voice_female/_male`
+  keep one per gender, empty → the account's first voice of that gender (what the dashboard
+  highlights), George if the list fails. With a Gemini/OpenRouter key too, `_voice_providers`
+  = [elevenlabs, that] and the fallbacks use `any_error` (used-up credit is a 401).
+- **Offline voice (Piper):** `voice/infrastructure/piper.py`. `synthesizer()` wraps every
+  chain in `_OfflineFallback` — any failure before audio (429, 402, 401, no network) →
+  Piper, one process per sentence, `ar_JO-kareem-medium` if the sentence has Arabic script
+  else `en_US-lessac-medium`, `--output_raw` resampled to 24 kHz. Dashboard preview and
+  selftest pass `offline=False` so they test the real voice. Program: `piper/` next to the
+  executable (release.yml bundles it for Linux + Windows and runs one sentence), else
+  `<data>/piper/piper/` (downloaded by `ensure()` at daemon start and by install.sh; macOS
+  signs it ad hoc), else `piper-tts` on PATH — never `piper` (apt's is a mouse tool).
+  Voices are always downloaded, not shipped (dataset licences). A free OpenRouter speech
+  model that hits its daily limit falls back to Gemini 3.8 Flash TTS until `X-RateLimit-Reset`.
 - **Streaming:** brain text streams into `SpeechPlayer` → first sentence synthesised
   while the rest is written. TTS falls back to the Lite TTS model on retryable errors only.
 - **2.3 — faster and interruptible (pipeline):**

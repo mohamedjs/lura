@@ -9,7 +9,8 @@ import time
 
 from ...shared.http import HttpError
 from ...shared.presence import NullPresence, Presence
-from ..settings import GEMINI, HEARING_MODELS, OPENROUTER, TTS_MODELS, VOICES, Settings, resolve_voice_provider
+from ..settings import (ELEVENLABS, GEMINI, HEARING_MODELS, OPENROUTER, TTS_MODELS, VOICE_PROVIDERS, VOICES, Settings,
+                        resolve_voice_provider)
 from .domain import SentenceChunker, SpeechSynthesizer, Transcriber, retry_after
 
 log = logging.getLogger(__name__)
@@ -170,14 +171,15 @@ class _FallbackSynthesizer:
     """Speak through the second voice provider when the first is out of quota,
     overloaded or slow, instead of going silent."""
 
-    def __init__(self, primary: SpeechSynthesizer, backup: SpeechSynthesizer, on_429):
-        self._primary, self._backup, self._on_429 = primary, backup, on_429
+    def __init__(self, primary: SpeechSynthesizer, backup: SpeechSynthesizer, on_429, any_error: bool = False):
+        #: ``any_error``: ElevenLabs reports used-up credit as a 401, not a retryable status.
+        self._primary, self._backup, self._on_429, self._any = primary, backup, on_429, any_error
 
     def synthesize(self, text: str) -> bytes:
         try:
             return self._primary.synthesize(text)
         except HttpError as exc:
-            if not exc.retryable:
+            if not (exc.retryable or self._any):
                 raise
             if exc.status == 429:
                 self._on_429(exc)
@@ -192,7 +194,7 @@ class _FallbackSynthesizer:
                 yield pcm
         except HttpError as exc:
             # Mid-sentence, the backup would start the sentence over.
-            if started or not exc.retryable:
+            if started or not (exc.retryable or self._any):
                 raise
             if exc.status == 429:
                 self._on_429(exc)
@@ -200,17 +202,68 @@ class _FallbackSynthesizer:
             yield from self._backup.stream(text)
 
 
+def elevenlabs_voice(settings: Settings, account_voices) -> str:
+    """The chosen ElevenLabs voice for the current gender; else the account's first voice
+    of that gender (the one the dashboard shows as picked); else George."""
+    from .infrastructure.elevenlabs import FALLBACK_VOICE
+
+    gender = "male" if settings.voice_gender == "male" else "female"
+    if chosen := getattr(settings, f"elevenlabs_voice_{gender}"):
+        return chosen
+    try:
+        listed = account_voices()
+    except Exception as exc:
+        log.warning("Could not list ElevenLabs voices (%s); using the default voice.", exc)
+        return FALLBACK_VOICE
+    same = [v for v in listed if v["gender"] == gender] or listed
+    return same[0]["id"] if same else FALLBACK_VOICE
+
+
+class _OfflineFallback:
+    """Speak with Piper when every online voice failed, whatever the reason
+    (out of quota, out of credit, no network): a silent Lura is the worst case."""
+
+    def __init__(self, online: SpeechSynthesizer, offline: SpeechSynthesizer):
+        self._online, self._offline = online, offline
+
+    def synthesize(self, text: str) -> bytes:
+        try:
+            return self._online.synthesize(text)
+        except Exception as exc:
+            if not _offline_ready():
+                raise
+            log.warning("Online voice failed (%s); speaking with the offline voice.", str(exc)[:120])
+            return self._offline.synthesize(text)
+
+    def stream(self, text: str):
+        started = False
+        try:
+            for pcm in self._online.stream(text):
+                started = True
+                yield pcm
+        except Exception as exc:
+            if started or not _offline_ready():
+                raise
+            log.warning("Online voice failed (%s); speaking with the offline voice.", str(exc)[:120])
+            yield from self._offline.stream(text)
+
+
+def _offline_ready() -> bool:
+    from .infrastructure.piper import ready
+    return ready()
+
+
 class _FallbackTranscriber:
     """Hear through the second voice provider when the first fails."""
 
-    def __init__(self, primary: Transcriber, backup: Transcriber, on_429):
-        self._primary, self._backup, self._on_429 = primary, backup, on_429
+    def __init__(self, primary: Transcriber, backup: Transcriber, on_429, any_error: bool = False):
+        self._primary, self._backup, self._on_429, self._any = primary, backup, on_429, any_error
 
     def transcribe(self, wav: bytes) -> str:
         try:
             return self._primary.transcribe(wav)
         except HttpError as exc:
-            if not exc.retryable:
+            if not (exc.retryable or self._any):
                 raise
             if exc.status == 429:
                 self._on_429(exc)
@@ -225,18 +278,22 @@ class VoiceService:
         self._cooldown_until: dict[str, float] = {}
         self._streaming = None   # tts.StreamSupport, made on first use
         self._models: tuple[float, list[dict]] | None = None
+        self._el_voices: tuple[float, list[dict]] | None = None
 
     def _voice_providers(self, settings: Settings) -> list[str]:
         from ...shared.errors import NeedsSetup
 
-        keys = {p for p in (GEMINI, OPENROUTER) if self._has_key(p)}
+        keys = {p for p in VOICE_PROVIDERS if self._has_key(p)}
         provider = resolve_voice_provider(settings, keys)
         if provider is None:
-            raise NeedsSetup("Lura's voice needs a Gemini or an OpenRouter key.")
-        if settings.voice_provider != "auto" or len(keys) < 2:
+            raise NeedsSetup("Lura's voice needs a Gemini, OpenRouter or ElevenLabs key.")
+        # auto falls back between the two Gemini routes; ElevenLabs is chosen by name.
+        order = [p for p in (GEMINI, OPENROUTER) if p in keys]
+        if provider == ELEVENLABS:   # out of credit or down: hear and speak through Gemini instead
+            return [ELEVENLABS, *order[:1]]
+        if settings.voice_provider != "auto" or len(order) < 2:
             return [provider]
         now = time.monotonic()
-        order = [GEMINI, OPENROUTER]
         order.sort(key=lambda p: self._cooldown_until.get(p, 0.0) > now)
         return order
 
@@ -245,7 +302,8 @@ class VoiceService:
         self._cooldown_until[provider] = time.monotonic() + wait
         log.warning("%s voice is out of quota; using the other provider for %.0f min.", provider, wait / 60)
 
-    def synthesizer(self, settings: Settings, voice: str | None = None) -> SpeechSynthesizer:
+    def synthesizer(self, settings: Settings, voice: str | None = None, offline: bool = True) -> SpeechSynthesizer:
+        """``offline``: Piper behind it all — off where the online voice itself is being checked."""
         from .infrastructure.tts import GeminiTTS, OpenRouterTTS, StreamSupport
 
         if self._streaming is None:
@@ -256,6 +314,10 @@ class VoiceService:
         gemini_voice = voice if voice in VOICES["female"] + VOICES["male"] else settings.voice_name
 
         def build(p: str) -> SpeechSynthesizer:
+            if p == ELEVENLABS:
+                from .infrastructure.elevenlabs import ElevenLabsTTS
+                return ElevenLabsTTS(self._key_for(p), settings.elevenlabs_model,
+                                     voice or elevenlabs_voice(settings, self.elevenlabs_voices))
             if p == GEMINI:
                 return GeminiTTS(self._key_for(p), TTS_MODELS[p], gemini_voice, settings.tts_style,
                                  lite_fallback=len(providers) == 1, streaming=self._streaming)
@@ -264,14 +326,23 @@ class VoiceService:
                 return OpenRouterTTS(self._key_for(p), model, gemini_voice, settings.tts_style,
                                      lite_fallback=len(providers) == 1)
             # Another speech model: its own voices, and no Gemini-style direction in the text.
-            return OpenRouterTTS(self._key_for(p), model, voice or settings.openrouter_voice, "",
-                                 lite_fallback=False)
+            # Free ones run out (50 requests a day): speak with Gemini until the reset.
+            gemini = OpenRouterTTS(self._key_for(p), TTS_MODELS[p], gemini_voice, settings.tts_style)
+            if self._cooldown_until.get(model, 0.0) > time.monotonic():
+                return gemini
+            own = OpenRouterTTS(self._key_for(p), model, voice or settings.openrouter_voice, "",
+                                lite_fallback=False)
+            return _FallbackSynthesizer(own, gemini, lambda exc: self._mark_429(model, exc))
+
+        from .infrastructure.piper import PiperTTS
 
         providers = self._voice_providers(settings)
         primary = build(providers[0])
-        if len(providers) == 1:
-            return primary
-        return _FallbackSynthesizer(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
+        if len(providers) > 1:
+            primary = _FallbackSynthesizer(primary, build(providers[1]),
+                                           lambda exc: self._mark_429(providers[0], exc),
+                                           any_error=providers[0] == ELEVENLABS)
+        return _OfflineFallback(primary, PiperTTS()) if offline else primary
 
     def speech_models(self) -> list[dict]:
         """OpenRouter's speech models with their voices, fetched at most once an hour."""
@@ -282,17 +353,36 @@ class VoiceService:
             self._models = (now, speech_models())
         return self._models[1]
 
+    def elevenlabs_voices(self) -> list[dict]:
+        """The ElevenLabs account's voices with their gender, fetched at most once an hour."""
+        from .infrastructure.elevenlabs import voices
+
+        now = time.monotonic()
+        if self._el_voices is None or now - self._el_voices[0] > 3600:
+            self._el_voices = (now, voices(self._key_for(ELEVENLABS)))
+        return self._el_voices[1]
+
+    def check_key(self, provider: str, key: str) -> str:
+        """For keys that only hear and speak (ElevenLabs)."""
+        from .infrastructure.elevenlabs import check_key
+        self._el_voices = None
+        return check_key(key)
+
     def transcriber(self, settings: Settings) -> Transcriber:
         from .infrastructure.transcribe import ChatTranscriber
 
         def build(p: str) -> Transcriber:
+            if p == ELEVENLABS:
+                from .infrastructure.elevenlabs import ElevenLabsTranscriber
+                return ElevenLabsTranscriber(self._key_for(p))
             return ChatTranscriber(p, self._key_for(p), HEARING_MODELS[p])
 
         providers = self._voice_providers(settings)
         primary = build(providers[0])
         if len(providers) == 1:
             return primary
-        return _FallbackTranscriber(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc))
+        return _FallbackTranscriber(primary, build(providers[1]), lambda exc: self._mark_429(providers[0], exc),
+                                    any_error=providers[0] == ELEVENLABS)
 
     def player(self, settings: Settings, presence: Presence | None = None, listen: bool = False) -> SpeechPlayer:
         """``listen``: a conversation reply — the user may talk over it (barge-in)."""
@@ -304,7 +394,7 @@ class VoiceService:
 
     def preview(self, settings: Settings, voice: str, text: str) -> None:
         """Say a sample line in one voice — the dashboard's ▶ button."""
-        player = SpeechPlayer(self.synthesizer(settings, voice), settings.output_device)
+        player = SpeechPlayer(self.synthesizer(settings, voice, offline=False), settings.output_device)
         player.say(text)
         player.wait()
 
@@ -362,6 +452,12 @@ class VoiceService:
     def ensure_wake_model(progress=None):
         from .infrastructure.wake import ensure_model
         return ensure_model(progress)
+
+    @staticmethod
+    def ensure_offline_voice() -> bool:
+        """Install Piper and its voices if missing (downloads ~150 MB once)."""
+        from .infrastructure.piper import ensure
+        return ensure()
 
     @staticmethod
     def wake_model_present() -> bool:

@@ -8,7 +8,7 @@ from typing import Any
 from ...shared import events
 from ...shared.errors import NeedsSetup
 from ...shared.events import EventBus
-from .domain import PROVIDER_INFO, PROVIDERS, Capabilities, Settings, apply_patch, capabilities
+from .domain import KEY_PROVIDERS, PROVIDER_INFO, Capabilities, Settings, apply_patch, capabilities
 from .infrastructure import JsonSettingsRepository, KeyFileStore
 
 
@@ -68,7 +68,7 @@ class SettingsService:
         return bool(self._keys.get(provider))
 
     def set_key(self, provider: str, key: str) -> None:
-        if provider not in PROVIDERS:
+        if provider not in KEY_PROVIDERS:
             raise ValueError(f"unknown provider {provider!r}")
         self._keys.set(provider, key)
         if self._bus:
@@ -83,7 +83,7 @@ class SettingsService:
     def key_status(self) -> dict[str, dict[str, Any]]:
         """Per provider: stored or not, masked, and from where. Never the key."""
         out = {}
-        for provider in PROVIDERS:
+        for provider in KEY_PROVIDERS:
             key = self._keys.get(provider)
             out[provider] = {"set": bool(key), "masked": mask(key) if key else "",
                              "source": self._keys.source(provider),

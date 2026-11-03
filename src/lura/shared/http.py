@@ -59,10 +59,13 @@ class HttpError(LuraError):
         return self.status in (None, 402, 408, 409, 429, 500, 502, 503, 504, 529)
 
 
-def _build(url: str, headers: dict[str, str] | None, payload: Any, form: dict | None):
+def _build(url: str, headers: dict[str, str] | None, payload: Any, form: dict | None,
+           raw: tuple[bytes, str] | None = None):
     all_headers = {"User-Agent": USER_AGENT, **(headers or {})}
     data = None
-    if payload is not None:
+    if raw is not None:   # a body built by the caller, e.g. multipart: (bytes, content type)
+        data, all_headers["Content-Type"] = raw
+    elif payload is not None:
         data = json.dumps(payload).encode()
         all_headers["Content-Type"] = "application/json"
     elif form is not None:
@@ -87,8 +90,8 @@ def _open(request, timeout: float):
 
 
 def request_json(url: str, headers: dict[str, str] | None = None, payload: Any = None,
-                 timeout: float = 60, form: dict | None = None) -> Any:
-    with _open(_build(url, headers, payload, form), timeout) as response:
+                 timeout: float = 60, form: dict | None = None, raw: tuple[bytes, str] | None = None) -> Any:
+    with _open(_build(url, headers, payload, form, raw), timeout) as response:
         body = response.read()
     return json.loads(body) if body else {}
 

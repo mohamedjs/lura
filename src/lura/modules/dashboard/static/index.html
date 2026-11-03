@@ -138,11 +138,20 @@
               <option value="auto" data-i18n="voice.provider.auto"></option>
               <option value="gemini">Google Gemini</option>
               <option value="openrouter">OpenRouter</option>
+              <option value="elevenlabs">ElevenLabs</option>
             </select>
           </label>
           <p class="hint" data-i18n="voice.model_hint"></p>
           <label class="field" id="or-voice-model-field" hidden><span data-i18n="voice.or_model"></span>
             <select id="or-voice-model"></select>
+          </label>
+          <label class="field" id="el-model-field" hidden><span data-i18n="voice.el_model"></span>
+            <select id="el-model">
+              <option value="eleven_flash_v2_5">Flash v2.5 · fast</option>
+              <option value="eleven_v4_turbo">v4 Turbo · expressive, fast</option>
+              <option value="eleven_multilingual_v2">Multilingual v2 · rich</option>
+              <option value="eleven_v4">v4 · most expressive, slower</option>
+            </select>
           </label>
           <label class="field"><span data-i18n="voice.gender"></span>
             <div class="seg" id="gender" role="group">

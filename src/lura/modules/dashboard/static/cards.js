@@ -213,7 +213,7 @@ function renderHome() {
   const s = S.settings;
   const rows = [
     [t("home.brain"), s.mode === "realtime" ? `Gemini Live · ${s.realtime_model}` : `${(S.keys[s.brain_provider] || {}).label || s.brain_provider} · ${s.models[s.brain_provider] || ""}`],
-    [t("home.voice"), `${s.voice_name} · ${s.voice_provider === "auto" ? t("home.auto") : (S.keys[s.voice_provider] || {}).label || s.voice_provider}`],
+    [t("home.voice"), `${s.voice_provider === "elevenlabs" ? s.elevenlabs_model : s.voice_name} · ${s.voice_provider === "auto" ? t("home.auto") : (S.keys[s.voice_provider] || {}).label || s.voice_provider}`],
     [t("home.mic"), s.input_device || t("audio.default")],
     [t("home.wake"), `“${s.wake_word}”`],
     [t("home.memory"), s.memory_enabled ? t("home.on") : t("home.off")],

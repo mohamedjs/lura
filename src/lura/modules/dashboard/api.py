@@ -15,7 +15,8 @@ from ..brain import BrainService
 from ..connectors import ConnectorService
 from ..memory import MemoryService
 from ..overlay import THEMES as OVERLAY_THEMES
-from ..settings import PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES, SettingsService
+from ..settings import (ELEVENLABS, KEY_PROVIDERS, PROVIDERS, SUGGESTED_MODELS, VOICE_PROVIDERS, VOICES,
+                        SettingsService)
 from ..skills import SkillsService
 from ..updates import UpdateService
 from ..voice import VoiceService
@@ -30,7 +31,8 @@ LIVE = {"onboarded", "subtitles", "ui_language", "input_device", "output_device"
         "language", "brain_provider", "models", "voice_provider", "mode", "wake_word",
         "daily_briefing", "check_updates",
         "overlay_style", "overlay_theme", "overlay_colors", "overlay_scale",
-        "openrouter_voice_model", "openrouter_voice"}
+        "openrouter_voice_model", "openrouter_voice",
+        "elevenlabs_model", "elevenlabs_voice_female", "elevenlabs_voice_male"}
 
 PREVIEW = {"en": "Hi, I'm {name}. This is how I sound.", "ar": "أهلاً، أنا {name}. ده صوتي."}
 
@@ -81,6 +83,7 @@ class DashboardApi:
         r("GET", r"/api/models/(\w+)", lambda b, m: {"models": self.brain.list_models(m[1])})
         r("POST", "/api/voice/preview", lambda b, m: self.preview(b))
         r("GET", "/api/voice/models", lambda b, m: self.voice_models())
+        r("GET", "/api/voice/elevenlabs", lambda b, m: self.elevenlabs_voices())
         r("GET", "/api/audio/devices", lambda b, m: self.voice.devices())
         r("POST", "/api/audio/test-mic", lambda b, m: self.voice.mic_test(b.get("device")))
         r("POST", "/api/audio/test-speaker", lambda b, m: self.test_speaker(b))
@@ -115,7 +118,8 @@ class DashboardApi:
             "version": __version__, "os": os_name(), "status": self.status(),
             "settings": s.to_dict(), "keys": self.settings.key_status(),
             "capabilities": self.settings.capabilities().to_dict(),
-            "providers": list(PROVIDERS), "voice_providers": list(VOICE_PROVIDERS),
+            "providers": list(PROVIDERS), "key_providers": list(KEY_PROVIDERS),
+            "voice_providers": list(VOICE_PROVIDERS),
             "suggested_models": {k: list(v) for k, v in SUGGESTED_MODELS.items()},
             "voices": {k: list(v) for k, v in VOICES.items()},
             "overlay_themes": {name: {k: "#" + "".join(f"{round(c * 255):02x}" for c in rgb)
@@ -173,19 +177,26 @@ class DashboardApi:
                 "restart_pending": self.restart_pending}
 
     def set_key(self, provider: str, body: dict) -> dict:
-        if provider not in PROVIDERS:
+        if provider not in KEY_PROVIDERS:
             raise ApiError(404, f"unknown provider {provider}")
         key = str(body.get("key", "")).strip()
         if not key:
             raise ApiError(400, t("keys.empty", self.settings.current.ui_language))
         # Test before saving: a key that does not work should never be stored
         # and then fail mysteriously mid-conversation.
-        message = self.brain.check_key(provider, key)
-        self.settings.set_key(provider, key)
-        # The first key decides the brain if the user has not picked one.
-        caps = self.settings.capabilities()
-        if caps.brain_provider is None and not self.settings.has_key(self.settings.current.brain_provider):
-            self.settings.update({"brain_provider": provider})
+        if provider == ELEVENLABS:
+            message = self.voice.check_key(provider, key)
+            self.settings.set_key(provider, key)
+            # Someone who adds an ElevenLabs key wants to hear it.
+            if self.settings.current.voice_provider == "auto":
+                self.settings.update({"voice_provider": ELEVENLABS})
+        else:
+            message = self.brain.check_key(provider, key)
+            self.settings.set_key(provider, key)
+            # The first key decides the brain if the user has not picked one.
+            caps = self.settings.capabilities()
+            if caps.brain_provider is None and not self.settings.has_key(self.settings.current.brain_provider):
+                self.settings.update({"brain_provider": provider})
         return {"message": message, "keys": self.settings.key_status(),
                 "capabilities": self.settings.capabilities().to_dict(),
                 "settings": self.settings.current.to_dict(), "restart_pending": self.restart_pending}
@@ -201,6 +212,12 @@ class DashboardApi:
             return {"models": self.voice.speech_models()}
         except Exception as exc:
             raise ApiError(502, f"Could not reach OpenRouter for its speech models: {exc}")
+
+    def elevenlabs_voices(self) -> dict:
+        try:
+            return {"voices": self.voice.elevenlabs_voices()}
+        except Exception as exc:
+            raise ApiError(502, f"Could not load your ElevenLabs voices: {exc}")
 
     def preview(self, body: dict) -> dict:
         import re

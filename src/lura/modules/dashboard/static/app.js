@@ -188,13 +188,13 @@ function buildKeyRow(p) {
 
 function renderKeys() {
   const box = $("#keys");
-  for (const p of S.providers) {
+  for (const p of S.key_providers || S.providers) {
     const k = S.keys[p];
     const r = keyRows[p] || (keyRows[p] = buildKeyRow(p));
     if (r.row.parentNode !== box) box.append(r.row);
     $("b", r.who).textContent = k.label;
     $("small", r.who).textContent = k.set ? `${t("keys.saved")} ${k.masked}${k.source === "env" ? " · env" : ""}` : t("keys.none");
-    const tagList = [["tag", t("keys.tag.brain")]];
+    const tagList = k.brain === false ? [] : [["tag", t("keys.tag.brain")]];
     if (k.voice) tagList.push(["tag voice", t("keys.tag.voice")]);
     if (k.realtime) tagList.push(["tag voice", t("keys.tag.realtime")]);
     $(".tags", r.who).replaceChildren(...tagList.map(([c, txt]) => Object.assign(document.createElement("span"), { className: c, textContent: txt })));
@@ -284,8 +284,9 @@ function renderBrain() {
 }
 
 let speechModels = null;   // OpenRouter's speech models with their voices, loaded once
+let elVoices = null;       // the ElevenLabs account's voices [{id, name, gender, accent}], loaded once
 
-function voiceChip(name, on, pick) {
+function voiceChip(name, on, pick, id = name) {
   const chip = Object.assign(document.createElement("div"), { className: "voice" + (on ? " on" : "") });
   chip.setAttribute("role", "button");
   chip.tabIndex = 0;
@@ -293,7 +294,7 @@ function voiceChip(name, on, pick) {
   const play = Object.assign(document.createElement("button"), { className: "play", textContent: "▶", title: t("voice.preview") });
   play.onclick = async (e) => {
     e.stopPropagation();
-    try { await api("POST", "/api/voice/preview", { voice: name }); toast(t("voice.previewing", { name })); } catch (err) { fail(err); }
+    try { await api("POST", "/api/voice/preview", { voice: id }); toast(t("voice.previewing", { name })); } catch (err) { fail(err); }
   };
   chip.append(play);
   chip.onclick = pick;
@@ -330,8 +331,31 @@ function renderVoice() {
     save({ openrouter_voice_model: sel.value, openrouter_voice: (m && m.voices[0]) || "" });
   };
 
+  // ElevenLabs: the account's own voices, the female or male ones, kept per gender.
+  const viaEL = s.voice_provider === "elevenlabs";
+  $("#el-model-field").hidden = !viaEL;
+  const elSel = $("#el-model");
+  if (viaEL) {
+    if (![...elSel.options].some((o) => o.value === s.elevenlabs_model))
+      elSel.append(Object.assign(document.createElement("option"), { value: s.elevenlabs_model, textContent: s.elevenlabs_model }));
+    elSel.value = s.elevenlabs_model;
+    elSel.onchange = () => save({ elevenlabs_model: elSel.value });
+    if (elVoices === null) {
+      elVoices = [];
+      api("GET", "/api/voice/elevenlabs").then((r) => { elVoices = r.voices; renderVoice(); })
+        .catch((e) => { elVoices = null; fail(e); });
+    }
+  }
+
   const box = $("#voices");
-  if (gemini) {
+  if (viaEL) {
+    const key = `elevenlabs_voice_${s.voice_gender === "male" ? "male" : "female"}`;
+    // That gender first, then unlabelled ones: the first is what she uses until one is picked.
+    const mine = [...elVoices.filter((v) => v.gender === s.voice_gender), ...elVoices.filter((v) => !v.gender)];
+    const current = s[key] || (mine[0] && mine[0].id);
+    box.replaceChildren(...mine.map((v) =>
+      voiceChip(v.name + (v.accent ? ` · ${v.accent}` : ""), v.id === current, () => save({ [key]: v.id }), v.id)));
+  } else if (gemini) {
     box.replaceChildren(...S.voices[s.voice_gender].map((name) =>
       voiceChip(name, name === s.voice_name, () => save({ voice_name: name }))));
   } else {
@@ -339,7 +363,7 @@ function renderVoice() {
     box.replaceChildren(...((m && m.voices) || []).map((name) =>
       voiceChip(name, name === s.openrouter_voice, () => save({ openrouter_voice: name }))));
   }
-  $("#tts-style").closest("label").hidden = !gemini;   // the style direction is Gemini's
+  $("#tts-style").closest("label").hidden = !gemini || viaEL;   // the style direction is Gemini's
   bindText("#tts-style", "tts_style");
 }
 

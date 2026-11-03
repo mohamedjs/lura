@@ -34,7 +34,8 @@ reply by itself; the tap always works.
 - **API keys:** paste, *Test & save*. Each key is checked before it is stored.
 - **Brain:** *Any model* (pipeline) or *Realtime* (Gemini Live). Pick the provider
   and model; *Thinking effort* trades speed for depth (minimal is fastest).
-- **Voice:** Gemini directly or through OpenRouter, female or male, 30 voices.
+- **Voice:** Gemini directly or through OpenRouter, female or male, 30 voices. If every online voice fails, the offline Piper voice
+  speaks instead (flatter, Arabic is male and standard Arabic), so she is never silent.
   Press ▶ to hear one.
 - **Language & you:** conversation language (Arabic answers in Egyptian Arabic),
   your name, the assistant's name and the wake word.

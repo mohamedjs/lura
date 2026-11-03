@@ -46,7 +46,7 @@
   "voice.title": "Voice",
   "voice.provider": "Speaks through",
   "voice.provider.auto": "Automatic (Gemini first; OpenRouter when Gemini is busy or out of quota)",
-  "voice.model_hint": "Gemini 3.8 Flash TTS by default — directly, or through OpenRouter, where you can also pick another speech model.",
+  "voice.model_hint": "Gemini 3.8 Flash TTS by default — directly, or through OpenRouter, where you can also pick another speech model. With an ElevenLabs key, ElevenLabs can hear and speak instead, with your account's voices.",
   "voice.gender": "Voice",
   "voice.female": "Female",
   "voice.male": "Male",
@@ -261,5 +261,6 @@
   "tray.style": "Style",
   "tray.theme": "Colours",
   "voice.or_model": "Speech model (OpenRouter)",
-  "voice.free": "free"
+  "voice.free": "free",
+  "voice.el_model": "Speech model (ElevenLabs)"
 }

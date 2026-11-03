@@ -19,10 +19,14 @@ GEMINI = "gemini"
 OPENAI = "openai"
 ANTHROPIC = "anthropic"
 OPENROUTER = "openrouter"
+ELEVENLABS = "elevenlabs"
 
+#: The providers that can be the brain.
 PROVIDERS: tuple[str, ...] = (GEMINI, OPENAI, ANTHROPIC, OPENROUTER)
+#: Every key Lura stores: the brains, plus ElevenLabs, which only hears and speaks.
+KEY_PROVIDERS: tuple[str, ...] = (*PROVIDERS, ELEVENLABS)
 #: The providers that can hear and speak. See the module docstring.
-VOICE_PROVIDERS: tuple[str, ...] = (GEMINI, OPENROUTER)
+VOICE_PROVIDERS: tuple[str, ...] = (GEMINI, OPENROUTER, ELEVENLABS)
 
 PROVIDER_INFO: dict[str, dict[str, Any]] = {
     GEMINI: {"label": "Google Gemini", "key_url": "https://aistudio.google.com/apikey",
@@ -33,6 +37,9 @@ PROVIDER_INFO: dict[str, dict[str, Any]] = {
                 "env": ("ANTHROPIC_API_KEY",), "voice": False, "realtime": False},
     OPENROUTER: {"label": "OpenRouter", "key_url": "https://openrouter.ai/keys",
                  "env": ("OPENROUTER_API_KEY",), "voice": True, "realtime": False},
+    ELEVENLABS: {"label": "ElevenLabs", "key_url": "https://elevenlabs.io/app/settings/api-keys",
+                 "env": ("ELEVENLABS_API_KEY", "XI_API_KEY"), "voice": True, "realtime": False,
+                 "brain": False},
 }
 
 #: The brain each provider starts with. 3.8 Flash everywhere Google is
@@ -114,6 +121,11 @@ class Settings:
     openrouter_voice_model: str = "google/gemini-3.8-flash-tts"
     #: That model's voice, from its own list; Gemini models use ``voice_name`` instead.
     openrouter_voice: str = ""
+    #: ElevenLabs: the speech model (Flash v2.5 is the fast one that speaks Arabic) and a
+    #: voice id per gender, so the female/male switch keeps each choice. Empty → a default voice.
+    elevenlabs_model: str = "eleven_flash_v2_5"
+    elevenlabs_voice_female: str = ""
+    elevenlabs_voice_male: str = ""
     realtime_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
 
     # ── who ──

@@ -134,6 +134,20 @@ lura autostart on|off
 | Settings, keys, connectors | `~/.config/lura/` | `~/Library/Application Support/Lura/` | `%APPDATA%\Lura\` |
 | Wake model, log | `~/.local/share/lura/` | `…/Lura/data/` | `%LOCALAPPDATA%\Lura\` |
 
+**ElevenLabs voice.** Paste an ElevenLabs key under Keys and Lura hears with Scribe v2
+and speaks with your account's voices (female or male, a separate choice for each) through
+Flash v2.5, v4 Turbo, Multilingual v2 or v4. The key is only for the voice, never the brain (add it in the dashboard; `lura login` is
+for brain keys). If ElevenLabs runs out of credit, a Gemini or OpenRouter key takes over
+hearing and speaking. Unlike Gemini, Scribe also writes down a TV or video playing nearby.
+
+**Offline voice.** When every online voice fails (free quota used up, no credit, no
+network), Lura speaks with [Piper](https://github.com/rhasspy/piper) on your computer:
+free, no key, no daily limit. One English voice (`en_US-lessac`) and one Arabic voice
+(`ar_JO-kareem`, Modern Standard Arabic, male only), picked per sentence. Piper ships
+inside the Linux and Windows builds; on macOS and source installs Lura downloads it
+the first time she starts (macOS not tested yet). The two voices (~130 MB, their own dataset licences) are
+downloaded from Hugging Face into `<data>/piper/`.
+
 `mcp.json` uses the same format as every other MCP client, so you can paste a
 server's README snippet straight in.
 

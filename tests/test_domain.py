@@ -305,13 +305,133 @@ def check_openrouter_voice_model():
     apply_patch(s, {"voice_provider": "openrouter", "openrouter_voice_model": "heygen/heygen-voice-1-turbo:free",
                     "openrouter_voice": "nadine", "tts_style": "warm"})
     vs = VoiceService(lambda p: "k", lambda p: p == "openrouter")
-    synth = vs.synthesizer(s)
+    synth = vs.synthesizer(s, offline=False)._primary
     url, _, payload = synth._request(synth._model, "hello")
     assert payload["model"] == "heygen/heygen-voice-1-turbo:free" and payload["voice"] == "nadine"
     assert payload["input"] == "hello", "no Gemini-style direction for another model"
-    assert vs.synthesizer(s, "bram")._voice == "bram", "the dashboard previews the model's own voices"
+    assert vs.synthesizer(s, "bram", offline=False)._primary._voice == "bram", "the dashboard previews the model's own voices"
+    # A free model out of its daily requests: Gemini speaks until OpenRouter's reset.
+    import time as _t
+    from lura.modules.voice.domain import retry_after
+    from lura.shared.http import HttpError
+    reset = int((_t.time() + 3 * 3600) * 1000)
+    exc = HttpError(f'HTTP 429: {{"X-RateLimit-Limit":"50","X-RateLimit-Reset":"{reset}"}}', 429)
+    assert 3 * 3600 - 60 < retry_after(str(exc)) <= 3 * 3600
+    fb = vs.synthesizer(s, offline=False)
+    fb._primary.synthesize = lambda text: (_ for _ in ()).throw(exc)
+    fb._backup.synthesize = lambda text: b"pcm"
+    assert fb.synthesize("hi") == b"pcm", "an exhausted free model falls back to Gemini"
+    gemini = vs.synthesizer(s, offline=False)
+    assert gemini._model == "google/gemini-3.8-flash-tts" and gemini._voice == s.voice_name, \
+        "and is skipped until the reset"
     s.openrouter_voice_model = "google/gemini-3.8-flash-tts"
-    assert vs.synthesizer(s)._voice == s.voice_name, "Gemini models keep the Gemini voice"
+    assert vs.synthesizer(s, offline=False)._voice == s.voice_name, "Gemini models keep the Gemini voice"
+
+
+def check_offline_voice_fallback():
+    from lura.modules.voice import application as va
+    from lura.modules.voice.infrastructure import piper
+    from lura.shared.http import HttpError
+    assert piper._ARABIC.search("مرحبا") and not piper._ARABIC.search("hello")
+    assert sys.platform != "linux" or piper._asset().startswith("piper_linux_")
+
+    class Dead:
+        def __init__(self, exc):
+            self.exc = exc
+
+        def synthesize(self, text):
+            raise self.exc
+
+        def stream(self, text):
+            raise self.exc
+            yield b""
+
+    class Offline:
+        def synthesize(self, text):
+            return b"offline"
+
+        def stream(self, text):
+            yield b"offline"
+
+    ready = va._offline_ready
+    try:
+        va._offline_ready = lambda: True
+        for exc in (HttpError("429 free-models-per-day", 429), HttpError("402 out of credit", 402),
+                    HttpError("no network"), HttpError("400 bad request", 400)):
+            fb = va._OfflineFallback(Dead(exc), Offline())
+            assert fb.synthesize("hi") == b"offline" and list(fb.stream("hi")) == [b"offline"], exc
+        va._offline_ready = lambda: False
+        try:
+            va._OfflineFallback(Dead(HttpError("429", 429)), Offline()).synthesize("hi")
+            raise AssertionError("Piper not installed: the online error must surface")
+        except HttpError:
+            pass
+    finally:
+        va._offline_ready = ready
+    s = Settings()
+    apply_patch(s, {"voice_provider": "openrouter"})
+    vs = va.VoiceService(lambda p: "k", lambda p: p == "openrouter")
+    assert isinstance(vs.synthesizer(s), va._OfflineFallback)
+    assert not isinstance(vs.synthesizer(s, offline=False), va._OfflineFallback), "preview/selftest check the real voice"
+
+
+def check_elevenlabs_voice():
+    from lura.modules.settings import KEY_PROVIDERS, PROVIDERS, resolve_voice_provider
+    from lura.modules.settings.domain import capabilities
+    from lura.modules.voice import application as va
+    from lura.modules.voice.infrastructure import elevenlabs as el
+    assert "elevenlabs" in KEY_PROVIDERS and "elevenlabs" not in PROVIDERS, "a voice key, never a brain"
+    s = Settings()
+    apply_patch(s, {"voice_provider": "elevenlabs"})
+    assert resolve_voice_provider(s, {"openrouter", "elevenlabs"}) == "elevenlabs"
+    assert capabilities(s, {"openrouter", "elevenlabs"}).can_talk
+    s.voice_provider = "auto"
+    assert resolve_voice_provider(s, {"openrouter", "elevenlabs"}) == "openrouter"
+    vs = va.VoiceService(lambda p: "k-" + p, lambda p: p in ("openrouter", "elevenlabs"))
+    assert vs._voice_providers(s) == ["openrouter"], "auto never falls back to a provider without a key"
+
+    apply_patch(s, {"voice_provider": "elevenlabs", "voice_gender": "male"})
+    assert vs._voice_providers(s) == ["elevenlabs", "openrouter"], "Gemini via OpenRouter stands behind it"
+    vs._el_voices = (1e18, [{"id": "f1", "name": "A", "gender": "female", "accent": ""},
+                            {"id": "m1", "name": "B", "gender": "male", "accent": ""}])
+    tts = vs.synthesizer(s, offline=False)._primary
+    assert isinstance(tts, el.ElevenLabsTTS) and tts._voice == "m1", "first male voice of the account"
+    apply_patch(s, {"elevenlabs_voice_female": "abcFemale", "voice_gender": "female"})
+    assert vs.synthesizer(s, offline=False)._primary._voice == "abcFemale", "each gender keeps its own voice"
+    assert vs.synthesizer(s, "previewId", offline=False)._primary._voice == "previewId"
+    assert isinstance(vs.transcriber(s)._primary, el.ElevenLabsTranscriber)
+    # Used-up ElevenLabs credit is a 401: hearing still falls back.
+    from lura.shared.http import HttpError
+    ft = vs.transcriber(s)
+    ft._primary.transcribe = lambda wav: (_ for _ in ()).throw(HttpError("401 quota_exceeded", 401))
+    ft._backup.transcribe = lambda wav: "heard"
+    assert ft.transcribe(b"wav") == "heard"
+    alone = va.VoiceService(lambda p: "k", lambda p: p == "elevenlabs")
+    assert alone._voice_providers(s) == ["elevenlabs"]
+
+    sent = {}
+
+    def fake_stream(url, headers, payload, timeout):
+        sent.update(url=url, headers=headers, payload=payload)
+        yield b"\x01\x02\x03", "audio/pcm"
+        yield b"\x04", "audio/pcm"
+
+    def fake_json(url, headers, timeout, raw):
+        sent.update(stt_url=url, body=raw[0], kind=raw[1])
+        return {"text": " مرحبا "}
+
+    real = el.stream_bytes, el.request_json
+    try:
+        el.stream_bytes, el.request_json = fake_stream, fake_json
+        pcm = vs.synthesizer(s, offline=False)._primary.synthesize("hi")
+        assert pcm == b"\x01\x02\x03\x04", "samples are never split across reads"
+        assert sent["url"].endswith("/v1/text-to-speech/abcFemale/stream?output_format=pcm_24000")
+        assert sent["headers"] == {"xi-api-key": "k-elevenlabs"} and sent["payload"]["model_id"] == "eleven_flash_v2_5"
+        assert el.ElevenLabsTranscriber("k").transcribe(b"RIFFwav") == "مرحبا"
+        assert sent["stt_url"].endswith("/v1/speech-to-text") and sent["kind"].startswith("multipart/form-data")
+        assert b'name="model_id"\r\n\r\nscribe_v2' in sent["body"] and b"RIFFwav" in sent["body"]
+    finally:
+        el.stream_bytes, el.request_json = real
 
 
 def check_overlay_look():

@@ -88,7 +88,7 @@ def run(c) -> int:
 
         print(f"\n── voice ({caps.voice_provider}) ──")
         try:
-            pcm = c.voice.synthesizer(s).synthesize("Test.")
+            pcm = c.voice.synthesizer(s, offline=False).synthesize("Test.")
             (ok if pcm else bad)(f"{len(pcm)} bytes of speech")
         except Exception as exc:
             bad(f"speech: {exc}")

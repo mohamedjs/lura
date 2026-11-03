@@ -142,6 +142,7 @@ def cmd_run(args) -> int:
 
     c.bus.subscribe(events.EXIT_REQUESTED, on_exit)
     threading.Thread(target=c.updates.watch, args=(stop,), daemon=True, name="updates").start()
+    threading.Thread(target=c.voice.ensure_offline_voice, daemon=True, name="offline-voice").start()
     c.connectors.start_all()
 
     # First run, or nothing works yet: the dashboard is where that gets fixed.

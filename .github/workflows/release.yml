@@ -95,6 +95,31 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean packaging/pyinstaller/lura.spec
 
+      # Piper (MIT; espeak-ng inside is GPL-3, a separate program) ships next to
+      # the executable, so the offline voice needs no download. macOS gets it
+      # at first start instead: the downloaded copy is signed ad hoc there.
+      - name: Bundle the offline voice (Linux, Windows)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: |
+          base=https://github.com/rhasspy/piper/releases/download/2023.11.14-2
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            curl -fsSL -o piper.zip "$base/piper_windows_amd64.zip" && unzip -q piper.zip -d dist/lura
+          else
+            curl -fsSL "$base/piper_linux_x86_64.tar.gz" | tar -xz -C dist/lura
+          fi
+          curl -fsSL -o dist/lura/piper/LICENSE-piper.md https://raw.githubusercontent.com/rhasspy/piper/2023.11.14-2/LICENSE.md
+          curl -fsSL -o dist/lura/piper/COPYING-espeak-ng https://raw.githubusercontent.com/rhasspy/espeak-ng/master/COPYING
+          echo "espeak-ng (GPL-3.0) in this folder is built from https://github.com/rhasspy/espeak-ng, as shipped in $base/" \
+            > dist/lura/piper/SOURCE-espeak-ng.txt
+          # One sentence with a real voice, or the bundle is broken (missing lib, lost exec bit).
+          v=https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx
+          curl -fsSL -o "$RUNNER_TEMP/v.onnx" "$v" && curl -fsSL -o "$RUNNER_TEMP/v.onnx.json" "$v.json"
+          exe=dist/lura/piper/piper; [ "$RUNNER_OS" = "Windows" ] && exe=dist/lura/piper/piper.exe
+          echo "Lura test." | "$exe" --model "$RUNNER_TEMP/v.onnx" --output_raw --quiet \
+            --espeak_data dist/lura/piper/espeak-ng-data > "$RUNNER_TEMP/out.raw"
+          test -s "$RUNNER_TEMP/out.raw"
+
       - name: Smoke test the build
         shell: bash
         run: |

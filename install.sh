@@ -47,6 +47,12 @@ if [ -d /usr/lib/python3/dist-packages/gi ]; then
 fi
 echo "Installed into $VENV"
 
+# ── offline voice ───────────────────────────────────────────────────────────
+# Piper speaks when every online voice fails (quota, credit, no network).
+say "Installing the offline voice (Piper, ~150 MB once)"
+"$VENV/bin/python" -c "from lura.modules.voice.infrastructure.piper import ensure; ensure()" \
+  || echo "Could not install it now; Lura retries when she starts."
+
 # ── service ─────────────────────────────────────────────────────────────────
 say "Installing the background service"
 mkdir -p "$UNIT_DIR"

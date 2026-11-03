@@ -14,7 +14,7 @@ from dataclasses import fields
 from pathlib import Path
 
 from ...shared import paths
-from .domain import PROVIDER_INFO, PROVIDERS, Settings, migrate_legacy
+from .domain import KEY_PROVIDERS, PROVIDER_INFO, Settings, migrate_legacy
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class KeyFileStore:
         return "file" if provider in self._read() else None
 
     def available(self) -> frozenset[str]:
-        return frozenset(p for p in PROVIDERS if self.get(p))
+        return frozenset(p for p in KEY_PROVIDERS if self.get(p))
 
     def set(self, provider: str, key: str) -> None:
         key = key.strip()
