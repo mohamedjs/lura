@@ -99,7 +99,11 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Restart button** appears after settings/key changes (except live ones: subtitles,
   ui_language); daemon exits 75 under systemd, else re-execs. Dashboard token is stable
   (`dashboard.token`) so the open window reconnects.
-- **Subtitles** under the face (`overlay/captions.py`, drawn by Qt/Pango so Arabic shapes):
+- **Subtitles** under the face (`overlay/captions.py`, drawn by Qt/Pango so Arabic shapes) in a
+  small dark-glass box with a glowing border, centred under Lura, `caption_width(size)` =
+  1.3× her size (260–480 px), text in FSI/PDI isolates so Arabic after "You:" keeps its
+  direction. GTK lays it out from the face's position/size only — measuring the window
+  (which includes the offset) grew it every frame into a full-screen banner:
   what you said + Lura's streamed reply; toggle live from dashboard, tray, or right-click on
   the face. When the brain hears audio directly, a parallel transcription fills "You".
 - **Microphone & speaker card:** pick devices by name (`/api/audio/devices`), test mic
@@ -165,14 +169,25 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   themes `lura` (default, the approved palette) `aurora` `rose` `gold` `ice` or `custom`
   (`overlay_colors`: wire/fill/accent/glow hex), `overlay_scale` 0.6–2.0. All live
   (`OverlayState.look`, read every frame); dashboard "Look" tab + Qt tray submenu. The
-  bust (after Mohamed's second reference image): head, neck and shoulders, no arms;
-  the body is fine horizontal contour lines over a translucent skin with a glowing
-  rim, standing on perspective rings of light with sound-wave bars (tall with her
-  voice), short waveforms by the ears while speaking, specks drifting off the head.
+  bust (Mohamed's reference images): **pre-rendered in Blender**, not drawn as a mesh —
+  cairo triangles always showed facets and rings at eyes/mouth/ears. `tools/holo_bust.py`
+  builds the MPFB (MakeHuman, CC0) base mesh (female and male), cuts head-to-chest with
+  statue-like arm cuts, subdivides, and renders in Cycles (GPU) with a grey hologram
+  material (soft light, Fresnel rim, contour lines; only the nearest surface shows, or
+  the mouth/eyeballs stack into bright patches) at 9 turns × 3 mouth openings, then packs
+  luma + alpha into `overlay/holo/{female,male}.npz` (~1.7 MB each, shipped via
+  pyproject package-data + lura.spec datas). At run time `_holo_frames` tints them with
+  the theme once, `_figure` cross-fades the two nearest turns/mouths; around it: HUD base
+  rings + sound-wave bars, slanted orbit rings with nodes, diamond core, sparkle points
+  sampled from each frame, drift, ear waveforms, light streaks rising off the shoulders. The figure follows `voice_gender`
+  (`Look.figure`). ~6 ms/frame. The face style is untouched.
   **Tool badges:** `ConnectorService.call` publishes `events.TOOL_USED`; `app.py` calls
   `OverlayState.set_tool(connector)`; every style draws a flowing line to a circle with
   the connector's first two letters ("Gi", "No") for 5 s (`TOOL_LINGER`).
-  **Click-through:** only cells with drawn pixels take clicks (`render.hit_rects`) —
+  **Dragging (GTK):** by hand in press/motion handlers — window managers ignore
+  `begin_move_drag` on DOCK windows, so the face could not be moved.
+  **Click-through:** only cells with drawn pixels take clicks (`render.hit_rects`, gaps up
+  to 4 cells filled so the whole figure is one handle) —
   GTK via XShape (`workspaces.x11_input_shape`; the venv's PyGObject has no cairo
   bindings), Qt via `setMask` grown one cell so the glow isn't clipped. Both backends render **once per frame for
   all monitors** — per-window rendering froze GTK on two screens at 150 %.

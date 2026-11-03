@@ -20,12 +20,12 @@ __all__ = ["Overlay", "OverlayState", "State", "StateBlender", "Look", "look_fro
            "LOOK_SETTINGS", "settings_look"]
 
 #: The settings that make up the look, all applied live.
-LOOK_SETTINGS = ("overlay_style", "overlay_theme", "overlay_colors", "overlay_scale")
+LOOK_SETTINGS = ("overlay_style", "overlay_theme", "overlay_colors", "overlay_scale", "voice_gender", "voice_name")
 
 
 def settings_look(s) -> Look:
     """The Look for a Settings object."""
-    return look_from(s.overlay_style, s.overlay_theme, s.overlay_colors, s.overlay_scale)
+    return look_from(s.overlay_style, s.overlay_theme, s.overlay_colors, s.overlay_scale, s.voice_gender)
 
 
 class Overlay:

@@ -8,12 +8,24 @@ from __future__ import annotations
 
 from .state import OverlayState, State
 
-#: Width of the subtitle strip; the window widens to this while it shows.
-CAPTION_WIDTH = 440
+#: Width of the subtitle box at the default size; it follows Lura's size (``caption_width``).
+CAPTION_WIDTH = 340
 #: Room under the face for up to about four lines.
 CAPTION_HEIGHT = 150
 #: After this long without a new word, an idle face's subtitles fade away.
 LINGER_SECONDS = 8.0
+
+
+def caption_width(size: int) -> int:
+    """The subtitle box under Lura: a little wider than her, never a banner."""
+    return max(260, min(480, int(size * 1.3)))
+
+
+#: How far the box tucks up into the frame's empty bottom, as a share of its size.
+TUCK = 0.12
+
+#: The box's look, shared by both windows: dark glass, a thin glowing border.
+BOX_BG, BOX_BORDER = (10, 16, 30, 0.82), (90, 220, 255, 0.45)
 
 
 def _tail(text: str, limit: int) -> str:

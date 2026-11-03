@@ -49,10 +49,12 @@ class Look:
     style: str = "face"
     palette: Palette = THEMES["lura"]
     scale: float = 1.0
+    #: The bust's figure, "female" or "male": it follows Lura's voice.
+    figure: str = "female"
 
 
 def look_from(style: str = "face", theme: str = "lura", colors: dict | None = None,
-              scale: float = 1.0) -> Look:
+              scale: float = 1.0, figure: str = "female") -> Look:
     """A Look from the stored settings; unknown or broken values fall back to the default."""
     base = THEMES.get(theme, THEMES["lura"])
     if theme == "custom":
@@ -65,4 +67,5 @@ def look_from(style: str = "face", theme: str = "lura", colors: dict | None = No
                 pass
         base = base._replace(**{k: v for k, v in picked.items() if k in Palette._fields})
     return Look(style if style in STYLES else "face", base,
-                max(SCALE_MIN, min(SCALE_MAX, float(scale or 1.0))))
+                max(SCALE_MIN, min(SCALE_MAX, float(scale or 1.0))),
+                "male" if figure == "male" else "female")

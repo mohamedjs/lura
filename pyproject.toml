@@ -38,4 +38,5 @@ lura = [
     "modules/billing/store.json",
     "modules/dashboard/static/*",
     "modules/dashboard/static/fonts/*",
+    "modules/overlay/holo/*.npz",
 ]

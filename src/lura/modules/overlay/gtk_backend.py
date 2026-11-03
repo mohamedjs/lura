@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 
-from .captions import CAPTION_HEIGHT, CAPTION_WIDTH, caption_lines
+from .captions import BOX_BG, BOX_BORDER, CAPTION_WIDTH, TUCK, caption_lines, caption_width
 from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, hit_rects, render_surface, surface_rgba
 from .state import OverlayState, StateBlender
 from .workspaces import x11_input_shape
@@ -68,9 +68,11 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
     win.connect("map-event", lambda w, e: w.move(x, y))
 
     css = Gtk.CssProvider()
-    css.load_from_data(b"window, window.background { background: none; border: none; box-shadow: none; }"
-                       b" .lura-caption { background-color: rgba(18, 20, 34, 0.75); color: #ffffff;"
-                       b" border-radius: 14px; padding: 8px 14px; font-size: 15px; }")
+    css.load_from_data((
+        "window, window.background { background: none; border: none; box-shadow: none; }"
+        " .lura-caption { background-color: rgba(%d, %d, %d, %.2f); color: #e8f6ff;"
+        " border: 1px solid rgba(%d, %d, %d, %.2f); border-radius: 16px; padding: 8px 14px;"
+        " font-size: 13px; }" % (*BOX_BG, *BOX_BORDER)).encode())
     Gtk.StyleContext.add_provider_for_screen(screen, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     face_pos = [x, y]
@@ -84,11 +86,24 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
         if event.button != 1:
             return
         if event.type == Gdk.EventType._2BUTTON_PRESS and actions.get("open"):
+            drag[0] = None
             actions["open"]()   # double-click: open the dashboard
-        else:
-            win.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+        elif event.type == Gdk.EventType.BUTTON_PRESS:
+            # Dragged by hand: window managers refuse begin_move_drag on DOCK windows.
+            wx, wy = win.get_position()
+            drag[0] = (event.x_root - wx, event.y_root - wy)
+
+    def on_motion(widget, event):
+        if drag[0] is not None:
+            nx, ny = int(event.x_root - drag[0][0]), int(event.y_root - drag[0][1])
+            win.move(nx, ny)
+            face_pos[0], face_pos[1] = nx + offset[0], ny
+
+    def on_release(widget, event):
+        drag[0] = None
 
     offset = [0]
+    drag = [None]
 
     def on_configure(widget, event):
         # Remember where the face is after a drag, whatever the window width.
@@ -97,17 +112,23 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
 
     box = Gtk.EventBox()
     box.set_visible_window(False)
+    box.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK)
     box.connect("button-press-event", on_press)
+    box.connect("motion-notify-event", on_motion)
+    box.connect("button-release-event", on_release)
     win.connect("configure-event", on_configure)
     column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
-    column.set_spacing(-30)   # tuck the subtitles up under the chin
+    column.set_spacing(-int(OVERLAY_SIZE * TUCK))   # tuck the subtitles up into the empty bottom
     img = Gtk.Image()
     img.set_halign(Gtk.Align.CENTER)
     caption = Gtk.Label()
     caption.set_line_wrap(True)
     caption.set_justify(Gtk.Justification.CENTER)
-    caption.set_max_width_chars(40)
-    caption.set_size_request(CAPTION_WIDTH - 28, -1)   # + 2×14px CSS padding = CAPTION_WIDTH
+    # A small natural width, so the size request below sets the width and the text wraps
+    # (a wrapping label's natural width is the whole line, which widened the window).
+    caption.set_max_width_chars(8)
+    caption.set_halign(Gtk.Align.START)
+    caption.set_size_request(CAPTION_WIDTH - 30, -1)   # + 2×14px padding + border
     caption.get_style_context().add_class("lura-caption")
     caption.set_no_show_all(True)
     column.pack_start(img, False, False, 0)
@@ -116,11 +137,14 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
     win.add(box)
     last_markup = [""]
 
+    placed = [None]
+
     def update_caption():
         lines = caption_lines(shared)
         if (lines is not None) != wide[0]:
             wide[0] = lines is not None
             caption.set_visible(wide[0])
+            placed[0] = None
             if not wide[0]:
                 offset[0] = 0
                 img.set_margin_start(0)
@@ -128,23 +152,32 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
                 win.move(int(face_pos[0]), int(face_pos[1]))
         if lines is None:
             return False
-        # Centred under the face but kept on this monitor, measured from the
-        # width GTK actually gave the window (it sizes to the wrapped text).
-        width = max(win.get_size()[0], CAPTION_WIDTH)
-        half = (width - cur[0]) // 2
-        left = max(geo.x, min(int(face_pos[0]) - half, geo.x + geo.width - width))
-        if offset[0] != int(face_pos[0]) - left:
-            offset[0] = int(face_pos[0]) - left
+        # A box of fixed width centred under the face, kept on this monitor. Everything is
+        # computed from the face's position and size — never from the window's width,
+        # which includes the offset itself and grew every frame into a full-width banner.
+        size, cw = cur[0], caption_width(cur[0])
+        tw = max(cw, size)
+        fx = int(face_pos[0])
+        left = max(geo.x, min(fx - (tw - size) // 2, geo.x + geo.width - tw))
+        layout = (left, fx - left, cw, max(0, min(fx - left + size // 2 - cw // 2, tw - cw)), size)
+        if layout != placed[0]:
+            placed[0] = layout
+            offset[0] = layout[1]
             img.set_halign(Gtk.Align.START)
-            img.set_margin_start(offset[0])
+            img.set_margin_start(layout[1])
+            caption.set_margin_start(layout[3])
+            caption.set_size_request(cw - 30, -1)
+            column.set_spacing(-int(size * TUCK))
+            win.resize(tw, 1)
             win.move(left, int(face_pos[1]))
         you, lura = lines
         esc = GLib.markup_escape_text
         parts = []
         if you:
-            parts.append(f'<span foreground="#b9bdd6">{esc(labels.get("you", "You"))}: {esc(you)}</span>')
+            # FSI…PDI isolates the words, so Arabic after an English label keeps its direction.
+            parts.append(f'<span foreground="#b9bdd6">{esc(labels.get("you", "You"))}: \u2068{esc(you)}\u2069</span>')
         if lura:
-            parts.append(f'<span foreground="#7fe3f0">{esc(labels.get("lura", "Lura"))}:</span> {esc(lura)}')
+            parts.append(f'<span foreground="#7fe3f0">{esc(labels.get("lura", "Lura"))}:</span> \u2068{esc(lura)}\u2069')
         markup = "\n".join(parts)
         if markup != last_markup[0]:
             last_markup[0] = markup
@@ -221,7 +254,7 @@ def _frames(shared: OverlayState, windows: dict) -> None:
         pix = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(surface_rgba(surface)),
                                               GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
         frame[0] += 1
-        rects = hit_rects(surface, threshold=40) if frame[0] % 5 == 1 else None
+        rects = hit_rects(surface, threshold=20) if frame[0] % 5 == 1 else None
         # idle_add, not a direct call: Gtk.main() runs in a daemon thread and
         # setting the pixbuf inline leaves the overlay blank on screen.
         for win in list(windows.values()):

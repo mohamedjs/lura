@@ -20,6 +20,7 @@ ICON_PNG = ROOT / "packaging" / "icons" / "lura.png"
 datas = [
     (str(LURA / "shared" / "i18n" / "*.json"), "lura/shared/i18n"),
     (str(LURA / "modules" / "dashboard" / "static"), "lura/modules/dashboard/static"),
+    (str(LURA / "modules" / "overlay" / "holo" / "*.npz"), "lura/modules/overlay/holo"),
 ]
 binaries = []
 hidden = collect_submodules("lura")

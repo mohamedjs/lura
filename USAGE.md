@@ -15,7 +15,8 @@ The face top-right shows what she is doing: calm while listening, turning while
 thinking, the mouth moving while speaking. Drag it anywhere. **Double-click it to
 open the dashboard.**
 Change how she looks in the dashboard's **Look** tab or the tray's Look menu: a face,
-an orb of light, a holographic bust on rings of light with sound-wave bars, or a small voice ring; five colour themes or your own four colours;
+an orb of light, a holographic digital human (wireframe, particles, a glowing chest core, orbit
+rings and sound-wave bars), or a small voice ring; five colour themes or your own four colours;
 and the size. Changes show at once, no restart. While she uses a connector (GitHub,
 Notion…) a badge with its first letters appears beside her. Only the drawn hologram
 catches clicks; the empty space around it lets them through.

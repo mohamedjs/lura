@@ -41,6 +41,10 @@ def selfcheck() -> None:
             surf = render_surface(2.3, b, size=size, amp=0.7, look=look_from(style, "gold"))
             rgba = surf.get_data()
             assert surf.get_width() == size and any(rgba[3::4]), f"{style} @ {size}: empty frame"
+    # The bust's rendered figure exists for both voices and draws.
+    for figure in ("female", "male"):
+        surf = render_surface(1.0, StateBlender(), size=260, look=look_from("bust", figure=figure))
+        assert any(surf.get_data()[3::4]), f"bust {figure}: empty frame"
     # Tools in use show as badges; only drawn cells take clicks.
     from .render import hit_rects
     st = OverlayState()

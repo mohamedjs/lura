@@ -15,7 +15,7 @@ import logging
 import sys
 import threading
 
-from .captions import CAPTION_HEIGHT, CAPTION_WIDTH, caption_lines
+from .captions import BOX_BG, BOX_BORDER, CAPTION_HEIGHT, TUCK, caption_lines, caption_width
 from .render import MARGIN_RIGHT, MARGIN_TOP, OVERLAY_SIZE, hit_rects, render_surface
 from .state import OverlayState, StateBlender
 from .workspaces import on_every_workspace
@@ -96,8 +96,9 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             self.label.setTextFormat(QtCore.Qt.RichText)
             self.label.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents)
             self.label.setStyleSheet(
-                "QLabel { background: rgba(18, 20, 34, 190); color: #ffffff; border-radius: 14px;"
-                " padding: 8px 14px; font-size: 15px; }")
+                "QLabel { background: rgba(%d, %d, %d, %d); color: #e8f6ff; border-radius: 16px;"
+                " border: 1px solid rgba(%d, %d, %d, %d); padding: 8px 14px; font-size: 13px; }"
+                % (*BOX_BG[:3], int(BOX_BG[3] * 255), *BOX_BORDER[:3], int(BOX_BORDER[3] * 255)))
             self._layout(False)
 
         def _layout(self, wide: bool) -> None:
@@ -107,16 +108,17 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             self._wide = wide
             size = self._size
             if wide:
-                # Centred under the face, but never past the screen's edges:
-                # the face sits top-right, so a centred strip would hang off.
-                width = max(CAPTION_WIDTH, size)
+                # A small box centred under the face, never past the screen's edges.
+                cw = self._cw = caption_width(size)
+                width = max(cw, size)
                 area = (self.screen() or app.primaryScreen()).availableGeometry()
                 left = self._face_pos.x() - (width - size) // 2
                 left = max(area.left(), min(left, area.right() + 1 - width))
                 self._offset = self._face_pos.x() - left
                 self.setFixedSize(width, size + CAPTION_HEIGHT)
                 self.move(left, self._face_pos.y())
-                self.label.setGeometry((width - CAPTION_WIDTH) // 2, size - 36, CAPTION_WIDTH, CAPTION_HEIGHT)
+                x = max(0, min(self._offset + size // 2 - cw // 2, width - cw))
+                self.label.setGeometry(x, size - int(size * TUCK), cw, CAPTION_HEIGHT)
             else:
                 self._offset = 0
                 self.setFixedSize(size, size)
@@ -132,16 +134,16 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             parts = []
             if you:
                 parts.append(f'<span style="color:#b9bdd6">{html.escape(labels.get("you", "You"))}: '
-                             f'{html.escape(you)}</span>')
+                             f'\u2068{html.escape(you)}\u2069</span>')
             if lura:
                 parts.append(f'<span style="color:#7fe3f0">{html.escape(labels.get("lura", "Lura"))}:</span> '
-                             f'{html.escape(lura)}')
+                             f'\u2068{html.escape(lura)}\u2069')
             text = "<br>".join(parts)
             if text != self._caption_html:
                 self._caption_html = text
                 self.label.setText(text)
+                self.label.setFixedWidth(getattr(self, "_cw", caption_width(self._size)))
                 self.label.adjustSize()
-                self.label.setFixedWidth(CAPTION_WIDTH)
 
         def resize_face(self, size: int) -> None:
             """A new size from the dashboard: grow or shrink, keeping the right edge."""
