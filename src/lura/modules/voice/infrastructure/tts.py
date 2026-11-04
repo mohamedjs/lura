@@ -106,7 +106,7 @@ class GeminiTTS:
         try:
             return self._once(self._model, text)
         except HttpError as exc:
-            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
+            if not exc.retryable or exc.status == 402 or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             return self._once(_lite(self._model), text)
@@ -162,7 +162,7 @@ class GeminiTTS:
                 log.warning("TTS streaming unavailable (%s); using whole clips.", str(exc)[:160])
                 yield self.synthesize(text)
                 return
-            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
+            if not exc.retryable or exc.status == 402 or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             yield self._once(_lite(self._model), text)
@@ -203,7 +203,7 @@ class OpenRouterTTS:
         try:
             return self._once(self._model, text)
         except HttpError as exc:
-            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
+            if not exc.retryable or exc.status == 402 or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             return self._once(_lite(self._model), text)
@@ -255,7 +255,7 @@ class OpenRouterTTS:
                 self._format = "mp3"
                 yield self.synthesize(text)
                 return
-            if not exc.retryable or not _lite(self._model) or not self._lite_fallback:
+            if not exc.retryable or exc.status == 402 or not _lite(self._model) or not self._lite_fallback:
                 raise
             log.warning("TTS %s failed (%s); trying %s", self._model, exc.status, _lite(self._model))
             yield self._once(_lite(self._model), text)

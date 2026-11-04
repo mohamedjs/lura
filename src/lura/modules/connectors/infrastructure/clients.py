@@ -21,7 +21,7 @@ PROTOCOL_VERSION = "2025-06-18"
 CLIENT_INFO = {"name": "lura", "version": "2"}
 #: The first `npx -y` of a server downloads it; that can take a while.
 START_TIMEOUT = 120
-CALL_TIMEOUT = 60
+CALL_TIMEOUT = 30
 
 
 class MCPError(RuntimeError):

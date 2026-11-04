@@ -223,19 +223,36 @@ class _OfflineFallback:
     """Speak with Piper when every online voice failed, whatever the reason
     (out of quota, out of credit, no network): a silent Lura is the worst case."""
 
-    def __init__(self, online: SpeechSynthesizer, offline: SpeechSynthesizer):
-        self._online, self._offline = online, offline
+    #: After out-of-credit/quota (or no network), skip the online voice this long:
+    #: otherwise every sentence pays a failed round trip before Piper speaks.
+    SKIP = 120.0
+
+    def __init__(self, online: SpeechSynthesizer, offline: SpeechSynthesizer, skip: dict[str, float]):
+        self._online, self._offline, self._skip = online, offline, skip   # skip: VoiceService's, outlives a reply
+
+    def _skipping(self) -> bool:
+        return self._skip.get("online", 0.0) > time.monotonic() and _offline_ready()
+
+    def _failed(self, exc: Exception) -> None:
+        if isinstance(exc, HttpError) and exc.status in (None, 402, 429):
+            self._skip["online"] = time.monotonic() + self.SKIP
+        log.warning("Online voice failed (%s); speaking with the offline voice.", str(exc)[:120])
 
     def synthesize(self, text: str) -> bytes:
+        if self._skipping():
+            return self._offline.synthesize(text)
         try:
             return self._online.synthesize(text)
         except Exception as exc:
             if not _offline_ready():
                 raise
-            log.warning("Online voice failed (%s); speaking with the offline voice.", str(exc)[:120])
+            self._failed(exc)
             return self._offline.synthesize(text)
 
     def stream(self, text: str):
+        if self._skipping():
+            yield from self._offline.stream(text)
+            return
         started = False
         try:
             for pcm in self._online.stream(text):
@@ -244,7 +261,7 @@ class _OfflineFallback:
         except Exception as exc:
             if started or not _offline_ready():
                 raise
-            log.warning("Online voice failed (%s); speaking with the offline voice.", str(exc)[:120])
+            self._failed(exc)
             yield from self._offline.stream(text)
 
 
@@ -332,7 +349,8 @@ class VoiceService:
                 return gemini
             own = OpenRouterTTS(self._key_for(p), model, voice or settings.openrouter_voice, "",
                                 lite_fallback=False)
-            return _FallbackSynthesizer(own, gemini, lambda exc: self._mark_429(model, exc))
+            # Any failure, not just quota: some refuse a language outright (heygen and Arabic, a 400).
+            return _FallbackSynthesizer(own, gemini, lambda exc: self._mark_429(model, exc), any_error=True)
 
         from .infrastructure.piper import PiperTTS
 
@@ -342,7 +360,7 @@ class VoiceService:
             primary = _FallbackSynthesizer(primary, build(providers[1]),
                                            lambda exc: self._mark_429(providers[0], exc),
                                            any_error=providers[0] == ELEVENLABS)
-        return _OfflineFallback(primary, PiperTTS()) if offline else primary
+        return _OfflineFallback(primary, PiperTTS(), self._cooldown_until) if offline else primary
 
     def speech_models(self) -> list[dict]:
         """OpenRouter's speech models with their voices, fetched at most once an hour."""

@@ -10,6 +10,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from lura.modules.tools import check_command  # noqa: E402
 
 BLOCKED = [
+    "cat /home/mohamed/.config/lura/* 2>/dev/null | head -40",   # Lura's keys (seen in a real log)
+    "grep -r token ~/.config/lura",
+    "type %APPDATA%\\Lura\\keys.json",
     "rm -rf /",
     "rm -rf ~/Documents",
     "/bin/rm file.txt",

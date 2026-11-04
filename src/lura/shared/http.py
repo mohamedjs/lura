@@ -7,6 +7,7 @@ streaming ones speak SSE, which is a dozen lines of line splitting.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -118,13 +119,21 @@ def stream_sse(url: str, headers: dict[str, str] | None = None, payload: Any = N
     """Yield ``(event, data)`` for each server-sent event.
 
     Comment lines (``: keep-alive``, OpenRouter's ``: OPENROUTER PROCESSING``)
-    are skipped; multi-line data is joined the way the spec says.
+    are skipped; multi-line data is joined the way the spec says. Keep-alives
+    alone never count as progress: after ``timeout`` seconds of nothing but
+    them the stream is given up (408), or a stalled upstream hangs Lura forever.
     """
     request = _build(url, {"Accept": "text/event-stream", **(headers or {})}, payload, None)
     with _open(request, timeout) as response:
         event, data = "message", []
+        last = time.monotonic()
         for raw in response:
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if line.startswith(":"):
+                if time.monotonic() - last > timeout:
+                    raise HttpError(f"{urllib.parse.urlsplit(url).path}: no reply for {timeout:.0f}s "
+                                    "(only keep-alives)", 408)
+                continue
             if not line:
                 if data:
                     yield event, "\n".join(data)
@@ -134,6 +143,7 @@ def stream_sse(url: str, headers: dict[str, str] | None = None, payload: Any = N
                 continue
             field, _, value = line.partition(":")
             value = value[1:] if value.startswith(" ") else value
+            last = time.monotonic()   # a real field: the model is talking
             if field == "event":
                 event = value
             elif field == "data":

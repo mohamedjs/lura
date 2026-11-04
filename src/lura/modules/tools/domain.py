@@ -92,8 +92,18 @@ def _name(token: str) -> str:
     return name[:-4] if name.endswith(".exe") else name
 
 
+#: Lura's own secrets: API keys, MCP tokens, the dashboard token. A command that
+#: names them would put the keys into the conversation, i.e. send them to the model.
+_SECRETS = re.compile(r"keys\.json|mcp\.json|dashboard\.token|env-d\.txt|"
+                      r"\.config[/\\]lura|application support[/\\]lura|appdata[/\\]roaming[/\\]lura|"
+                      r"%appdata%[/\\]lura|\$env:appdata", re.I)
+
+
 def check_command(command: str) -> str | None:
     """Return a refusal to speak, or None if the command may run."""
+    if _SECRETS.search(command):
+        return ("I will not read Lura's own settings folder or key files: they hold your API keys. "
+                "Ask me about a setting and I will tell you, or open the dashboard.")
     # Command substitution hides a whole command inside a word. Refuse rather
     # than parse; the wording tells the model to retry with something simpler.
     if "$(" in command or "`" in command or "${" in command:

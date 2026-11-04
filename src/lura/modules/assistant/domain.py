@@ -9,7 +9,7 @@ from ..memory import tokens
 
 #: A tool-calling model can ask for tools forever. It gets this many rounds,
 #: then it has to answer in words.
-MAX_TOOL_ROUNDS = 6
+MAX_TOOL_ROUNDS = 10
 #: Gemini counts audio at 32 tokens a second; 16 kHz 16-bit WAV is 32 000
 #: bytes a second.
 AUDIO_BYTES_PER_TOKEN = 1000

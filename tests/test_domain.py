@@ -358,11 +358,22 @@ def check_offline_voice_fallback():
         va._offline_ready = lambda: True
         for exc in (HttpError("429 free-models-per-day", 429), HttpError("402 out of credit", 402),
                     HttpError("no network"), HttpError("400 bad request", 400)):
-            fb = va._OfflineFallback(Dead(exc), Offline())
+            fb = va._OfflineFallback(Dead(exc), Offline(), {})
             assert fb.synthesize("hi") == b"offline" and list(fb.stream("hi")) == [b"offline"], exc
+        # Out of credit: the next sentences go straight to Piper, no failed round trip each.
+        skip, calls = {}, []
+
+        class Counting(Dead):
+            def synthesize(self, text):
+                calls.append(text)
+                raise HttpError("402 out of credit", 402)
+
+        va._OfflineFallback(Counting(None), Offline(), skip).synthesize("one")
+        assert va._OfflineFallback(Counting(None), Offline(), skip).synthesize("two") == b"offline"
+        assert calls == ["one"], "the online voice is skipped for a while after a 402"
         va._offline_ready = lambda: False
         try:
-            va._OfflineFallback(Dead(HttpError("429", 429)), Offline()).synthesize("hi")
+            va._OfflineFallback(Dead(HttpError("429", 429)), Offline(), {}).synthesize("hi")
             raise AssertionError("Piper not installed: the online error must surface")
         except HttpError:
             pass
@@ -432,6 +443,43 @@ def check_elevenlabs_voice():
         assert b'name="model_id"\r\n\r\nscribe_v2' in sent["body"] and b"RIFFwav" in sent["body"]
     finally:
         el.stream_bytes, el.request_json = real
+
+
+def check_sse_gives_up_on_keepalives_only():
+    """A stalled OpenRouter stream sends ': OPENROUTER PROCESSING' forever; Lura hung on one."""
+    import http.server
+    import threading
+    import time as _t
+    from lura.shared import http as h
+
+    class Stall(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b"data: hi\n\n")
+            try:
+                for _ in range(20):
+                    self.wfile.write(b": OPENROUTER PROCESSING\n\n")
+                    self.wfile.flush()
+                    _t.sleep(0.1)
+            except OSError:   # Lura hung up, as she should
+                pass
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stall)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    got = []
+    try:
+        for ev in h.stream_sse(f"http://127.0.0.1:{srv.server_port}/x", payload={}, timeout=0.5):
+            got.append(ev)
+        raise AssertionError("a stream of keep-alives only must time out")
+    except h.HttpError as exc:
+        assert exc.status == 408 and got == [("message", "hi")]
+    finally:
+        srv.shutdown()
 
 
 def check_overlay_look():

@@ -72,7 +72,7 @@ mcp.json, dashboard.url), data `~/.local/share/lura/` (vosk-model,
 last_briefing, lura.log). macOS/Windows paths: README → Where things live. Venv `.venv/`
 is an **editable install**, so editing `src/` + restarting the service is enough.
 
-## Current behaviour (2.4.2, Nov 2026)
+## Current behaviour (2.4.3, Nov 2026)
 
 - **Default:** mode `pipeline`, brain `openrouter` / `google/gemini-3.8-flash`, voice
   `auto` (Gemini direct if a Gemini key exists, else OpenRouter), voice `Kore` (female) /
@@ -104,6 +104,13 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   signs it ad hoc), else `piper-tts` on PATH — never `piper` (apt's is a mouse tool).
   Voices are always downloaded, not shipped (dataset licences). A free OpenRouter speech
   model that hits its daily limit falls back to Gemini 3.8 Flash TTS until `X-RateLimit-Reset`.
+- **2.4.3 (from Mohamed's logs):** `stream_sse` gives up (408) after `timeout` s of keep-alives
+  only (a stalled OpenRouter stream hung her 8+ min); MCP `CALL_TIMEOUT` 30 s (a Chrome
+  screenshot of a background tab hung); `MAX_TOOL_ROUNDS` 10 (Docs typing ran out at 6);
+  no Lite TTS retry on 402 (credit is per account); `_OfflineFallback` skips the online voice
+  120 s after a 402/429/no network; non-Gemini OpenRouter speech models fall back to Gemini on
+  any error (heygen 400s on Arabic); `check_command` refuses anything touching Lura's config
+  folder / keys.json / mcp.json (she once ran `cat ~/.config/lura/*`).
 - **Streaming:** brain text streams into `SpeechPlayer` → first sentence synthesised
   while the rest is written. TTS falls back to the Lite TTS model on retryable errors only.
 - **2.3 — faster and interruptible (pipeline):**
@@ -151,7 +158,7 @@ is an **editable install**, so editing `src/` + restarting the service is enough
 - **Settings migration:** a 1.x settings.json (`provider`, `openrouter_model`, …) is
   converted on load (`settings/domain.py: migrate_legacy`).
 - **Command guard** also blocks Windows/macOS destructive commands. Test:
-  `python3 tests/test_command_guard.py` → `command guard OK (29 blocked, 19 allowed)`.
+  `python3 tests/test_command_guard.py` → `command guard OK (32 blocked, 19 allowed)`.
 - **Dashboard window:** native — pywebview (WebView2 / WKWebView) on Windows/macOS, Qt
   WebEngine on Linux (bundled in the Linux build only), in a separate `lura window` process.
   If that process dies, it is reaped and the page opens in a browser. The Linux bundle
