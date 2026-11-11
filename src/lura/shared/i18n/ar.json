@@ -90,7 +90,7 @@
   "adv.silence_factor": "حساسية الصوت (× دوشة الأوضة)",
   "adv.config_path": "الإعدادات موجودة في {path}",
   "assistant.brain_error": "معلش، مقدرتش أوصل للموديل دلوقتي.",
-  "assistant.hearing_error": "معلش، مسمعتش كويس.",
+  "assistant.hearing_error": "معلش، مسمعتش كويس، قول تاني.",
   "assistant.refused": "مقدرش أساعد في دي.",
   "tray.open": "افتح لوحة التحكم",
   "tray.talk": "اتكلم دلوقتي",

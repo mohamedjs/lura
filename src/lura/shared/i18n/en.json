@@ -90,7 +90,7 @@
   "adv.silence_factor": "Speech sensitivity (× room noise)",
   "adv.config_path": "Settings live in {path}",
   "assistant.brain_error": "Sorry, I couldn't reach the model just now.",
-  "assistant.hearing_error": "Sorry, I couldn't hear that properly.",
+  "assistant.hearing_error": "Sorry, I didn't catch that. Say it again?",
   "assistant.refused": "I can't help with that one.",
   "tray.open": "Open dashboard",
   "tray.talk": "Talk now",

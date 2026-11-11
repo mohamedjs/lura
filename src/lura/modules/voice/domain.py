@@ -24,6 +24,8 @@ _SENTENCE_END = re.compile(r"(?<=[.!?…۔؟])\s+|\n+")
 #: Softer breaks for a sentence that runs on too long.
 _CLAUSE_END = re.compile(r"(?<=[,;:،؛])\s+")
 _MARKDOWN = re.compile(r"[*_`#>]+|^\s*[-•]\s+", re.MULTILINE)
+#: Emoji and their joiners: a voice either skips them or reads their name aloud.
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]+")
 
 
 class SpeechSynthesizer(Protocol):
@@ -43,7 +45,7 @@ class Transcriber(Protocol):
 
 def speakable(text: str) -> str:
     """Strip the markdown a model writes anyway; a voice reads ``**`` aloud."""
-    return _MARKDOWN.sub("", text).strip()
+    return re.sub(r"[ \t]{2,}", " ", _EMOJI.sub("", _MARKDOWN.sub("", text))).strip()
 
 
 class SentenceChunker:
@@ -103,7 +105,9 @@ class SentenceChunker:
     def _emit(self, cut: int) -> str:
         piece, self._buffer = speakable(self._buffer[:cut]), self._buffer[cut:]
         self._released += 1
-        return piece or self._take(final=False)
+        # Only punctuation or an emoji (a model's stray "." after a tool call):
+        # nothing to say, and a request to the voice for it is a wasted round trip.
+        return piece if re.search(r"\w", piece) else self._take(final=False)
 
 
 def retry_after(message: str, default: float = 300.0) -> float:

@@ -842,7 +842,7 @@ def check_noise_and_live_captions():
 
     class Ear:
         def transcribe(self, wav):
-            return "partial words" if len(wav) < 40000 else next(heard)
+            return "partial words" if len(wav) < 90000 else next(heard)
 
     class FakeVoice:
         recorded = 0
@@ -861,11 +861,13 @@ def check_noise_and_live_captions():
             self.recorded += 1
             if self.recorded > 2:
                 return b""
-            blocks = [b"\0" * 3200] * 15
+            blocks = [b"\0" * 3200] * 30
             if on_audio:
-                on_audio(blocks[:12], 0)   # mid-sentence: shorter than the final turn
+                on_audio(blocks[:5], 0)    # under two seconds: too short to caption
+                assert self.recorded > 1 or not any(c[1].endswith(" …") for c in captions)
+                on_audio(blocks[:24], 0)   # mid-sentence: shorter than the final turn
                 deadline = time.monotonic() + 5   # the caption thread; slow CI runners vary
-                while time.monotonic() < deadline and not any(c[1].endswith("…") for c in captions):
+                while time.monotonic() < deadline and not any(c[1].endswith(" …") for c in captions):
                     time.sleep(0.02)
             return b"".join(blocks)
 
@@ -884,6 +886,97 @@ def check_noise_and_live_captions():
     assert "".join(spoken) == "Hello there.", spoken
     assert histories[-1] == [("user", "hi Lura")], "the noise turn is gone from the thread"
     assert ("you", "partial words …") in captions, captions
+
+
+def check_hearing_trouble_keeps_the_turn():
+    """A failed hearing call does not end the conversation, and a final
+    transcript that comes back empty falls back on what the captions read."""
+    import time
+    from lura.modules.assistant import PipelineConversation
+    from lura.modules.brain import Done, Message, TextDelta
+    from lura.modules.settings import Settings
+    from lura.modules.tools import ToolService
+    from lura.shared.http import HttpError
+
+    asked, spoken = [], []
+
+    class FakeModel:
+        provider, model = "anthropic", "claude-opus-5-5"
+
+        def stream(self, system, history, tools):
+            asked.append(history[-1].text)
+            yield TextDelta("Opening it.")
+            yield Done(Message("assistant", "Opening it."), "end")
+
+    class FakeBrain:
+        def model(self, settings):
+            return FakeModel()
+
+    class Player:
+        interrupted, heard, carry = False, [], None
+        finish = wait = cancel = lambda self: None
+
+        def feed(self, text):
+            spoken.append(text)
+
+        def say(self, text):
+            spoken.append(text)
+
+    class Ear:
+        finals = 0
+
+        def transcribe(self, wav):
+            if len(wav) < 150000:
+                return "open YouTube for me"     # the live caption
+            Ear.finals += 1
+            if Ear.finals == 1:
+                raise HttpError("timed out", None)
+            return ""                            # the whole turn: empty
+
+    class FakeVoice:
+        recorded = 0
+
+        def player(self, settings, presence=None, listen=False):
+            return Player()
+
+        def transcriber(self, settings):
+            return Ear()
+
+        @staticmethod
+        def to_wav(pcm):
+            return pcm
+
+        def record(self, settings, should_stop, on_audio=None, carry=None):
+            self.recorded += 1
+            if self.recorded > 2:
+                return b""
+            blocks = [b"\0" * 3200] * 50
+            if on_audio and self.recorded == 2:
+                on_audio(blocks[:40], 0)
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline and not live_seen():
+                    time.sleep(0.02)
+            return b"".join(blocks)
+
+    captions = []
+    live_seen = lambda: any(c == ("you", "open YouTube for me …") for c in captions)
+
+    class Presence:
+        def set_state(self, state):
+            pass
+
+        def set_amplitude(self, level):
+            pass
+
+        def set_caption(self, who, text):
+            captions.append((who, text))
+
+    voice = FakeVoice()
+    PipelineConversation(Settings(brain_provider="anthropic"), FakeBrain(), voice, ToolService(None),
+                         Presence(), threading.Event()).run()
+    assert voice.recorded == 3, "after the failed call she listened again"
+    assert asked == ["open YouTube for me"], asked
+    assert spoken[-1] == "Opening it.", spoken
 
 
 def main() -> int:

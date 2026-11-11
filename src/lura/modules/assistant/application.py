@@ -307,9 +307,17 @@ class PipelineConversation:
                 try:
                     heard = self._transcriber.transcribe(wav)
                 except HttpError as exc:
+                    # One failed call (a timeout, a provider out of quota) is not the
+                    # end of the conversation: say so and listen again.
                     log.warning("Hearing failed: %s", exc)
                     self._say(t("assistant.hearing_error", self.s.language))
-                    return
+                    ignored += 1
+                    continue
+                if not heard and live is not None and domain.worth_keeping(live.last, len(pcm)):
+                    # The whole turn came back empty although the captions read real
+                    # words from it: their sentence must not vanish in silence.
+                    heard = live.last
+                    log.info("Final transcript was empty; using the live caption: %s", heard)
                 if not heard:
                     ignored += 1
                     self._presence.set_caption("you", "")

@@ -96,6 +96,13 @@ def check_chunker():
     out = c.feed(long) + c.flush()
     assert all(len(p) <= 260 for p in out) and sum(len(p.split()) for p in out) == 120
     assert speakable("**Bold** and `code`") == "Bold and code"
+    assert speakable("فهمتك 😄 تمام") == "فهمتك تمام", "emoji are never sent to the voice"
+    c = SentenceChunker()
+    out = c.feed("Done. 😄 . ") + c.flush()
+    assert out == ["Done."], out                # punctuation or an emoji alone is not a request to the voice
+    from lura.modules.assistant.domain import worth_keeping
+    assert worth_keeping("افتحي لي يوتيوب", 4 * 32000) and not worth_keeping("Por?", 4 * 32000)
+    assert not worth_keeping("three whole words", 32000), "a one-second clip is a guess"
 
 
 def check_connectors():

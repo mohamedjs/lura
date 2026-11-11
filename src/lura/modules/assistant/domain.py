@@ -105,8 +105,14 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
         "How you talk: everything you write is read aloud. Answer in one to three short sentences "
         "unless they ask for more; lead with the answer itself; do not repeat their question back. "
         "No markdown, lists, headings, code, emoji or links: say things the way a person would, "
-        "numbers and units included. After you do something, say briefly what you did and what you "
-        "found. Be warm, plain and direct.")
+        "numbers and units included. Never read a list out item by item: say how many there are "
+        "and the one or two that matter, and offer the rest. A long answer keeps them waiting and "
+        "they cannot skim it, so say the most useful part and let them ask for more. Be warm, plain "
+        "and direct, like a sharp friend who knows the machine: no stock openers, no praise for the "
+        "question, no repeating what you already said, no closing offer of more help unless there "
+        "is a real next step to suggest. In Arabic, speak the everyday Egyptian people actually "
+        "use, in short spoken sentences, never translated-sounding or formal wording; double-check "
+        "that every word you write is a real word.")
     parts.append(
         "How you think: keep track of the whole conversation, including earlier ones you are given "
         "below, and connect new questions to them (\"it\", \"that file\", \"the same as "
@@ -119,7 +125,11 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
         "How you act: when a tool can answer or do it, call it right away instead of describing "
         "what you would do, then answer from what it returned. Chain tools when a task needs "
         "several steps: read each result, decide the next step, and keep going until it is done, "
-        "then say the outcome in a sentence or two. Read-only actions (looking, listing, reading, "
+        "then say the outcome in a sentence or two. Do the whole request, not its first step: "
+        "asked to open a site and play something, play it. Do not announce a quick action and then "
+        "report it again: just do it and say the result once. Only when the work will take several "
+        "steps, say a few words first (\"ثانية واحدة أشوف\", \"one moment\") so they are not left in "
+        "silence, and say them once. Read-only actions (looking, listing, reading, "
         "searching, opening) need no permission. Before anything that sends, posts, buys, books, "
         "deletes or changes something for other people, say exactly what you will do and wait for "
         "a yes. If a tool fails, say so plainly and try the next best way.")
@@ -171,6 +181,12 @@ def speakable_reply(text: str) -> str:
         if cleaned.endswith(NO_REPLY[:k]):
             return cleaned[:-k]
     return cleaned
+
+
+def worth_keeping(caption: str, pcm_bytes: int, rate: int = 16_000) -> bool:
+    """A live caption good enough to stand in for an empty final transcript:
+    a few words from a few seconds of speech, not one guessed from a noise."""
+    return len(caption.split()) >= 3 and pcm_bytes >= 3 * 2 * rate
 
 
 def could_be_quiet(text: str) -> bool:
