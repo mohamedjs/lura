@@ -10,7 +10,7 @@ cp "$ROOT"/site/index.html "$ROOT"/site/site.css "$ROOT"/site/site.js "$OUT/"
 cp "$ROOT"/src/lura/modules/dashboard/static/fonts/{caveat-latin,marhey-arabic}.woff2 \
    "$ROOT"/src/lura/modules/dashboard/static/fonts/OFL.txt "$OUT/fonts/"
 cp "$ROOT"/src/lura/modules/dashboard/static/favicon.svg "$ROOT"/packaging/icons/lura.png \
-   "$ROOT"/site/mac-not-opened.png "$OUT/assets/"
+   "$ROOT"/site/mac-not-opened.png "$ROOT"/site/live-poster.jpg "$OUT/assets/"
 cp "$ROOT"/video/face.js "$ROOT"/video/face_mesh.js "$OUT/assets/"
 cp "$ROOT"/docs/screenshots/windows/{windows-desktop-dashboard,dashboard-en-light,dashboard-ar-dark}.png \
    "$ROOT"/docs/screenshots/macos-arm64/macos-desktop-face.png "$OUT/assets/shots/"
