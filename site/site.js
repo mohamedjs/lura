@@ -9,7 +9,7 @@ const T = {
     "hero.badge": "Voice assistant · Arabic & English", "hero.watch": "Watch her work",
     "hero.you": "YOU", "hero.q": "Lura, sort my Downloads folder.", "hero.a": "Done. Four folders: images, videos, PDFs and notes.",
     "strip.lang": "Egyptian Arabic & English", "strip.brain": "Gemini, Claude, GPT or any OpenRouter model", "strip.wake": "Offline wake word", "strip.mit": "Free & open source (MIT)",
-    "watch.kick": "See it", "watch.title": "Not a mock-up. A real session.", "watch.live": "Real session", "watch.intro": "Quick intro",
+    "watch.kick": "See it", "watch.title": "Not a mock-up. A real session.", "watch.live": "Real session", "watch.reel": "Instagram reel",
     "how.kick": "How it works", "feat.kick": "Features", "looks.kick": "Looks", "shots.kick": "Screenshots", "dl.kick": "Download", "open.kick": "Open source", "faq.kick": "FAQ",
     "looks.bust": "Hologram bust", "looks.face": "Wireframe face", "looks.orb": "Orb", "looks.ring": "Sound ring",
     "final.title": "Say “Lura”.", "final.sub": "Free on Windows, macOS and Linux. One key, and she's ready to talk.",
@@ -76,7 +76,7 @@ const T = {
     "hero.badge": "مساعدة صوتية · عربي وإنجليزي", "hero.watch": "شوفها وهي شغالة",
     "hero.you": "إنت", "hero.q": "لورا، رتّبي فولدر التحميلات.", "hero.a": "تمام، عملت ٤ فولدرات: صور وفيديوهات وPDF وملاحظات.",
     "strip.lang": "مصري وإنجليزي", "strip.brain": "Gemini أو Claude أو GPT أو أي موديل من OpenRouter", "strip.wake": "كلمة تشغيل من غير نت", "strip.mit": "مجانية ومفتوحة المصدر (MIT)",
-    "watch.kick": "شوفها", "watch.title": "مش تصميم. دي جلسة حقيقية.", "watch.live": "جلسة حقيقية", "watch.intro": "تعريف سريع",
+    "watch.kick": "شوفها", "watch.title": "مش تصميم. دي جلسة حقيقية.", "watch.live": "جلسة حقيقية", "watch.reel": "ريل إنستجرام",
     "how.kick": "إزاي", "feat.kick": "المميزات", "looks.kick": "الأشكال", "shots.kick": "صور", "dl.kick": "التحميل", "open.kick": "مفتوحة المصدر", "faq.kick": "أسئلة",
     "looks.bust": "تمثال هولوجرام", "looks.face": "وش شبكي", "looks.orb": "كورة", "looks.ring": "حلقة صوت",
     "final.title": "قول «لورا».", "final.sub": "مجانية على ويندوز وماك ولينكس. مفتاح واحد، وهي جاهزة تتكلم.",
@@ -231,13 +231,6 @@ function applyLang() {
   $$("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
   $$("#lang button").forEach((b) => b.classList.toggle("on", b.dataset.value === lang));
   document.title = `Lura — ${t("hero.title").replace(/<[^>]+>/g, "").replace(/\.$/, "")}`;
-  // The intro video and its poster exist in both languages.
-  const video = $("#intro"), src = `assets/intro-${lang}.mp4`;
-  if (!video.currentSrc.endsWith(src)) {
-    video.poster = `assets/intro-${lang}.jpg`;
-    video.querySelector("source").src = src;
-    video.load();
-  }
   $("#shot-dash").src = `assets/shots/dashboard-${lang === "ar" ? "ar-dark" : "en-light"}.png`;
   renderDownloads();
 }
@@ -267,10 +260,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }));
   $$(".tabs button").forEach((b) => (b.onclick = () => {
     $$(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const id of ["live-video", "intro"]) {
+    for (const id of ["live-video", "reel"]) {
       const v = $("#" + id), on = (b.dataset.tab === "live") === (id === "live-video");
       v.hidden = !on; if (!on) v.pause();
     }
+    $(".screen").classList.toggle("vertical", b.dataset.tab === "reel");
   }));
   release = await loadRelease();
   renderDownloads();

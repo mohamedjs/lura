@@ -141,6 +141,8 @@ img, video { max-width: 100%; }
 .screen { position: relative; padding: 10px; border-radius: 28px; background: linear-gradient(var(--solid), var(--solid)) padding-box, var(--grad) border-box; border: 1.5px solid transparent;
   box-shadow: 0 0 80px rgba(79, 216, 255, .18), var(--shadow); }
 .screen video { display: block; width: 100%; border-radius: 20px; background: #000; aspect-ratio: 16 / 9; }
+.screen.vertical { width: fit-content; margin: 0 auto; }
+.screen.vertical video { width: min(400px, 80vw); aspect-ratio: 9 / 16; }
 
 /* how */
 .flow { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; margin-top: 30px; }
