@@ -57,7 +57,7 @@ img, video { max-width: 100%; }
 .nav { position: sticky; top: 0; z-index: 20; background: rgba(5, 9, 18, .86); backdrop-filter: blur(16px) saturate(1.4); border-bottom: 1px solid rgba(79, 216, 255, .12); }
 .nav-in { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #eaf6ff; font: 800 1.35rem/1 "InterD", sans-serif; letter-spacing: .02em; }
-.logo { width: 34px; height: 34px; filter: drop-shadow(0 0 10px rgba(79, 216, 255, .6)); }
+.logo { width: 34px; height: 34px; border-radius: 9px; filter: drop-shadow(0 0 10px rgba(79, 216, 255, .45)); }
 .logo.small { width: 30px; height: 30px; }
 .links { display: flex; gap: 26px; }
 .links a { color: #a9c0d6; text-decoration: none; font-size: .95em; }
