@@ -1,11 +1,19 @@
-// Lura landing page: language, theme, OS detection, live download links, the face.
+// Lura landing page: language, theme, OS detection, live download links, video tabs.
 "use strict";
 
 const REPO = "mohamedjs/lura";
 const T = {
   en: {
     "nav.download": "Download", "nav.features": "Features", "nav.open": "Open source", "nav.faq": "FAQ",
-    "hero.title": "Talk to your computer.",
+    "nav.watch": "Watch", "nav.looks": "Looks",
+    "hero.badge": "Voice assistant · Arabic & English", "hero.watch": "Watch her work",
+    "hero.you": "YOU", "hero.q": "Lura, sort my Downloads folder.", "hero.a": "Done. Four folders: images, videos, PDFs and notes.",
+    "strip.lang": "Egyptian Arabic & English", "strip.brain": "Gemini, Claude, GPT or any OpenRouter model", "strip.wake": "Offline wake word", "strip.mit": "Free & open source (MIT)",
+    "watch.kick": "See it", "watch.title": "Not a mock-up. A real session.", "watch.live": "Real session", "watch.intro": "Quick intro",
+    "how.kick": "How it works", "feat.kick": "Features", "looks.kick": "Looks", "shots.kick": "Screenshots", "dl.kick": "Download", "open.kick": "Open source", "faq.kick": "FAQ",
+    "looks.bust": "Hologram bust", "looks.face": "Wireframe face", "looks.orb": "Orb", "looks.ring": "Sound ring",
+    "final.title": "Say “Lura”.", "final.sub": "Free on Windows, macOS and Linux. One key, and she's ready to talk.",
+    "hero.title": "Talk to your <em>computer</em>.",
     "hero.lead": "Say “Lura” and just talk, in Arabic or English. She answers out loud, opens your apps and pages, drives Chrome, finds your files and gets things done.",
     "hero.download": "Download for {os}", "hero.other": "Other platforms", "hero.say": "say “Lura”",
     "hero.version": "Version {v} · free", "hero.mobile": "Lura runs on your computer — open this page there.",
@@ -64,7 +72,15 @@ const T = {
   },
   ar: {
     "nav.download": "التحميل", "nav.features": "المميزات", "nav.open": "مفتوحة المصدر", "nav.faq": "أسئلة",
-    "hero.title": "كلّم جهازك.",
+    "nav.watch": "شوفها", "nav.looks": "الأشكال",
+    "hero.badge": "مساعدة صوتية · عربي وإنجليزي", "hero.watch": "شوفها وهي شغالة",
+    "hero.you": "إنت", "hero.q": "لورا، رتّبي فولدر التحميلات.", "hero.a": "تمام، عملت ٤ فولدرات: صور وفيديوهات وPDF وملاحظات.",
+    "strip.lang": "مصري وإنجليزي", "strip.brain": "Gemini أو Claude أو GPT أو أي موديل من OpenRouter", "strip.wake": "كلمة تشغيل من غير نت", "strip.mit": "مجانية ومفتوحة المصدر (MIT)",
+    "watch.kick": "شوفها", "watch.title": "مش تصميم. دي جلسة حقيقية.", "watch.live": "جلسة حقيقية", "watch.intro": "تعريف سريع",
+    "how.kick": "إزاي", "feat.kick": "المميزات", "looks.kick": "الأشكال", "shots.kick": "صور", "dl.kick": "التحميل", "open.kick": "مفتوحة المصدر", "faq.kick": "أسئلة",
+    "looks.bust": "تمثال هولوجرام", "looks.face": "وش شبكي", "looks.orb": "كورة", "looks.ring": "حلقة صوت",
+    "final.title": "قول «لورا».", "final.sub": "مجانية على ويندوز وماك ولينكس. مفتاح واحد، وهي جاهزة تتكلم.",
+    "hero.title": "كلّم <em>جهازك</em>.",
     "hero.lead": "قول «لورا» واتكلم عادي، عربي أو إنجليزي. بترد عليك بصوتها، وتفتحلك برامجك وصفحاتك، وتتحكم في كروم، وتلاقيلك ملفاتك، وتخلّص الحاجة.",
     "hero.download": "حمّل لـ {os}", "hero.other": "أنظمة تانية", "hero.say": "قول «لورا»",
     "hero.version": "إصدار {v} · مجاني", "hero.mobile": "لورا بتشتغل على الكمبيوتر — افتح الصفحة دي من عليه.",
@@ -212,8 +228,9 @@ function applyLang() {
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   $$("[data-i18n]").forEach((el) => { if (!el.dataset.asset) el.textContent = t(el.dataset.i18n); });
+  $$("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
   $$("#lang button").forEach((b) => b.classList.toggle("on", b.dataset.value === lang));
-  document.title = `Lura — ${t("hero.title").replace(/\.$/, "")}`;
+  document.title = `Lura — ${t("hero.title").replace(/<[^>]+>/g, "").replace(/\.$/, "")}`;
   // The intro video and its poster exist in both languages.
   const video = $("#intro"), src = `assets/intro-${lang}.mp4`;
   if (!video.currentSrc.endsWith(src)) {
@@ -229,34 +246,10 @@ function applyTheme() {
   const theme = store.get("lura-theme") || "auto";
   if (theme === "auto") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
+  const icon = $("#theme i");
+  if (icon) icon.className = theme === "light" ? "ri-sun-line" : theme === "dark" ? "ri-moon-line" : "ri-contrast-line";
 }
 
-function dark() {
-  const theme = document.documentElement.dataset.theme;
-  return theme ? theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-}
-
-// ── the face, live in the hero (face.js is the same head as the app's) ──
-function startFace() {
-  const canvas = $("#face");
-  if (!canvas || typeof window.drawFace !== "function") return;
-  const ctx = canvas.getContext("2d");
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const t0 = performance.now();
-  function frame(now) {
-    const t = still ? 2 : (now - t0) / 1000;
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    const ink = dark()
-      ? { line: [150, 145, 255], hot: [120, 230, 245], eye: [60, 210, 235], blend: "lighter", boost: 1.1 }
-      : { line: [96, 88, 220], hot: [12, 150, 172], eye: [12, 150, 172], blend: "source-over", boost: 1.8 };
-    // A soft talking rhythm every few seconds, so it looks alive.
-    const talk = Math.max(0, Math.sin(t * 0.7)) > 0.85 ? 0.3 + 0.4 * Math.abs(Math.sin(t * 12)) : 0;
-    window.drawFace(ctx, w / 2, h * 0.46, w * 0.27, { t, mouth: talk, alpha: 1, glow: 0.3, ...ink });
-    if (!still) requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   applyTheme();
@@ -272,7 +265,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     const code = b.parentElement.querySelector("code").textContent;
     try { await navigator.clipboard.writeText(code); b.textContent = t("dl.copied"); setTimeout(() => (b.textContent = t("dl.copy")), 1500); } catch {}
   }));
+  $$(".tabs button").forEach((b) => (b.onclick = () => {
+    $$(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    for (const id of ["live-video", "intro"]) {
+      const v = $("#" + id), on = (b.dataset.tab === "live") === (id === "live-video");
+      v.hidden = !on; if (!on) v.pause();
+    }
+  }));
   release = await loadRelease();
   renderDownloads();
 });
-window.addEventListener("load", startFace);
+

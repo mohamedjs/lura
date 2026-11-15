@@ -1,0 +1,36 @@
+/* Remix Icon subset (Apache-2.0, remixicon.com) */
+@font-face{font-family:"ri";src:url(remixicon.woff2) format("woff2");font-display:block}
+[class^="ri-"],[class*=" ri-"]{font-family:"ri"!important;font-style:normal;line-height:1;-webkit-font-smoothing:antialiased}
+.ri-brain-line:before{content:"\f2f7"}
+.ri-mic-line:before{content:"\ef50"}
+.ri-translate-2:before{content:"\f226"}
+.ri-chrome-line:before{content:"\eb8d"}
+.ri-plug-line:before{content:"\f019"}
+.ri-shield-check-line:before{content:"\f100"}
+.ri-hand:before{content:"\f444"}
+.ri-history-line:before{content:"\ee17"}
+.ri-palette-line:before{content:"\efc5"}
+.ri-github-fill:before{content:"\edca"}
+.ri-download-2-line:before{content:"\ec54"}
+.ri-play-fill:before{content:"\f00a"}
+.ri-sparkling-2-fill:before{content:"\f36a"}
+.ri-windows-fill:before{content:"\f2c7"}
+.ri-apple-fill:before{content:"\ea3f"}
+.ri-ubuntu-fill:before{content:"\f240"}
+.ri-check-line:before{content:"\eb7b"}
+.ri-arrow-right-line:before{content:"\ea6c"}
+.ri-notion-fill:before{content:"\f348"}
+.ri-folder-3-fill:before{content:"\ed53"}
+.ri-gemini-fill:before{content:"\f53e"}
+.ri-mic-2-fill:before{content:"\ef4d"}
+.ri-voiceprint-line:before{content:"\f29a"}
+.ri-terminal-box-line:before{content:"\f1f6"}
+.ri-lock-2-line:before{content:"\eecc"}
+.ri-code-s-slash-line:before{content:"\ebad"}
+.ri-moon-line:before{content:"\ef75"}
+.ri-sun-line:before{content:"\f1bf"}
+.ri-computer-line:before{content:"\ebca"}
+.ri-user-voice-line:before{content:"\f27a"}
+.ri-flashlight-line:before{content:"\ed3d"}
+.ri-global-line:before{content:"\edcf"}
+.ri-contrast-line:before{content:"\ebda"}
