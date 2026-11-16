@@ -13,7 +13,7 @@ const T = {
     "how.kick": "How it works", "feat.kick": "Features", "looks.kick": "Looks", "shots.kick": "Screenshots", "dl.kick": "Download", "open.kick": "Open source", "faq.kick": "FAQ",
     "looks.bust": "Hologram bust", "looks.face": "Wireframe face", "looks.orb": "Orb", "looks.ring": "Sound ring",
     "final.title": "Say “Lura”.", "final.sub": "Free on Windows, macOS and Linux. One key, and she's ready to talk.",
-    "hero.title": "Talk to your <em>computer</em>.",
+    "hero.title": "Talk to your <em class=\"hl\">computer</em>.",
     "hero.lead": "Say “Lura” and just talk, in Arabic or English. She answers out loud, opens your apps and pages, drives Chrome, finds your files and gets things done.",
     "hero.download": "Download for {os}", "hero.other": "Other platforms", "hero.say": "say “Lura”",
     "hero.version": "Version {v} · free", "hero.mobile": "Lura runs on your computer — open this page there.",
@@ -80,7 +80,7 @@ const T = {
     "how.kick": "إزاي", "feat.kick": "المميزات", "looks.kick": "الأشكال", "shots.kick": "صور", "dl.kick": "التحميل", "open.kick": "مفتوحة المصدر", "faq.kick": "أسئلة",
     "looks.bust": "تمثال هولوجرام", "looks.face": "وش شبكي", "looks.orb": "كورة", "looks.ring": "حلقة صوت",
     "final.title": "قول «لورا».", "final.sub": "مجانية على ويندوز وماك ولينكس. مفتاح واحد، وهي جاهزة تتكلم.",
-    "hero.title": "كلّم <em>جهازك</em>.",
+    "hero.title": "كلّم <em class=\"hl\">جهازك</em>.",
     "hero.lead": "قول «لورا» واتكلم عادي، عربي أو إنجليزي. بترد عليك بصوتها، وتفتحلك برامجك وصفحاتك، وتتحكم في كروم، وتلاقيلك ملفاتك، وتخلّص الحاجة.",
     "hero.download": "حمّل لـ {os}", "hero.other": "أنظمة تانية", "hero.say": "قول «لورا»",
     "hero.version": "إصدار {v} · مجاني", "hero.mobile": "لورا بتشتغل على الكمبيوتر — افتح الصفحة دي من عليه.",
@@ -233,6 +233,7 @@ function applyLang() {
   document.title = `Lura — ${t("hero.title").replace(/<[^>]+>/g, "").replace(/\.$/, "")}`;
   $("#shot-dash").src = `assets/shots/dashboard-${lang === "ar" ? "ar-dark" : "en-light"}.png`;
   renderDownloads();
+  if (window.nbScan) { nbScan(); nbRefit(); }   // marks.js: new highlighter spans, strokes re-fitted to the new text
 }
 
 function applyTheme() {

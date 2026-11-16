@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="$ROOT/_site"
 rm -rf "$OUT"
 mkdir -p "$OUT/assets/shots" "$OUT/fonts" "$OUT/img"
-cp "$ROOT"/site/index.html "$ROOT"/site/site.css "$ROOT"/site/site.js "$OUT/"
+cp "$ROOT"/site/index.html "$ROOT"/site/notebook.css "$ROOT"/site/site.css "$ROOT"/site/marks.js "$ROOT"/site/site.js "$OUT/"
 cp "$ROOT"/src/lura/modules/dashboard/static/fonts/OFL.txt "$OUT/fonts/"
 cp "$ROOT"/src/lura/modules/dashboard/static/favicon.svg "$ROOT"/packaging/icons/lura.png \
    "$ROOT"/site/mac-not-opened.png "$ROOT"/site/live-poster.jpg "$ROOT"/site/reel-poster.jpg "$OUT/assets/"

@@ -1,0 +1,207 @@
+/* Notebook design system for landing pages — the same look as Mohamed's videos (story-reel-notebook v4):
+   cream dotted paper, white paper cards with tape, ink text, ONE marker orange, ONE highlighter yellow,
+   handwritten labels, yellow sticky notes, marker strokes that draw on (marks.js).
+   Light = cream paper. Dark = "night paper" (same system, warm dark). No blue, no neon, no glow.
+   Product colours: override --marker (and --on-marker) only. Paper and ink stay. */
+
+@font-face { font-family: "Ink"; src: url(fonts/tajawal-arabic-500-normal.woff2) format("woff2"); font-weight: 400 600; font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFC; }
+@font-face { font-family: "Ink"; src: url(fonts/tajawal-arabic-800-normal.woff2) format("woff2"); font-weight: 700 900; font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFC; }
+/* every script uses the same two weight ranges (400-600, 700-900) or the browser skips a face */
+@font-face { font-family: "Ink"; src: url(fonts/inter-latin-400-normal.woff2) format("woff2"); font-weight: 400 600; font-display: swap; unicode-range: U+0000-00FF, U+2000-206F, U+20AC, U+2122; }
+@font-face { font-family: "Ink"; src: url(fonts/inter-latin-800-normal.woff2) format("woff2"); font-weight: 700 900; font-display: swap; unicode-range: U+0000-00FF, U+2000-206F, U+20AC, U+2122; }
+@font-face { font-family: "Hand"; src: url(fonts/marhey-arabic.woff2) format("woff2"); font-display: swap; unicode-range: U+0600-06FF, U+0750-077F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFC; }
+@font-face { font-family: "Hand"; src: url(fonts/caveat-latin.woff2) format("woff2"); font-display: swap; unicode-range: U+0000-00FF, U+2000-206F; }
+
+:root {
+  --paper: #F3EEE4; --paper-2: #EAE3D5; --dot: rgba(26, 23, 20, .12);
+  --card: #FFFFFF; --card-2: #FBF8F2;
+  --ink: #1A1714; --mute: #6B6358; --line: #DCD3C2;
+  --marker: #E2572B; --on-marker: #FFFFFF; --marker-tint: #FBE3D8;
+  --hl: #FFD84D; --hl-tint: #FFF1BF; --hl-ink: #1A1714;
+  --good: #2F8F5B; --bad: #D2452F;
+  --term: #1F1B17; --term-ink: #F3EEE4; --term-mute: #8F8676;
+  --tape: rgba(255, 255, 255, .62); --tape-line: rgba(26, 23, 20, .06);
+  --sh: 0 10px 24px rgba(70, 50, 25, .14); --sh-deep: 0 18px 40px rgba(70, 50, 25, .24);
+  --r: 6px;            /* paper corners are almost square */
+  --r-btn: 12px;
+  color-scheme: light;
+}
+/* night paper: same system, warm dark */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #1C1915; --paper-2: #26221D; --dot: rgba(243, 238, 228, .07);
+    --card: #2A2621; --card-2: #24201B;
+    --ink: #F3EEE4; --mute: #A89F92; --line: #3D372F;
+    --marker: #F0693D; --marker-tint: #3A2419;
+    --hl-tint: #3B3320;
+    --term: #12100D;
+    --tape: rgba(243, 238, 228, .16); --tape-line: rgba(243, 238, 228, .08);
+    --sh: 0 10px 24px rgba(0, 0, 0, .35); --sh-deep: 0 18px 40px rgba(0, 0, 0, .5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #1C1915; --paper-2: #26221D; --dot: rgba(243, 238, 228, .07);
+  --card: #2A2621; --card-2: #24201B;
+  --ink: #F3EEE4; --mute: #A89F92; --line: #3D372F;
+  --marker: #F0693D; --marker-tint: #3A2419;
+  --hl-tint: #3B3320;
+  --term: #12100D;
+  --tape: rgba(243, 238, 228, .16); --tape-line: rgba(243, 238, 228, .08);
+  --sh: 0 10px 24px rgba(0, 0, 0, .35); --sh-deep: 0 18px 40px rgba(0, 0, 0, .5);
+  color-scheme: dark;
+}
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; overflow-x: clip; }   /* tapes and turned cards may poke out; clip keeps position: sticky working */
+body { margin: 0; color: var(--ink); overflow-x: hidden;
+  background-color: var(--paper); background-image: radial-gradient(var(--dot) 1.1px, transparent 1.4px); background-size: 48px 48px;
+  font: 17px/1.65 "Ink", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Arabic", sans-serif; -webkit-font-smoothing: antialiased; }
+h1, h2, h3 { margin: 0 0 .45em; font-weight: 800; line-height: 1.15; letter-spacing: -.02em; }
+[dir="rtl"] h1, [dir="rtl"] h2, [dir="rtl"] h3 { letter-spacing: 0; line-height: 1.32; }
+h1 { font-size: clamp(2.7rem, 6.2vw, 5rem); }
+h2 { font-size: clamp(2rem, 4.2vw, 3rem); text-align: center; }
+h3 { font-size: 1.15rem; font-weight: 700; }
+p { margin: 0 0 1em; }
+a { color: var(--ink); text-decoration-color: var(--marker); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+a:hover { color: var(--marker); }
+img, video { max-width: 100%; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 3px solid var(--marker); outline-offset: 3px; border-radius: 6px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 22px; }
+.section { padding-top: 110px; scroll-margin-top: 76px; }
+.sub { text-align: center; color: var(--mute); max-width: 680px; margin: 0 auto 40px; font-size: 1.05em; }
+.lead { font-size: 1.15em; color: var(--mute); }
+.hint { color: var(--mute); font-size: .9em; }
+.center { text-align: center; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 28px 0 12px; }
+
+/* ---------- handwriting ---------- */
+.hand { font-family: "Hand", "Ink", cursive; font-weight: 400; letter-spacing: 0; }
+/* the section label: a handwritten word on a white tab, slightly turned (the reel's top-right label) */
+.kick { display: block; width: fit-content; margin: 0 auto 16px; padding: 4px 18px 8px; border-radius: var(--r);
+  font: 400 1.55rem/1.15 "Hand", "Ink", cursive; color: var(--ink); background: var(--card); box-shadow: var(--sh); transform: rotate(-2deg); }
+.kick.l { margin-inline: 0; }
+/* the highlighter: a yellow sweep behind the words; .hl-on (added by marks.js on view) draws it */
+.hl { position: relative; z-index: 0; font-style: normal; color: inherit; white-space: nowrap; }
+.hl::before { content: ""; position: absolute; z-index: -1; inset: 18% -6px 4% -6px; border-radius: 6px; background: var(--hl);
+  transform: skewX(-8deg) scaleX(0); transform-origin: 0 50%; transition: transform .7s cubic-bezier(.2, .8, .2, 1) .15s; }
+[dir="rtl"] .hl::before { transform-origin: 100% 50%; }
+.hl.hl-on::before, .no-js .hl::before { transform: skewX(-8deg) scaleX(1); }
+.hl { transition: color .3s .35s; }
+.hl.hl-on, .no-js .hl { color: var(--hl-ink); }   /* dark ink on the yellow in both themes */
+/* a marker underline in plain CSS (static); for a drawn stroke use data-mark="underline" */
+.u { text-decoration: none; border-bottom: 4px solid var(--marker); }
+
+/* ---------- paper ---------- */
+.card { position: relative; background: var(--card); border-radius: var(--r); padding: 26px 28px; box-shadow: var(--sh); }
+.card.soft { background: var(--card-2); }
+/* tape strips: add <i class="tape tl"></i> / tr / top inside any positioned box */
+.tape { position: absolute; z-index: 2; width: 92px; height: 26px; background: var(--tape); border: 1px solid var(--tape-line); pointer-events: none;
+  backdrop-filter: blur(1px); }
+.tape.tl { left: -26px; top: -6px; transform: rotate(-34deg); }
+.tape.tr { right: -26px; top: -6px; transform: rotate(34deg); }
+.tape.top { left: 50%; top: -14px; margin-left: -46px; transform: rotate(-3deg); }
+.tilt-l { transform: rotate(-1.2deg); } .tilt-r { transform: rotate(1deg); }
+/* a photo / video on a white paper card (the reel's big card) */
+.paper-frame { position: relative; background: var(--card); padding: 12px; border-radius: var(--r); box-shadow: var(--sh-deep); }
+.paper-frame > video, .paper-frame > img { display: block; width: 100%; border-radius: 3px; background: #000; }
+/* a dark plate for renders made for dark backgrounds (holograms, glow) — footage keeps its own colours */
+.plate { background: var(--term); color: var(--term-ink); }
+/* the yellow sticky note */
+.sticky { position: relative; display: block; width: fit-content; max-width: 320px; padding: 22px 24px 20px; background: var(--hl); color: var(--hl-ink);
+  box-shadow: 0 14px 28px rgba(70, 50, 25, .22); font-weight: 800; line-height: 1.3; transform: rotate(-2deg); }
+.sticky .tape.top { width: 80px; margin-left: -40px; background: rgba(255, 255, 255, .55); }
+.sticky small, .sticky .hand { display: block; font: 400 1.25em/1.2 "Hand", "Ink", cursive; margin-top: 4px; }
+.sticky.r { transform: rotate(2.2deg); }
+
+/* ---------- nav ---------- */
+.nav { position: sticky; top: 0; z-index: 20; background: color-mix(in srgb, var(--paper) 88%, transparent); backdrop-filter: blur(10px);
+  border-bottom: 1.5px solid var(--line); }
+.nav-in { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 68px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); font-weight: 800; font-size: 1.35rem; }
+.brand:hover { color: var(--ink); }
+.logo { width: 34px; height: 34px; border-radius: 9px; }
+.links { display: flex; gap: 24px; }
+.links a { color: var(--mute); text-decoration: none; font-size: .95em; font-weight: 600; }
+.links a:hover { color: var(--ink); }
+.nav-actions { display: flex; gap: 10px; align-items: center; }
+@media (max-width: 900px) { .links { display: none; } }
+@media (max-width: 520px) { .nav .btn.sm { display: none; } }
+
+/* ---------- controls ---------- */
+.btn { font: inherit; font-weight: 700; font-size: .98em; color: var(--ink); background: var(--card); border: 1.5px solid var(--ink); border-radius: var(--r-btn);
+  padding: 11px 20px; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  box-shadow: 3px 3px 0 var(--ink); transition: transform .12s, box-shadow .12s; }
+.btn:hover { color: var(--ink); transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+.btn i { font-size: 1.2em; }
+.btn.primary { color: var(--on-marker); background: var(--marker); border-color: var(--ink); }
+.btn.primary:hover { color: var(--on-marker); }
+.btn.big { font-size: 1.05em; padding: 15px 26px; }
+.btn.sm { padding: 7px 14px; font-size: .9em; box-shadow: 2px 2px 0 var(--ink); }
+.btn.ghost { border-color: transparent; background: transparent; box-shadow: none; }
+.btn.ghost:hover { background: var(--paper-2); box-shadow: none; transform: none; }
+.btn.block { display: flex; width: 100%; margin-top: 12px; }
+.icon-btn { width: 38px; height: 38px; border-radius: 10px; border: 1.5px solid var(--line); color: var(--ink); background: var(--card); cursor: pointer;
+  display: grid; place-items: center; font-size: 18px; }
+.icon-btn:hover { border-color: var(--ink); }
+.seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--card); border: 1.5px solid var(--line); }
+.seg button { font: inherit; font-size: .88em; font-weight: 700; color: var(--mute); background: transparent; border: 0; border-radius: 7px; padding: 4px 12px; cursor: pointer; }
+.seg button.on { color: var(--paper); background: var(--ink); }
+.tabs { display: flex; justify-content: center; gap: 4px; margin: -14px auto 26px; padding: 4px; width: fit-content; border-radius: 12px; background: var(--card); border: 1.5px solid var(--line); }
+.tabs button { font: inherit; font-weight: 700; color: var(--mute); background: transparent; border: 0; border-radius: 9px; padding: 8px 18px; cursor: pointer; }
+.tabs button.on { color: var(--paper); background: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.chips span { font-weight: 700; font-size: .84rem; padding: 6px 12px; border-radius: 999px; background: var(--paper); border: 1.5px solid var(--line); }
+.badge { display: inline-block; font-size: .78em; font-weight: 700; padding: 2px 10px; border-radius: 999px; background: var(--hl); color: var(--hl-ink); }
+.pill { display: inline-flex; align-items: center; gap: 10px; padding: 6px 14px; border-radius: 999px; font-size: .92em; font-weight: 700;
+  background: var(--card); border: 1.5px solid var(--line); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--good); animation: nb-pulse 1.6s ease-in-out infinite; }
+@keyframes nb-pulse { 50% { opacity: .3; } }
+
+/* ---------- blocks ---------- */
+/* feature cards: paper, a faint alternating tilt that straightens on hover */
+.feats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+.feat { position: relative; background: var(--card); border-radius: var(--r); padding: 26px; box-shadow: var(--sh); transition: transform .25s; }
+.feats > .feat:nth-child(odd) { transform: rotate(-.5deg); } .feats > .feat:nth-child(even) { transform: rotate(.5deg); }
+.feats > .feat:hover { transform: rotate(0) translateY(-3px); }
+.feat > i, .ico { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 10px; font-size: 25px; margin-bottom: 16px;
+  color: var(--paper); background: var(--ink); }
+.feat p { color: var(--mute); margin: 0; font-size: .96em; }
+@media (max-width: 980px) { .feats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .feats { grid-template-columns: 1fr; } }
+/* numbered steps: the number in handwriting with a drawn circle (data-mark="circle") */
+.flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px; margin-top: 30px; }
+.step { position: relative; text-align: center; padding: 0 10px; }
+.step .num { display: inline-block; font: 400 2.6rem/1 "Hand", cursive; color: var(--marker); margin: 6px 0 14px; padding: 4px 14px; }
+.step p { color: var(--mute); margin: 0; }
+@media (max-width: 860px) { .flow { grid-template-columns: 1fr; gap: 30px; } }
+/* commands / code: the terminal card */
+.cmd { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 7px 7px 7px 14px; border-radius: 8px; background: var(--term); color: var(--term-ink); direction: ltr; }
+.cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font: .82em ui-monospace, Menlo, Consolas, monospace; }
+.copy { font: inherit; font-size: .8em; font-weight: 700; border: 0; border-radius: 6px; padding: 4px 10px; background: var(--hl); color: var(--hl-ink); cursor: pointer; }
+.code { background: var(--term); color: var(--term-ink); border-radius: 8px; padding: 18px 22px; overflow-x: auto; direction: ltr; font: 14px/1.6 ui-monospace, Menlo, Consolas, monospace; }
+.ticks { list-style: none; padding: 0; margin: 18px 0 0; display: grid; gap: 10px; }
+.ticks li { position: relative; padding-inline-start: 30px; }
+.ticks li::before { content: ""; position: absolute; inset-inline-start: 2px; top: .3em; width: 16px; height: 9px; border: solid var(--good); border-width: 0 0 3px 3px; transform: rotate(-45deg); }
+/* faq */
+.faq { max-width: 780px; margin: 0 auto; display: grid; gap: 12px; }
+.faq details { padding: 18px 24px; }
+.faq summary { cursor: pointer; font-weight: 700; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; color: var(--marker); font: 400 1.8em/0.8 "Hand", cursive; }
+.faq details[open] summary::after { content: "–"; }
+.faq p { color: var(--mute); margin: 10px 0 0; }
+/* footer */
+.foot { margin-top: 80px; padding: 30px 0 40px; border-top: 1.5px dashed var(--line); text-align: center; color: var(--mute); font-size: .92em; }
+.foot p { margin: 8px 0 0; }
+
+/* marker strokes (marks.js) */
+.nb-mark { position: absolute; overflow: visible; pointer-events: none; z-index: 3; }
+.nb-mark path { fill: none; stroke: var(--marker); stroke-width: 4.5; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } html { scroll-behavior: auto; } }
+@media (max-width: 600px) { .tape { width: 64px; height: 20px; } .tape.tl { left: -10px; } .tape.tr { right: -10px; } .tape.top { margin-left: -32px; }
+  body { font-size: 16px; } .section { padding-top: 84px; } .wrap { padding: 0 16px; } .card { padding: 22px; } }

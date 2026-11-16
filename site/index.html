@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="en" dir="ltr" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -10,12 +10,14 @@
 <meta property="og:image" content="assets/live-poster.jpg">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#050912">
+<meta name="theme-color" content="#F3EEE4">
 <link rel="icon" href="img/favicon-64.png" type="image/png" sizes="64x64">
 <link rel="icon" href="img/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
 <link rel="stylesheet" href="fonts/icons.css">
+<link rel="stylesheet" href="notebook.css">
 <link rel="stylesheet" href="site.css">
+<script src="marks.js" defer></script>
 <script src="site.js" defer></script>
 </head>
 <body>
@@ -38,9 +40,8 @@
   </div>
 </nav>
 
-<!-- HERO: a dark stage in both themes; the hologram is Lura's real render -->
-<header class="stage" id="top">
-  <div class="stage-bg" aria-hidden="true"><div class="cone"></div><div class="floor"></div><div class="dust"></div><div class="giant">لورا</div></div>
+<!-- HERO: cream paper; Lura's real hologram render on a dark plate, taped to the page -->
+<header class="hero-top" id="top">
   <div class="wrap hero">
     <div class="hero-copy">
       <span class="pill"><span class="dot"></span><span data-i18n="hero.badge"></span></span>
@@ -48,20 +49,22 @@
       <p class="lead" data-i18n="hero.lead"></p>
       <div class="row">
         <a class="btn primary big" id="hero-download" href="#download"><span class="os-icon" id="hero-icon"></span><span id="hero-download-text"></span></a>
-        <a class="btn glass big" href="#watch"><i class="ri-play-fill"></i><span data-i18n="hero.watch"></span></a>
+        <a class="btn big" href="#watch"><i class="ri-play-fill"></i><span data-i18n="hero.watch"></span></a>
       </div>
+      <p class="say"><span class="arrow" data-mark="arrow-d" data-mark-delay="900"></span><span class="hand" data-i18n="hero.say"></span></p>
       <p class="hint" id="hero-version"></p>
     </div>
-    <div class="hero-holo">
-      <div class="holo-wrap">
-        <img class="holo" src="img/holo-hero.webp" width="1000" height="1000" alt="Lura's hologram">
-        <span class="orbit o1"><i class="ri-notion-fill"></i></span>
-        <span class="orbit o2"><i class="ri-github-fill"></i></span>
-        <span class="orbit o3"><i class="ri-chrome-line"></i></span>
-        <span class="orbit o4"><i class="ri-folder-3-fill"></i></span>
-      </div>
-      <div class="bubble you"><b data-i18n="hero.you"></b><span data-i18n="hero.q"></span></div>
-      <div class="bubble her"><b>Lura</b><span data-i18n="hero.a"></span></div>
+    <div class="hero-art">
+      <figure class="paper-frame holo-card">
+        <i class="tape tl"></i><i class="tape tr"></i>
+        <div class="plate holo-plate"><img class="holo" src="img/holo-hero.webp" width="1000" height="1000" alt="Lura's hologram"></div>
+      </figure>
+      <span class="chip-ic c1"><i class="ri-notion-fill"></i></span>
+      <span class="chip-ic c2"><i class="ri-github-fill"></i></span>
+      <span class="chip-ic c3"><i class="ri-chrome-line"></i></span>
+      <span class="chip-ic c4"><i class="ri-folder-3-fill"></i></span>
+      <div class="bubble you card"><b data-i18n="hero.you"></b><span data-i18n="hero.q"></span></div>
+      <div class="bubble her sticky r"><i class="tape top"></i><b>Lura</b><span data-i18n="hero.a"></span></div>
     </div>
   </div>
   <div class="wrap strip">
@@ -83,7 +86,7 @@
     <button class="on" data-tab="live" data-i18n="watch.live"></button>
     <button data-tab="reel" data-i18n="watch.reel"></button>
   </div>
-  <div class="screen">
+  <div class="screen paper-frame"><i class="tape tl"></i><i class="tape tr"></i>
     <video id="live-video" controls playsinline preload="none" poster="assets/live-poster.jpg">
       <source src="https://mohamedjs.github.io/mohamedjs/projects/lura/lura-demo.mp4" type="video/mp4">
     </video>
@@ -97,9 +100,9 @@
   <span class="kick" data-i18n="how.kick"></span>
   <h2 data-i18n="how.title"></h2>
   <div class="flow">
-    <div class="step"><span class="ic"><i class="ri-voiceprint-line"></i></span><span class="num">01</span><h3 data-i18n="how.1.t"></h3><p data-i18n="how.1.d"></p></div>
-    <div class="step"><span class="ic"><i class="ri-user-voice-line"></i></span><span class="num">02</span><h3 data-i18n="how.2.t"></h3><p data-i18n="how.2.d"></p></div>
-    <div class="step"><span class="ic"><i class="ri-flashlight-line"></i></span><span class="num">03</span><h3 data-i18n="how.3.t"></h3><p data-i18n="how.3.d"></p></div>
+    <div class="step"><span class="ic ico"><i class="ri-voiceprint-line"></i></span><span class="num" data-mark="circle">01</span><h3 data-i18n="how.1.t"></h3><p data-i18n="how.1.d"></p></div>
+    <div class="step"><span class="ic ico"><i class="ri-user-voice-line"></i></span><span class="num" data-mark="circle-r" data-mark-delay="250">02</span><h3 data-i18n="how.2.t"></h3><p data-i18n="how.2.d"></p></div>
+    <div class="step"><span class="ic ico"><i class="ri-flashlight-line"></i></span><span class="num" data-mark="circle" data-mark-delay="500">03</span><h3 data-i18n="how.3.t"></h3><p data-i18n="how.3.d"></p></div>
   </div>
 </section>
 
@@ -211,16 +214,16 @@
 </section>
 
 <section class="section" id="open">
-  <div class="open">
+  <div class="open card"><i class="tape tl"></i><i class="tape tr"></i>
     <div>
-      <span class="kick" data-i18n="open.kick"></span>
+      <span class="kick l" data-i18n="open.kick"></span>
       <h2 data-i18n="open.title"></h2>
       <p class="lead" data-i18n="open.lead"></p>
       <ul class="ticks"><li data-i18n="open.f1"></li><li data-i18n="open.f2"></li><li data-i18n="open.f3"></li></ul>
     </div>
     <div class="open-actions">
       <a class="btn primary big" href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener"><i class="ri-github-fill"></i><span data-i18n="open.cta"></span></a>
-      <a class="btn glass" href="https://github.com/mohamedjs/lura/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener" data-i18n="open.contrib"></a>
+      <a class="btn" href="https://github.com/mohamedjs/lura/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener" data-i18n="open.contrib"></a>
       <p class="hint" data-i18n="open.keys"></p>
     </div>
   </div>
@@ -239,8 +242,8 @@
 </section>
 
 <section class="final">
-  <img src="img/holo-hero.webp" alt="" class="final-holo" loading="lazy">
-  <h2 data-i18n="final.title"></h2>
+  <div class="final-plate paper-frame"><i class="tape top"></i><div class="plate"><img src="img/holo-hero.webp" alt="" class="final-holo" loading="lazy"></div></div>
+  <h2><span data-mark="underline"><span data-i18n="final.title"></span></span></h2>
   <p class="lead" data-i18n="final.sub"></p>
   <a class="btn primary big" href="#download"><i class="ri-download-2-line"></i><span data-i18n="nav.download"></span></a>
 </section>
