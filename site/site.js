@@ -240,7 +240,7 @@ function applyLang() {
 // The real-session video has an Arabic cut (Egyptian Arabic, captions) and an English cut (English narrator).
 const LIVE = {
   ar: { src: "https://mohamedjs.github.io/mohamedjs/projects/lura/lura-demo.mp4", poster: "assets/live-poster.jpg" },
-  en: { src: "assets/lura-en.mp4", poster: "assets/live-poster-en.jpg" },
+  en: { src: "https://mohamedjs.github.io/mohamedjs/projects/lura/lura-en.mp4", poster: "assets/live-poster-en.jpg" },
 };
 function liveVideo() {
   const v = $("#live-video"), want = LIVE[lang] || LIVE.en, source = v && v.querySelector("source");
