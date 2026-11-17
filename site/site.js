@@ -55,7 +55,7 @@ const T = {
     "feat.cut.t": "Interrupt her any time", "feat.cut.d": "Talk over her or tap her face and she stops mid-sentence and listens. She only remembers the part you actually heard.",
     "feat.mem.t": "She remembers you", "feat.mem.d": "One endless conversation with a running summary, plus things you ask her to remember. Stored only on your computer.",
     "feat.look.t": "Make her yours", "feat.look.d": "A floating hologram on every screen: bust, face, orb or ring, in five colour themes or your own colours.",
-    "live.title": "A real session", "live.sub": "Recorded live on a laptop: she sorts a folder, asks Gemini, reads Notion and sums up GitHub. Only the waiting is cut. Spoken in Egyptian Arabic, with captions.",
+    "live.title": "A real session", "live.sub": "Recorded live on a laptop: she sorts a folder, asks Gemini, reads Notion and sums up GitHub. Only the waiting is cut. The session is spoken in Arabic; this cut has an English narrator and captions.",
     "shots.title": "See it running", "shots.sub": "Real screenshots of the released app — the face floats over your apps on every screen.",
     "shots.win": "Windows: the face over your apps, with the dashboard", "shots.dash": "The dashboard: keys, brain, voice and language",
     "shots.mac": "macOS: the face and the menu-bar icon",
@@ -232,8 +232,23 @@ function applyLang() {
   $$("#lang button").forEach((b) => b.classList.toggle("on", b.dataset.value === lang));
   document.title = `Lura — ${t("hero.title").replace(/<[^>]+>/g, "").replace(/\.$/, "")}`;
   $("#shot-dash").src = `assets/shots/dashboard-${lang === "ar" ? "ar-dark" : "en-light"}.png`;
+  liveVideo();
   renderDownloads();
   if (window.nbScan) { nbScan(); nbRefit(); }   // marks.js: new highlighter spans, strokes re-fitted to the new text
+}
+
+// The real-session video has an Arabic cut (Egyptian Arabic, captions) and an English cut (English narrator).
+const LIVE = {
+  ar: { src: "https://mohamedjs.github.io/mohamedjs/projects/lura/lura-demo.mp4", poster: "assets/live-poster.jpg" },
+  en: { src: "assets/lura-en.mp4", poster: "assets/live-poster-en.jpg" },
+};
+function liveVideo() {
+  const v = $("#live-video"), want = LIVE[lang] || LIVE.en, source = v && v.querySelector("source");
+  if (!source || source.getAttribute("src") === want.src) return;
+  v.pause();
+  v.poster = want.poster;
+  source.setAttribute("src", want.src);
+  v.load();   // preload="none": this only swaps what plays, nothing is downloaded until play
 }
 
 function applyTheme() {
