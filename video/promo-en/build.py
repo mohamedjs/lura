@@ -36,7 +36,7 @@ WIN = (790, 196, 1070, 662)        # Chrome: Gemini, Notion, GitHub
 # id, handwritten label, tool chip, minimum length, footage (from, to, crop, mode)
 #   mode 'fit': the span is stretched to the whole section; 'once': plays 1x, then the board
 SECTIONS = [
-    ('intro', 'Meet Lura', None, 24, None),
+    ('intro', 'Meet Lura', None, 19, None),
     ('folder', '1/4 · Sort a folder', 'folder', 14, (26.0, 38.3, STRIP, 'fit')),
     ('gemini', '2/4 · Ask Gemini', 'gemini', 19, (39.6, 57.9, WIN, 'fit')),
     ('notion', '3/4 · Last thing in Notion', 'notion', 17, (59.2, 61.7, WIN, 'once')),
