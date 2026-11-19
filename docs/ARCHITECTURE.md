@@ -22,6 +22,7 @@ src/lura/
     ├── brain/        ChatModel port; OpenAI-compatible adapter (OpenAI, OpenRouter, Gemini), Anthropic adapter
     ├── voice/        sentence chunker, Gemini TTS (direct / OpenRouter, streamed), transcriber, mic/speaker, barge-in, Vosk wake word, Gemini Live
     ├── tools/        built-in tools + command guard; per-OS implementations; briefing
+    ├── computer/     desktop actions (windows, workspaces, layouts, pointer, system, clipboard), X11 backend, desktop_action tool
     ├── connectors/   MCP: stdio and Streamable HTTP clients, mcp.json repository, plan rule
     ├── memory/       history (SQLite), memory.md facts, running summary + compaction, memory tools
     ├── skills/       Agent Skills folders (SKILL.md), prompt listing, use_skill / read_skill_file

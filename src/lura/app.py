@@ -422,6 +422,27 @@ def cmd_selftest(args) -> int:
     return run(_container())
 
 
+def cmd_desktop(args) -> int:
+    from .modules.computer import ComputerService, default_backend
+
+    params: dict[str, str] = {}
+    for tok in args.params:
+        if "=" not in tok:
+            print(f"bad argument: {tok} (use key=value)")
+            return 2
+        key, value = tok.split("=", 1)
+        params[key] = value
+    svc = ComputerService(default_backend())
+    result = svc.run(args.action, params, confirmed=args.yes)
+    print(result.message)
+    if args.action == "capabilities" and result.data:
+        print(result.data.get("actions", ""))
+    elif result.data:
+        print(json.dumps(result.data, indent=2, ensure_ascii=False))
+    print(f"({result.ms} ms)")
+    return 0 if result.ok else 1
+
+
 def _utf8_console() -> None:
     """Windows consoles default to a legacy code page that cannot print Arabic
     (or "──"), and a print would raise mid-command. Reconfigure, never crash."""
@@ -468,6 +489,10 @@ def main(argv=None) -> int:
     mcp.add_argument("target", nargs="?", help="URL for add-url")
     auto = subs.add_parser("autostart", help="start Lura at login: on or off")
     auto.add_argument("state", choices=["on", "off"])
+    desk = subs.add_parser("desktop", help="desktop actions: list, run one (key=value args)")
+    desk.add_argument("action", nargs="?", default="capabilities")
+    desk.add_argument("params", nargs="*")
+    desk.add_argument("--yes", action="store_true")
 
     args = parser.parse_args(argv)
     if args.command == "mcp" and args.action == "import":
@@ -478,7 +503,7 @@ def main(argv=None) -> int:
     handlers = {
         "run": cmd_run, "dashboard": cmd_dashboard, "window": cmd_window, "login": cmd_login, "logout": cmd_logout,
         "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest, "say": cmd_say,
-        "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart,
+        "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart, "desktop": cmd_desktop,
     }
     return handlers[args.command](args)
 
