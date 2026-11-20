@@ -443,6 +443,108 @@ def cmd_desktop(args) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_air(args) -> int:
+    from .modules.air import (
+        AirService,
+        air_available,
+        download_model,
+        list_cameras,
+        model_path,
+        model_ready,
+        pick_camera,
+    )
+
+    if args.action == "cameras":
+        cams = list_cameras()
+        if not cams:
+            print("No cameras found.")
+            return 0
+        picked = pick_camera(cams, args.camera)
+        for cam in cams:
+            suffix = ""
+            if not cam.usable:
+                suffix = "  (not a camera)"
+            elif picked is not None and cam.index == picked.index:
+                suffix = "  ← used"
+            print(f"/dev/video{cam.index}  {cam.name}  [{cam.driver}]{suffix}")
+        return 0
+
+    if args.action == "setup":
+        if model_ready():
+            print(f"Hand model already installed: {model_path()}")
+            return 0
+
+        def _progress(done: int, total: int) -> None:
+            pct = int(done * 100 / total) if total > 0 else 0
+            print(f"\r… {pct}%", end="", flush=True)
+
+        try:
+            path = download_model(_progress)
+        except RuntimeError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        print(f"\r{path}        ")
+        return 0
+
+    if reason := air_available():
+        print(reason)
+        return 1
+
+    svc = AirService(None, camera=args.camera)
+
+    if args.action == "watch":
+        def on_event(ev) -> None:
+            now = time.time()
+            ms = int((now - int(now)) * 1000)
+            stamp = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{ms:03d}"
+            extra = json.dumps(ev.data, ensure_ascii=False) if ev.data else ""
+            line = (
+                f"{stamp}  {ev.gesture:13} {ev.hand:5} {ev.confidence:.2f}  "
+                f"{ev.x:.3f},{ev.y:.3f}"
+            )
+            print(f"{line}  {extra}" if extra else line, flush=True)
+
+        svc.subscribe(on_event)
+        svc.start()
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        next_status = time.monotonic() + 2.0
+        try:
+            while True:
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    break
+                if now >= next_status:
+                    snap = svc.snapshot()
+                    hands = ", ".join(
+                        f"{h.side}:{h.pose}{'*' if h.pinching else ''}" for h in snap.hands
+                    ) or "none"
+                    print(
+                        f"status: camera={snap.camera} ({snap.detail})  hands={hands}  "
+                        f"fps={snap.fps:.1f}",
+                        flush=True,
+                    )
+                    next_status = now + 2.0
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            svc.stop()
+        return 0
+
+    duration = args.seconds if args.seconds > 0 else 15.0
+    svc.start()
+    deadline = time.monotonic() + duration
+    try:
+        while time.monotonic() < deadline:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        svc.stop()
+    print(json.dumps(svc.stats(), indent=2))
+    return 0
+
+
 def _utf8_console() -> None:
     """Windows consoles default to a legacy code page that cannot print Arabic
     (or "──"), and a print would raise mid-command. Reconfigure, never crash."""
@@ -493,6 +595,11 @@ def main(argv=None) -> int:
     desk.add_argument("action", nargs="?", default="capabilities")
     desk.add_argument("params", nargs="*")
     desk.add_argument("--yes", action="store_true")
+    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, bench")
+    air.add_argument("action", nargs="?", default="watch",
+                     choices=["cameras", "setup", "watch", "bench"])
+    air.add_argument("--camera", default="")
+    air.add_argument("--seconds", type=float, default=0.0)
 
     args = parser.parse_args(argv)
     if args.command == "mcp" and args.action == "import":
@@ -504,6 +611,7 @@ def main(argv=None) -> int:
         "run": cmd_run, "dashboard": cmd_dashboard, "window": cmd_window, "login": cmd_login, "logout": cmd_logout,
         "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest, "say": cmd_say,
         "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart, "desktop": cmd_desktop,
+        "air": cmd_air,
     }
     return handlers[args.command](args)
 

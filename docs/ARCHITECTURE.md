@@ -27,6 +27,7 @@ src/lura/
     ├── memory/       history (SQLite), memory.md facts, running summary + compaction, memory tools
     ├── skills/       Agent Skills folders (SKILL.md), prompt listing, use_skill / read_skill_file
     ├── assistant/    orchestration: wake loop, pipeline conversation, realtime, briefing
+    ├── air/          Lura Air: webcam hand tracking (MediaPipe), gesture recognizer, gesture events
     ├── overlay/      presentation: the hologram face (cairo), GTK and Qt backends, tray
     └── dashboard/    presentation: local HTTP API + static neumorphic page
 ```

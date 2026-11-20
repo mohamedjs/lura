@@ -30,6 +30,10 @@ RESTART_REQUESTED = "app.restart"
 TOOL_USED = "connectors.tool_used"
 #: Quit so a newly downloaded version can take over (its installer starts it).
 EXIT_REQUESTED = "app.exit"
+#: Lura Air recognised a gesture: the payload is GestureEvent.to_payload() (discrete events only).
+AIR_GESTURE = "air.gesture"
+#: The Air camera changed state: {"camera": "on" | "lost" | "off" | "error", "detail": str}.
+AIR_STATUS = "air.status"
 
 
 class EventBus:
