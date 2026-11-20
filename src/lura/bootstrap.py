@@ -57,7 +57,10 @@ def build(presence: Presence | None = None) -> Container:
                            lambda prompt: brain.complete(settings.current, prompt),
                            lambda: settings.current.user_name)
     skills = SkillsService()
-    computer = ComputerService(default_backend())
+    computer = ComputerService(
+        default_backend(),
+        launcher=lambda name: tools.dispatch("open_application", {"app_name": name})[0],
+    )
     air = AirService(lambda name, payload: bus.publish(name, **payload),
                      camera=settings.current.air_camera)
     air_control = AirController(air, computer,

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -20,25 +22,30 @@ from .domain import (
     Layout,
     LayoutEntry,
     Monitor,
+    PresetApp,
     Rect,
     Window,
     WindowGrip,
     bounds,
     catalog_text,
     clamp_visible,
+    find_window,
     grid_rects,
     is_target,
     match_layout,
     monitor_for,
     monitor_target,
     next_window,
+    preset_from_windows,
     resolve_desktop,
     snap_rect,
     validate_args,
     validate_keys,
+    validate_preset,
     work_area,
 )
 from .infrastructure import layouts as _layouts_mod
+from .infrastructure import presets as _presets_mod
 
 log = logging.getLogger(__name__)
 
@@ -91,9 +98,19 @@ class Backend(Protocol):
 class ComputerService:
     """Validated desktop actions backed by an OS-specific Backend."""
 
-    def __init__(self, backend: Backend, layouts_store: Any = None) -> None:
+    def __init__(
+        self,
+        backend: Backend,
+        layouts_store: Any = None,
+        presets_store: Any = None,
+        launcher: Callable[[str], str] | None = None,
+    ) -> None:
         self._backend = backend
         self._layouts = layouts_store if layouts_store is not None else _layouts_mod
+        self._presets = presets_store if presets_store is not None else _presets_mod
+        self._launcher = launcher
+        self._sleep = time.sleep
+        self._clock = time.monotonic
         self._lock = threading.RLock()
         self._probe: dict[str, bool] | None = None
 
@@ -147,6 +164,8 @@ class ComputerService:
             return f"close {self._label(w)}"
         if name == "layout_delete":
             return f"delete layout '{args['name']}'"
+        if name == "preset_delete":
+            return f"delete preset '{args['name']}'"
         if name == "lock_screen":
             return "lock the screen"
         return name
@@ -194,18 +213,21 @@ class ComputerService:
         }
         log.info("desktop_action %s %s", name, safe_args)
 
-        with self._lock:
-            t0 = time.perf_counter()
-            try:
-                result = getattr(self, f"_do_{name}")(clean)
-            except ActionError as exc:
-                log.warning("desktop_action %s failed: %s", name, exc)
-                result = ActionResult(False, str(exc))
-            except Exception as exc:
-                log.warning("desktop_action %s failed: %s", name, exc)
-                result = ActionResult(False, f"{name} failed: {exc}")
-            result.ms = round((time.perf_counter() - t0) * 1000, 1)
-            return result
+        t0 = time.perf_counter()
+        try:
+            if name == "preset_apply":
+                result = self._do_preset_apply(clean)
+            else:
+                with self._lock:
+                    result = getattr(self, f"_do_{name}")(clean)
+        except ActionError as exc:
+            log.warning("desktop_action %s failed: %s", name, exc)
+            result = ActionResult(False, str(exc))
+        except Exception as exc:
+            log.warning("desktop_action %s failed: %s", name, exc)
+            result = ActionResult(False, f"{name} failed: {exc}")
+        result.ms = round((time.perf_counter() - t0) * 1000, 1)
+        return result
 
     # ── fast path (continuous moves) ────────────────────────────────────────
 
@@ -684,3 +706,168 @@ class ComputerService:
         combo = validate_keys(args["keys"])
         self._backend.key(combo)
         return ActionResult(True, f"Pressed {combo}.")
+
+    # ── presets ─────────────────────────────────────────────────────────────
+
+    def _do_preset_list(self, args: dict) -> ActionResult:
+        all_presets = self._presets.load()
+        rows = [
+            {
+                "name": p.name,
+                "apps": [a.launch for a in p.apps],
+                "saved_at": p.saved_at,
+            }
+            for p in all_presets.values()
+        ]
+        msg = f"Found {len(rows)} saved preset(s)." if rows else "No saved presets."
+        return ActionResult(True, msg, data={"presets": rows})
+
+    def _do_preset_define(self, args: dict) -> ActionResult:
+        name = args["name"]
+        try:
+            raw = json.loads(args["spec"])
+        except ValueError as exc:
+            raise ActionError(f"spec is not valid JSON: {exc}") from None
+        if not isinstance(raw, list):
+            raise ActionError("spec must be a JSON list of app objects.")
+        saved_at = datetime.now().isoformat(timespec="seconds")
+        preset = validate_preset(name, raw, saved_at=saved_at)
+        all_presets = self._presets.load()
+        all_presets[preset.name] = preset
+        self._presets.save(all_presets)
+        return ActionResult(True, f"Saved preset '{preset.name}' with {len(preset.apps)} apps.")
+
+    def _do_preset_save(self, args: dict) -> ActionResult:
+        name = args["name"]
+        ws = [w for w in self._targets() if not w.minimized]
+        mons = self._backend.monitors()
+        saved_at = datetime.now().isoformat(timespec="seconds")
+        preset = preset_from_windows(name, ws, mons, saved_at)
+        all_presets = self._presets.load()
+        all_presets[preset.name] = preset
+        self._presets.save(all_presets)
+        return ActionResult(True, f"Saved preset '{preset.name}' with {len(preset.apps)} apps.")
+
+    def _do_preset_delete(self, args: dict) -> ActionResult:
+        name = args["name"]
+        all_presets = self._presets.load()
+        if name not in all_presets:
+            return ActionResult(False, f"No saved preset named '{name}'.")
+        del all_presets[name]
+        self._presets.save(all_presets)
+        return ActionResult(True, f"Deleted preset '{name}'.")
+
+    def _do_preset_apply(self, args: dict) -> ActionResult:
+        name = args["name"]
+        all_presets = self._presets.load()
+        if name not in all_presets:
+            known = ", ".join(sorted(all_presets)) or "none"
+            return ActionResult(False, f"No saved preset named '{name}'. Available presets: {known}.")
+        preset = all_presets[name]
+
+        matched: list[tuple[PresetApp, Window]] = []
+        missing: list[PresetApp] = []
+        used: set[int] = set()
+        with self._lock:
+            before_windows = self._targets()
+            before_ids = {w.id for w in before_windows}
+            for app in preset.apps:
+                w = find_window(app, before_windows, used)
+                if w is not None:
+                    used.add(w.id)
+                    matched.append((app, w))
+                else:
+                    missing.append(app)
+
+        not_running: list[str] = []
+        pending: list[PresetApp] = []
+        if missing:
+            if self._launcher is None:
+                not_running = [app.launch for app in missing]
+            else:
+                for app in missing:
+                    self._launcher(app.launch)
+                    pending.append(app)
+
+        opened = 0
+        did_not_open: list[str] = []
+        if pending:
+            deadline = self._clock() + 10.0
+            remaining = list(pending)
+            while remaining:
+                self._sleep(0.4)
+                with self._lock:
+                    cur = self._targets()
+                new_windows = [w for w in cur if w.id not in before_ids]
+                still: list[PresetApp] = []
+                for app in remaining:
+                    w = find_window(app, new_windows, used)
+                    if w is not None:
+                        used.add(w.id)
+                        matched.append((app, w))
+                        opened += 1
+                    else:
+                        still.append(app)
+                remaining = still
+                if not remaining or self._clock() >= deadline:
+                    break
+            did_not_open = [app.launch for app in remaining]
+
+        with self._lock:
+            mons = self._backend.monitors()
+            wa_root = self._backend.workarea()
+            b = bounds(mons) if mons else None
+            for app, w in matched:
+                if app.workspace > 0 and (app.workspace - 1) != w.desktop:
+                    self._backend.set_window_desktop(w.id, app.workspace - 1)
+                if app.rect is not None:
+                    if w.maximized:
+                        self._backend.set_maximized(w.id, False)
+                    target_rect = clamp_visible(app.rect, b) if b is not None else app.rect
+                    self._backend.move_resize(w.id, target_rect)
+                elif app.where == "full":
+                    if 0 < app.monitor <= len(mons):
+                        src = monitor_for(w.rect, mons)
+                        dst = mons[app.monitor - 1]
+                        if dst != src:
+                            if w.maximized:
+                                self._backend.set_maximized(w.id, False)
+                            dst_area = work_area(dst, wa_root)
+                            rect = clamp_visible(
+                                w.rect.translate(dst.rect.x - src.rect.x, dst.rect.y - src.rect.y),
+                                dst_area,
+                            )
+                            self._backend.move_resize(w.id, rect)
+                    self._backend.set_maximized(w.id, True)
+                elif app.where:
+                    if mons:
+                        mon = (
+                            mons[app.monitor - 1]
+                            if 0 < app.monitor <= len(mons)
+                            else monitor_for(w.rect, mons)
+                        )
+                        if w.maximized:
+                            self._backend.set_maximized(w.id, False)
+                        self._backend.move_resize(w.id, snap_rect(work_area(mon, wa_root), app.where))
+                elif 0 < app.monitor <= len(mons):
+                    src = monitor_for(w.rect, mons)
+                    dst = mons[app.monitor - 1]
+                    dst_area = work_area(dst, wa_root)
+                    rect = clamp_visible(
+                        w.rect.translate(dst.rect.x - src.rect.x, dst.rect.y - src.rect.y),
+                        dst_area,
+                    )
+                    was_max = w.maximized
+                    if was_max:
+                        self._backend.set_maximized(w.id, False)
+                    self._backend.move_resize(w.id, rect)
+                    if was_max:
+                        self._backend.set_maximized(w.id, True)
+
+        placed = len(matched)
+        msg = f"Applied preset '{name}': {placed} placed ({opened} opened)."
+        if not_running:
+            msg += f" Not running: {', '.join(not_running)}."
+        if did_not_open:
+            msg += f" Did not open: {', '.join(did_not_open)}."
+        return ActionResult(placed > 0, msg)

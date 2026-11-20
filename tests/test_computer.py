@@ -1,5 +1,6 @@
 """Computer module: catalog, validation, geometry, parsers, service and ToolService integration."""
 
+import json
 import _setup  # noqa: F401
 import sys
 
@@ -15,11 +16,13 @@ from lura.modules.computer.domain import (
     ACTIONS_BY_NAME,
     LayoutEntry,
     Monitor,
+    PresetApp,
     Rect,
     Window,
     bounds,
     catalog_text,
     clamp_visible,
+    find_window,
     grid_rects,
     is_target,
     match_layout,
@@ -32,6 +35,7 @@ from lura.modules.computer.domain import (
     parse_wpctl_volume,
     parse_xprop,
     parse_xwininfo,
+    preset_from_windows,
     prop_atoms,
     prop_ints,
     prop_strings,
@@ -39,9 +43,11 @@ from lura.modules.computer.domain import (
     snap_rect,
     validate_args,
     validate_keys,
+    validate_preset,
     window_from_props,
     work_area,
 )
+from lura.modules.computer.infrastructure import presets as presets_store
 from lura.modules.computer.infrastructure.unsupported import UnsupportedBackend
 
 
@@ -59,6 +65,7 @@ EXPECTED_ORDER = [
     "brightness_set", "brightness_change", "media", "lock_screen",
     "clipboard_get", "clipboard_set", "copy", "cut", "paste",
     "select_all", "undo", "press_keys",
+    "preset_list", "preset_define", "preset_save", "preset_apply", "preset_delete",
 ]
 
 PROBE_KEYS = {
@@ -102,6 +109,33 @@ class FakeBackend:
         self._mic_muted = False
         self._bright = 50
         self._clip = "hello"
+        self._pending_spawns: list[list] = []
+        self._next_wid = 300
+
+    def spawn(
+        self,
+        app: str,
+        *,
+        after_polls: int = 1,
+        title: str = "",
+        rect: Rect | None = None,
+        desktop: int = 0,
+    ) -> int:
+        wid = self._next_wid
+        self._next_wid += 1
+        win = Window(
+            wid,
+            title or app,
+            app,
+            3000 + wid,
+            desktop,
+            rect or Rect(50, 50, 800, 600),
+            False,
+            False,
+            "NORMAL",
+        )
+        self._pending_spawns.append([after_polls, win])
+        return wid
 
     def unsupported_reason(self) -> str:
         return ""
@@ -113,6 +147,14 @@ class FakeBackend:
         return set(self._own)
 
     def windows(self) -> list[Window]:
+        still: list[list] = []
+        for entry in self._pending_spawns:
+            entry[0] -= 1
+            if entry[0] <= 0:
+                self._wins.append(entry[1])
+            else:
+                still.append(entry)
+        self._pending_spawns = still
         return list(self._wins)
 
     def active_window(self) -> int | None:
@@ -233,7 +275,7 @@ class FakeBackend:
 
 def check_catalog() -> None:
     names = [a.name for a in ACTIONS]
-    assert len(names) == 47
+    assert len(names) == 52
     assert len(set(names)) == len(names)
     assert names == EXPECTED_ORDER
     for spec in ACTIONS:
@@ -243,8 +285,10 @@ def check_catalog() -> None:
         assert spec.safety in (SAFE, CONFIRM)
     assert DESKTOP_TOOL.name == "desktop_action"
     assert DESKTOP_TOOL.parameters["properties"]["action"]["enum"] == names
+    assert "spec" in DESKTOP_TOOL.parameters["properties"]
+    assert "preset_define / preset_save" in DESKTOP_TOOL.description
     confirm_names = {a.name for a in ACTIONS if a.safety == CONFIRM}
-    assert confirm_names == {"window_close", "layout_delete", "lock_screen"}
+    assert confirm_names == {"window_close", "layout_delete", "lock_screen", "preset_delete"}
     txt = catalog_text({"window_close": False})
     assert "window_close [confirm]" in txt and "(unavailable)" in txt
 
@@ -560,6 +604,205 @@ def check_tool_service() -> None:
     assert len(svc.tool_specs()) == 1 and svc.tool_specs()[0].name == "desktop_action"
     out, ended = ts.dispatch("desktop_action", {"action": "window_list"})
     assert not ended and "Terminal — zsh" in out
+
+
+def _instant_clock(svc: ComputerService) -> None:
+    now = [0.0]
+    svc._clock = lambda: now[0]
+    svc._sleep = lambda dt: now.__setitem__(0, now[0] + dt)
+
+
+def check_preset_validate() -> None:
+    p = validate_preset(
+        "dev-1",
+        [
+            {
+                "launch": "org.gnome.Calculator",
+                "where": "left",
+                "monitor": 2,
+                "workspace": 3,
+                "extra_ignored": 123,
+            },
+            {
+                "launch": "Code",
+                "match": "Visual Studio",
+                "rect": [10, 20, 800, 600],
+            },
+        ],
+    )
+    assert p.name == "dev-1" and len(p.apps) == 2
+    assert p.apps[0] == PresetApp("org.gnome.Calculator", "calculator", "left", None, 2, 3)
+    assert p.apps[1] == PresetApp("Code", "Visual Studio", "", Rect(10, 20, 800, 600), 0, 0)
+
+    # 9 apps rejected
+    try:
+        validate_preset("too-many", [{"launch": f"app{i}"} for i in range(9)])
+    except ActionError:
+        pass
+    else:
+        raise AssertionError("9 apps accepted")
+
+    # 0 apps rejected
+    try:
+        validate_preset("empty", [])
+    except ActionError:
+        pass
+    else:
+        raise AssertionError("0 apps accepted")
+
+    # bad where, rect too small, missing launch -> ActionError naming index and field
+    for bad_apps, idx_str, field_name in (
+        ([{"launch": "code", "where": "diagonal"}], "0", "where"),
+        ([{"launch": "code"}, {"launch": "term", "rect": [0, 0, 50, 500]}], "1", "rect"),
+        ([{"launch": "code"}, {"where": "left"}], "1", "launch"),
+    ):
+        try:
+            validate_preset("bad", bad_apps)
+        except ActionError as exc:
+            msg = str(exc)
+            assert idx_str in msg and field_name in msg, f"unexpected error: {msg}"
+        else:
+            raise AssertionError(f"accepted {bad_apps!r}")
+
+
+def check_preset_all_running() -> None:
+    fb = FakeBackend()
+    launched: list[str] = []
+    svc = ComputerService(fb, launcher=lambda app: (launched.append(app), "ok")[1])
+    spec = json.dumps([
+        {"launch": "Code", "where": "left"},
+        {"launch": "Gnome-terminal", "where": "right", "monitor": 2},
+        {"launch": "firefox", "where": "full", "workspace": 2},
+    ])
+    res_def = svc.run("preset_define", {"name": "dev", "spec": spec})
+    assert res_def.ok and "3 apps" in res_def.message
+
+    res_list = svc.run("preset_list")
+    assert res_list.ok
+    rows = res_list.data["presets"]
+    row = next(r for r in rows if r["name"] == "dev")
+    assert row["apps"] == ["Code", "Gnome-terminal", "firefox"] and row["saved_at"]
+
+    res_app = svc.run("preset_apply", {"name": "dev"})
+    assert res_app.ok and "3 placed (0 opened)" in res_app.message
+    assert not launched
+    assert ("move_resize", 103, Rect(0, 28, 960, 1052)) in fb.calls
+    assert ("move_resize", 101, Rect(1920 + 960, 28, 960, 1052)) in fb.calls
+    assert ("set_window_desktop", 102, 1) in fb.calls
+    assert ("set_maximized", 102, True) in fb.calls
+
+
+def check_preset_launch_and_poll() -> None:
+    fb = FakeBackend()
+    launched: list[str] = []
+
+    def fake_launch(app: str) -> str:
+        launched.append(app)
+        fb.spawn(app, after_polls=3)
+        return f"Opened {app}."
+
+    svc = ComputerService(fb, launcher=fake_launch)
+    _instant_clock(svc)
+    spec = json.dumps([
+        {"launch": "Code", "where": "left"},
+        {"launch": "org.gnome.Calculator", "where": "top_right"},
+    ])
+    assert svc.run("preset_define", {"name": "calc-dev", "spec": spec}).ok
+
+    res = svc.run("preset_apply", {"name": "calc-dev"})
+    assert res.ok and "2 placed (1 opened)" in res.message
+    assert launched == ["org.gnome.Calculator"]
+    calc_win = next(w for w in fb.windows() if "calculator" in w.app.lower())
+    assert ("move_resize", calc_win.id, Rect(960, 28, 960, 526)) in fb.calls
+
+
+def check_preset_never_opens() -> None:
+    fb = FakeBackend()
+    launched: list[str] = []
+    svc = ComputerService(fb, launcher=lambda app: (launched.append(app), "ok")[1])
+    _instant_clock(svc)
+    spec = json.dumps([
+        {"launch": "Code", "where": "left"},
+        {"launch": "GhostApp", "where": "right"},
+    ])
+    assert svc.run("preset_define", {"name": "ghost", "spec": spec}).ok
+
+    res = svc.run("preset_apply", {"name": "ghost"})
+    assert res.ok
+    assert "1 placed (0 opened)" in res.message
+    assert "Did not open: GhostApp." in res.message
+    assert launched == ["GhostApp"]
+    assert ("move_resize", 103, Rect(0, 28, 960, 1052)) in fb.calls
+
+
+def check_preset_no_launcher() -> None:
+    fb = FakeBackend()
+    svc = ComputerService(fb)
+    spec = json.dumps([
+        {"launch": "Code", "where": "left"},
+        {"launch": "Slack", "where": "right"},
+    ])
+    assert svc.run("preset_define", {"name": "no-launch", "spec": spec}).ok
+
+    res = svc.run("preset_apply", {"name": "no-launch"})
+    assert res.ok
+    assert "1 placed (0 opened)" in res.message
+    assert "Not running: Slack." in res.message
+
+    # When zero windows can be placed, ok is False
+    only_missing = json.dumps([{"launch": "Slack", "where": "right"}])
+    assert svc.run("preset_define", {"name": "only-slack", "spec": only_missing}).ok
+    res2 = svc.run("preset_apply", {"name": "only-slack"})
+    assert not res2.ok and "Not running: Slack." in res2.message
+
+
+def check_preset_save_and_restore() -> None:
+    fb = FakeBackend()
+    svc = ComputerService(fb)
+    assert svc.run("preset_save", {"name": "snap"}).ok
+
+    orig = {w.id: w.rect for w in fb.windows() if w.id in (101, 102, 103)}
+    for wid in (101, 102, 103):
+        assert svc.run("window_move", {"window": wid, "x": 500, "y": 300}).ok
+
+    res = svc.run("preset_apply", {"name": "snap"})
+    assert res.ok and "3 placed (0 opened)" in res.message
+    for wid, rect in orig.items():
+        cur = next(w for w in fb.windows() if w.id == wid)
+        assert cur.rect == rect
+
+
+def check_preset_errors_and_delete() -> None:
+    fb = FakeBackend()
+    svc = ComputerService(fb)
+
+    # Invalid JSON spec
+    bad_json = svc.run("preset_define", {"name": "broken", "spec": "{not json"})
+    assert not bad_json.ok and "not valid JSON" in bad_json.message
+
+    # Non-list JSON spec
+    bad_type = svc.run("preset_define", {"name": "broken", "spec": '{"launch": "Code"}'})
+    assert not bad_type.ok
+
+    # Define a known preset, then request unknown preset -> lists available names
+    assert svc.run("preset_define", {"name": "known", "spec": json.dumps([{"launch": "Code"}])}).ok
+    unk = svc.run("preset_apply", {"name": "missing-one"})
+    assert not unk.ok and "known" in unk.message
+
+    # preset_delete requires confirmation
+    need = svc.run("preset_delete", {"name": "known"})
+    assert not need.ok and need.needs_confirmation and "known" in need.message
+    deleted = svc.run("preset_delete", {"name": "known"}, confirmed=True)
+    assert deleted.ok
+
+    # Corrupt presets.json returns {} safely
+    path = presets_store._path()
+    saved_bytes = path.read_text(encoding="utf-8")
+    try:
+        path.write_text("{corrupt", encoding="utf-8")
+        assert presets_store.load() == {}
+    finally:
+        path.write_text(saved_bytes, encoding="utf-8")
 
 
 def main() -> int:

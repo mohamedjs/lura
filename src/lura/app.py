@@ -440,6 +440,7 @@ def cmd_selftest(args) -> int:
 
 def cmd_desktop(args) -> int:
     from .modules.computer import ComputerService, default_backend
+    from .modules.tools import ToolService
 
     params: dict[str, str] = {}
     for tok in args.params:
@@ -448,7 +449,11 @@ def cmd_desktop(args) -> int:
             return 2
         key, value = tok.split("=", 1)
         params[key] = value
-    svc = ComputerService(default_backend())
+    tools = ToolService()
+    svc = ComputerService(
+        default_backend(),
+        launcher=lambda name: tools.dispatch("open_application", {"app_name": name})[0],
+    )
     result = svc.run(args.action, params, confirmed=args.yes)
     print(result.message)
     if args.action == "capabilities" and result.data:

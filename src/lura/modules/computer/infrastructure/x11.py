@@ -27,6 +27,22 @@ log = logging.getLogger(__name__)
 _CLI_PROBES = ("xdotool", "xprop", "xwininfo", "xrandr", "wpctl", "playerctl", "xclip", "loginctl")
 
 
+def _extents(props: dict[str, str]) -> tuple[int, int, int, int]:
+    """(left, right, top, bottom) from the visible window edge to the X client edge.
+
+    Positive: a window-manager frame around the client (_NET_FRAME_EXTENTS). Negative: an
+    invisible client-side shadow inside it (_GTK_FRAME_EXTENTS, GTK4/libadwaita apps such as
+    Text Editor: measured 61, 61, 55, 67) — without it a snapped window looked ~60 px too small.
+    """
+    ext = prop_ints(props.get("_NET_FRAME_EXTENTS", ""))
+    if len(ext) >= 4:
+        return (ext[0], ext[1], ext[2], ext[3])
+    gtk = prop_ints(props.get("_GTK_FRAME_EXTENTS", ""))
+    if len(gtk) >= 4:
+        return (-gtk[0], -gtk[1], -gtk[2], -gtk[3])
+    return (0, 0, 0, 0)
+
+
 class X11Backend:
     """X11 implementation of the desktop backend port."""
 
@@ -85,6 +101,7 @@ class X11Backend:
                 "xprop", "-id", str(wid),
                 "WM_CLASS", "_NET_WM_NAME", "WM_NAME", "_NET_WM_DESKTOP",
                 "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_NET_FRAME_EXTENTS",
+                "_GTK_FRAME_EXTENTS",
             ])
             ri = run(["xwininfo", "-id", str(wid)])
             if not rp.ok or not ri.ok:
@@ -93,9 +110,7 @@ class X11Backend:
             inner = parse_xwininfo(ri.out)
             if inner is None:
                 continue
-            ext = prop_ints(props.get("_NET_FRAME_EXTENTS", ""))
-            extents = (ext[0], ext[1], ext[2], ext[3]) if len(ext) >= 4 else (0, 0, 0, 0)
-            result.append(window_from_props(wid, props, inner, extents))
+            result.append(window_from_props(wid, props, inner, _extents(props)))
         return result
 
     def active_window(self) -> int | None:
@@ -147,13 +162,14 @@ class X11Backend:
 
     def move_resize(self, wid: int, frame: Rect) -> None:
         # xdotool windowmove lands offset by the frame on Mutter (measured), hence EWMH.
-        res = run(["xprop", "-id", str(wid), "_NET_FRAME_EXTENTS"])
-        ext = prop_ints(parse_xprop(res.out).get("_NET_FRAME_EXTENTS", "")) if res.ok else []
-        left, right, top, bottom = (ext[0], ext[1], ext[2], ext[3]) if len(ext) >= 4 else (0, 0, 0, 0)
+        res = run(["xprop", "-id", str(wid), "_NET_FRAME_EXTENTS", "_GTK_FRAME_EXTENTS"])
+        left, right, top, bottom = _extents(parse_xprop(res.out)) if res.ok else (0, 0, 0, 0)
+        # A WM frame (positive extents) sits outside the client and x,y is its outer corner; a
+        # client-side shadow (negative, GTK4) is inside the client, so the client starts earlier.
         xlib.move_resize(
             wid,
-            frame.x,
-            frame.y,
+            frame.x + min(left, 0),
+            frame.y + min(top, 0),
             max(1, frame.width - left - right),
             max(1, frame.height - top - bottom),
         )

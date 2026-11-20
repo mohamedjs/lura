@@ -112,6 +112,23 @@ class Layout:
     windows: tuple[LayoutEntry, ...]
 
 
+@dataclass(frozen=True)
+class PresetApp:
+    launch: str
+    match: str
+    where: str = ""
+    rect: Rect | None = None
+    monitor: int = 0
+    workspace: int = 0
+
+
+@dataclass(frozen=True)
+class Preset:
+    name: str
+    apps: tuple[PresetApp, ...]
+    saved_at: str
+
+
 @dataclass
 class ActionResult:
     ok: bool
@@ -327,6 +344,25 @@ ACTIONS: tuple[ActionSpec, ...] = (
                "Send a validated keyboard shortcut to the active window.",
                params={"keys": Param("str", required=True, max_len=40)},
                requires=("xdotool",)),
+    # presets
+    ActionSpec("preset_list", "layout",
+               "List saved workspace presets."),
+    ActionSpec("preset_define", "layout",
+               "Define a named workspace preset from a JSON list of apps.",
+               params={"name": Param("str", required=True, max_len=40),
+                       "spec": Param("str", required=True, max_len=4000)}),
+    ActionSpec("preset_save", "layout",
+               "Save the current open windows as a workspace preset.",
+               params={"name": Param("str", required=True, max_len=40)},
+               requires=WIN_REQ),
+    ActionSpec("preset_apply", "layout",
+               "Open and place the apps in a saved workspace preset.",
+               params={"name": Param("str", required=True, max_len=40)},
+               requires=WIN_REQ + ("xdotool",)),
+    ActionSpec("preset_delete", "layout",
+               "Delete a saved workspace preset.",
+               safety=CONFIRM,
+               params={"name": Param("str", required=True, max_len=40)}),
 )
 
 ACTIONS_BY_NAME: dict[str, ActionSpec] = {spec.name: spec for spec in ACTIONS}
@@ -339,7 +375,8 @@ DESKTOP_TOOL = ToolSpec(
     "first if unsure what works here, and 'window_list' to see windows and their ids. Target a window "
     "with window=<id> or app=<name>; default is the active window. Actions that need the user's OK "
     "(window_close, lock_screen, layout_delete) are refused until you ask the user and call again with "
-    "confirmed=true.",
+    "confirmed=true. Presets open the user's apps and place them: preset_define / preset_save, "
+    "then preset_apply.",
     {
         "type": "object",
         "properties": {
@@ -374,6 +411,9 @@ DESKTOP_TOOL = ToolSpec(
             "text": {"type": "string", "description": "Text to place on the clipboard."},
             "keys": {"type": "string", "description": "Key combination such as ctrl+shift+t or F5."},
             "name": {"type": "string", "description": "Saved window layout name."},
+            "spec": {"type": "string",
+                     "description": "For preset_define: JSON list of apps, each "
+                                    "{launch, match?, where?, monitor?, workspace?}"},
             "confirmed": {"type": "boolean",
                           "description": "True only after the user confirmed the action."},
         },
@@ -712,6 +752,148 @@ def match_layout(
         used.add(pick.id)
         matched.append((entry, pick))
     return matched, unmatched
+
+
+_PRESET_NAME_RE = re.compile(r"^[\w \-]{1,40}$")
+_REVERSE_DOMAIN_RE = re.compile(r"^(?:[A-Za-z][A-Za-z0-9_-]*\.){2,}")
+
+
+def _default_match(launch: str) -> str:
+    stripped = _REVERSE_DOMAIN_RE.sub("", launch)
+    return (stripped or launch).lower()
+
+
+def validate_preset(name: str, apps: list[dict], saved_at: str = "") -> Preset:
+    if not isinstance(name, str) or not _PRESET_NAME_RE.match(name.strip()):
+        raise ActionError(
+            "Preset name must be 1..40 characters (letters, digits, spaces, '-' and '_')."
+        )
+    clean_name = name.strip()
+    if not isinstance(apps, list) or not (1 <= len(apps) <= 8):
+        raise ActionError("Preset must have between 1 and 8 apps.")
+    parsed: list[PresetApp] = []
+    for i, item in enumerate(apps):
+        if not isinstance(item, dict):
+            raise ActionError(f"App {i}: must be an object.")
+        raw_launch = item.get("launch")
+        if not isinstance(raw_launch, str) or not raw_launch.strip():
+            raise ActionError(f"App {i} 'launch': must be a non-empty string.")
+        launch = raw_launch.strip()
+        if len(launch) > 80:
+            raise ActionError(f"App {i} 'launch': is too long (max 80 characters).")
+
+        raw_match = item.get("match")
+        if raw_match is None:
+            match = ""
+        elif isinstance(raw_match, str):
+            match = raw_match.strip()
+            if len(match) > 80:
+                raise ActionError(f"App {i} 'match': is too long (max 80 characters).")
+        else:
+            raise ActionError(f"App {i} 'match': must be a string.")
+        if not match:
+            match = _default_match(launch)
+
+        raw_where = item.get("where")
+        if raw_where is None:
+            where = ""
+        elif isinstance(raw_where, str):
+            where = raw_where.strip().lower()
+            if where and where not in _SNAP_CHOICES:
+                raise ActionError(
+                    f"App {i} 'where': must be one of {', '.join(_SNAP_CHOICES)} or empty."
+                )
+        else:
+            raise ActionError(f"App {i} 'where': must be a string.")
+
+        raw_rect = item.get("rect")
+        if raw_rect is None:
+            rect = None
+        else:
+            if not isinstance(raw_rect, (list, tuple)) or len(raw_rect) != 4:
+                raise ActionError(
+                    f"App {i} 'rect': must be a list of 4 integers [x, y, width, height]."
+                )
+            if any(isinstance(v, bool) or not isinstance(v, int) for v in raw_rect):
+                raise ActionError(f"App {i} 'rect': must contain 4 integers.")
+            rx, ry, rw, rh = raw_rect
+            if rw < 100 or rh < 100:
+                raise ActionError(f"App {i} 'rect': width and height must be at least 100.")
+            rect = Rect(rx, ry, rw, rh)
+
+        raw_mon = item.get("monitor")
+        if raw_mon is None:
+            monitor = 0
+        else:
+            try:
+                monitor = _parse_int("monitor", raw_mon)
+            except ActionError as exc:
+                raise ActionError(f"App {i} 'monitor': {exc}") from None
+            if not (0 <= monitor <= 9):
+                raise ActionError(f"App {i} 'monitor': must be between 0 and 9.")
+
+        raw_ws = item.get("workspace")
+        if raw_ws is None:
+            workspace = 0
+        else:
+            try:
+                workspace = _parse_int("workspace", raw_ws)
+            except ActionError as exc:
+                raise ActionError(f"App {i} 'workspace': {exc}") from None
+            if not (0 <= workspace <= 36):
+                raise ActionError(f"App {i} 'workspace': must be between 0 and 36.")
+
+        parsed.append(
+            PresetApp(
+                launch=launch,
+                match=match,
+                where=where,
+                rect=rect,
+                monitor=monitor,
+                workspace=workspace,
+            )
+        )
+    return Preset(name=clean_name, apps=tuple(parsed), saved_at=saved_at)
+
+
+def preset_from_windows(
+    name: str,
+    windows: list[Window],
+    monitors: list[Monitor],
+    saved_at: str,
+) -> Preset:
+    if not isinstance(name, str) or not _PRESET_NAME_RE.match(name.strip()):
+        raise ActionError(
+            "Preset name must be 1..40 characters (letters, digits, spaces, '-' and '_')."
+        )
+    clean_name = name.strip()
+    top_first = list(reversed(windows))[:8]
+    if not top_first:
+        raise ActionError("No open windows to save as a preset.")
+    apps = tuple(
+        PresetApp(
+            launch=w.app,
+            match=w.app,
+            where="",
+            rect=w.rect,
+            monitor=0,
+            workspace=w.desktop + 1 if w.desktop >= 0 else 0,
+        )
+        for w in top_first
+    )
+    return Preset(name=clean_name, apps=apps, saved_at=saved_at)
+
+
+def find_window(app: PresetApp, windows: list[Window], used: set[int]) -> Window | None:
+    needle = app.match.lower()
+    if not needle:
+        return None
+    for w in windows:
+        if w.id in used:
+            continue
+        if needle in w.app.lower() or needle in w.title.lower():
+            return w
+    return None
 
 
 # ── parsers ─────────────────────────────────────────────────────────────────
