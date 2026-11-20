@@ -555,19 +555,33 @@ def cmd_air(args) -> int:
     if args.action == "control":
         from .modules.air import AirController
         from .modules.computer import ComputerService, default_backend
+        from .shared import events
 
-        def on_action(_name: str, payload: dict) -> None:
+        def on_event(name: str, payload: dict) -> None:
             stamp = time.strftime("%H:%M:%S")
-            ok = "ok" if payload.get("ok") else "FAIL"
-            print(
-                f"{stamp}  {payload.get('action', ''):18} {ok:4}  {payload.get('message', '')}",
-                flush=True,
-            )
+            if name == events.AIR_MODE:
+                print(f"{stamp}  mode               ->    {payload.get('mode', '')}", flush=True)
+            elif name == events.AIR_INTENT:
+                app = payload.get("app", "")
+                title = payload.get("title", "")
+                ctx = f" ({app}: {title})" if app or title else ""
+                print(
+                    f"{stamp}  intent             {payload.get('intent', ''):5} "
+                    f"{payload.get('gesture', '')} [{payload.get('mode', '')}]{ctx}",
+                    flush=True,
+                )
+            else:
+                ok = "ok" if payload.get("ok") else "FAIL"
+                print(
+                    f"{stamp}  {payload.get('action', ''):18} {ok:4}  {payload.get('message', '')}",
+                    flush=True,
+                )
 
-        ctrl = AirController(svc, ComputerService(default_backend()), on_action)
+        ctrl = AirController(svc, ComputerService(default_backend()), on_event)
         svc.subscribe(_print_gesture)
         svc.start()
         ctrl.start()
+        ctrl.set_mode(args.mode)
         deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
         try:
             while True:
@@ -645,11 +659,13 @@ def main(argv=None) -> int:
     desk.add_argument("action", nargs="?", default="capabilities")
     desk.add_argument("params", nargs="*")
     desk.add_argument("--yes", action="store_true")
+    from .modules.air import MODES as AIR_MODES
     air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, control, bench")
     air.add_argument("action", nargs="?", default="watch",
                      choices=["cameras", "setup", "watch", "control", "bench"])
     air.add_argument("--camera", default="")
     air.add_argument("--seconds", type=float, default=0.0)
+    air.add_argument("--mode", choices=AIR_MODES, default="universal")
 
     args = parser.parse_args(argv)
     if args.command == "mcp" and args.action == "import":

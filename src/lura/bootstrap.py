@@ -63,8 +63,12 @@ def build(presence: Presence | None = None) -> Container:
     )
     air = AirService(lambda name, payload: bus.publish(name, **payload),
                      camera=settings.current.air_camera)
-    air_control = AirController(air, computer,
-                                lambda name, payload: bus.publish(name, **payload))
+    air_control = AirController(
+        air,
+        computer,
+        lambda name, payload: bus.publish(name, **payload),
+        app_kinds=lambda: settings.current.air_app_kinds,
+    )
     from . import __version__
     updates = UpdateService(__version__, lambda: settings.current.check_updates,
                             lambda how: bus.publish(events.RESTART_REQUESTED if how == "restart"
@@ -72,6 +76,7 @@ def build(presence: Presence | None = None) -> Container:
     tools.add_provider(memory)
     tools.add_provider(skills)
     tools.add_provider(computer)
+    tools.add_provider(air_control)
     assistant = Assistant(settings, brain, voice, tools, bus, presence, memory=memory,
                           extra_prompt=skills.prompt_block)
 

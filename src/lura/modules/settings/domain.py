@@ -193,6 +193,9 @@ class Settings:
     air_enabled: bool = False
     #: Which camera Lura Air uses: part of its name or its number; empty = the built-in webcam.
     air_camera: str = ""
+    #: Lura Air: your own app kinds, WM_CLASS part → browser, media, presentation, files, editor,
+    #: terminal or other, e.g. {"obsidian": "editor"}. Checked before the built-in list.
+    air_app_kinds: dict[str, str] = field(default_factory=dict)
     dashboard_port: int = 47321
     onboarded: bool = False
 

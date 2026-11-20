@@ -62,12 +62,30 @@ CONTROL_HZ = 30                     # how often an active drag/resize is updated
 SPREAD_MIN, SPREAD_MAX = 0.5, 2.5   # resize scale clamp
 MIN_W, MIN_H = 320, 240             # smallest size a spread can make a window
 
-SWIPE_ACTIONS: dict[str, tuple[str, dict]] = {
-    "swipe_left": ("workspace_switch", {"target": "prev"}),
-    "swipe_right": ("workspace_switch", {"target": "next"}),
-    "swipe_up": ("workspace_overview", {}),
-    "swipe_down": ("show_desktop", {}),
-}
+POINTER_MARGIN = 0.15   # the central 70 % of the frame maps to the whole screen
+POINTER_SMOOTH = 0.35   # exponential smoothing of the pointer target per tick (0..1, higher = snappier)
+
+MODES: tuple[str, ...] = (
+    "universal", "window", "workspace", "pointer", "files", "media", "developer",
+    "presentation", "ai",
+)
+KINDS: tuple[str, ...] = ("browser", "media", "presentation", "files", "editor", "terminal", "other")
+
+#: Lower-case substrings of WM_CLASS → app kind. First match wins; user entries (settings
+#: air_app_kinds) are checked before these.
+APP_KINDS: tuple[tuple[str, str], ...] = (
+    ("libreoffice-impress", "presentation"), ("impress", "presentation"), ("pdfpc", "presentation"),
+    ("google-chrome", "browser"), ("chromium", "browser"), ("firefox", "browser"),
+    ("brave", "browser"), ("microsoft-edge", "browser"), ("vivaldi", "browser"), ("opera", "browser"),
+    ("vlc", "media"), ("mpv", "media"), ("spotify", "media"), ("rhythmbox", "media"),
+    ("totem", "media"), ("celluloid", "media"), ("audacious", "media"),
+    ("nautilus", "files"), ("org.gnome.nautilus", "files"), ("dolphin", "files"),
+    ("thunar", "files"), ("nemo", "files"), ("pcmanfm", "files"),
+    ("code", "editor"), ("jetbrains", "editor"), ("gedit", "editor"), ("text-editor", "editor"),
+    ("sublime", "editor"), ("zed", "editor"),
+    ("gnome-terminal", "terminal"), ("terminator", "terminal"), ("kitty", "terminal"),
+    ("alacritty", "terminal"), ("konsole", "terminal"), ("tilix", "terminal"), ("wezterm", "terminal"),
+)
 
 _SWIPE_OPPOSITE: dict[str, str] = {
     "swipe_left": "swipe_right",
@@ -780,3 +798,138 @@ class Arming:
         self._until = -math.inf
         self._pending_disarm = None
         self._disarmed_notice = False
+
+
+# ── modes, app kinds & resolver (Stage E) ───────────────────────────────────
+
+@dataclass(frozen=True)
+class Resolution:
+    kind: str                  # "action" | "intent" | "ignore" | "mode"
+    action: str = ""           # computer action name (kind "action")
+    args: dict = field(default_factory=dict)
+    intent: str = ""           # kind "intent": "point" | "confirm" | "deny" | "talk"
+    reason: str = ""           # kind "ignore": a short sentence
+
+
+def app_kind(app: str, title: str, overrides: dict[str, str] | None = None) -> str:
+    """Classify an active window's WM_CLASS + title into one of ``KINDS``."""
+    low = (app or "").lower()
+    if overrides:
+        for needle, kind in overrides.items():
+            key = needle.strip().lower()
+            if key and key in low and kind in KINDS:
+                return kind
+    if ("libreoffice" in low or "soffice" in low) and "impress" in (title or "").lower():
+        return "presentation"
+    for needle, kind in APP_KINDS:
+        if needle in low:
+            return kind
+    return "other"
+
+
+_GLOBAL_POSES: dict[str, Resolution] = {
+    "victory": Resolution("mode"),
+    "thumbs_up": Resolution("intent", intent="confirm"),
+    "thumbs_down": Resolution("intent", intent="deny"),
+    "point": Resolution("intent", intent="point"),
+}
+
+_SILENT_GESTURES = frozenset({
+    "hand_enter",
+    "hand_leave",
+    "pinch_start",
+    "pinch_end",
+    "spread_start",
+    "spread_end",
+})
+
+_UNIVERSAL_SWIPES: dict[str, tuple[tuple[str, dict], tuple[str, dict]]] = {
+    "browser": (("press_keys", {"keys": "ctrl+shift+Tab"}), ("press_keys", {"keys": "ctrl+Tab"})),
+    "media": (("media", {"command": "previous"}), ("media", {"command": "next"})),
+    "presentation": (("press_keys", {"keys": "Left"}), ("press_keys", {"keys": "Right"})),
+    "files": (("press_keys", {"keys": "alt+Left"}), ("press_keys", {"keys": "alt+Right"})),
+    "editor": (("press_keys", {"keys": "ctrl+Page_Up"}), ("press_keys", {"keys": "ctrl+Page_Down"})),
+    "terminal": (("press_keys", {"keys": "ctrl+Page_Up"}), ("press_keys", {"keys": "ctrl+Page_Down"})),
+    "other": (("workspace_switch", {"target": "prev"}), ("workspace_switch", {"target": "next"})),
+}
+
+_MODE_TABLE: dict[str, dict[str, tuple[str, dict]]] = {
+    "universal": {
+        "swipe_up": ("workspace_overview", {}),
+        "swipe_down": ("show_desktop", {}),
+        "double_pinch": ("toggle_maximize", {}),
+    },
+    "window": {
+        "swipe_left": ("window_snap", {"where": "left"}),
+        "swipe_right": ("window_snap", {"where": "right"}),
+        "swipe_up": ("window_maximize", {}),
+        "swipe_down": ("window_minimize", {}),
+        "double_pinch": ("toggle_maximize", {}),
+    },
+    "workspace": {
+        "swipe_left": ("workspace_switch", {"target": "prev"}),
+        "swipe_right": ("workspace_switch", {"target": "next"}),
+        "swipe_up": ("workspace_overview", {}),
+        "swipe_down": ("show_desktop", {}),
+    },
+    "pointer": {
+        "swipe_up": ("pointer_scroll", {"direction": "up", "amount": 5}),
+        "swipe_down": ("pointer_scroll", {"direction": "down", "amount": 5}),
+        "double_pinch": ("pointer_click", {"button": "left", "count": 2}),
+    },
+    "files": {
+        "swipe_left": ("press_keys", {"keys": "alt+Left"}),
+        "swipe_right": ("press_keys", {"keys": "alt+Right"}),
+        "swipe_up": ("press_keys", {"keys": "alt+Up"}),
+        "double_pinch": ("press_keys", {"keys": "Return"}),
+    },
+    "media": {
+        "swipe_left": ("media", {"command": "previous"}),
+        "swipe_right": ("media", {"command": "next"}),
+        "swipe_up": ("volume_change", {"delta": 10}),
+        "swipe_down": ("volume_change", {"delta": -10}),
+        "double_pinch": ("media", {"command": "play_pause"}),
+    },
+    "developer": {
+        "swipe_left": ("press_keys", {"keys": "ctrl+Page_Up"}),
+        "swipe_right": ("press_keys", {"keys": "ctrl+Page_Down"}),
+        "swipe_up": ("workspace_switch", {"target": "prev"}),
+        "swipe_down": ("workspace_switch", {"target": "next"}),
+        "double_pinch": ("toggle_maximize", {}),
+    },
+    "presentation": {
+        "swipe_left": ("press_keys", {"keys": "Left"}),
+        "swipe_right": ("press_keys", {"keys": "Right"}),
+    },
+}
+
+
+def resolve(gesture: str, pose: str, mode: str, kind: str) -> Resolution:
+    """Resolve a discrete gesture event into an action, intent, mode cycle, or ignore."""
+    if gesture == "pose":
+        hit = _GLOBAL_POSES.get(pose)
+        return hit if hit is not None else Resolution("ignore")
+    if gesture in _SILENT_GESTURES:
+        return Resolution("ignore")
+    if mode == "ai":
+        return Resolution("intent", intent="talk", args={"gesture": gesture})
+    if mode == "universal" and gesture in ("swipe_left", "swipe_right"):
+        left_act, right_act = _UNIVERSAL_SWIPES.get(kind, _UNIVERSAL_SWIPES["other"])
+        action, args = left_act if gesture == "swipe_left" else right_act
+        return Resolution("action", action, dict(args))
+    entry = _MODE_TABLE.get(mode, {}).get(gesture)
+    if entry is not None:
+        action, args = entry
+        return Resolution("action", action, dict(args))
+    return Resolution("ignore", reason=f"{gesture} does nothing in {mode} mode.")
+
+
+def hand_to_screen(x: float, y: float, bounds: Rect) -> tuple[int, int]:
+    """Map normalized hand coordinates (central frame minus POINTER_MARGIN) into screen pixels."""
+    span = 1.0 - 2.0 * POINTER_MARGIN
+    u = max(0.0, min(1.0, (x - POINTER_MARGIN) / span))
+    v = max(0.0, min(1.0, (y - POINTER_MARGIN) / span))
+    return (
+        bounds.x + round(u * max(0, bounds.width - 1)),
+        bounds.y + round(v * max(0, bounds.height - 1)),
+    )

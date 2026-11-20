@@ -24,6 +24,9 @@ class UnsupportedBackend:
     def own_pids(self) -> set[int]:
         raise NotImplementedError(self._reason)
 
+    def window(self, wid: int) -> Window | None:
+        raise NotImplementedError(self._reason)
+
     def windows(self) -> list[Window]:
         raise NotImplementedError(self._reason)
 

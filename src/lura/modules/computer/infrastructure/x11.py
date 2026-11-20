@@ -92,25 +92,30 @@ class X11Backend:
 
     # ── read ────────────────────────────────────────────────────────────────
 
+    def window(self, wid: int) -> Window | None:
+        rp = run([
+            "xprop", "-id", str(wid),
+            "WM_CLASS", "_NET_WM_NAME", "WM_NAME", "_NET_WM_DESKTOP",
+            "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_NET_FRAME_EXTENTS",
+            "_GTK_FRAME_EXTENTS",
+        ])
+        ri = run(["xwininfo", "-id", str(wid)])
+        if not rp.ok or not ri.ok:
+            return None
+        props = parse_xprop(rp.out)
+        inner = parse_xwininfo(ri.out)
+        if inner is None:
+            return None
+        return window_from_props(wid, props, inner, _extents(props))
+
     def windows(self) -> list[Window]:
         out = self._checked(["xprop", "-root", "_NET_CLIENT_LIST_STACKING"])
         ids = prop_ints(parse_xprop(out).get("_NET_CLIENT_LIST_STACKING", ""))
         result: list[Window] = []
         for wid in ids:
-            rp = run([
-                "xprop", "-id", str(wid),
-                "WM_CLASS", "_NET_WM_NAME", "WM_NAME", "_NET_WM_DESKTOP",
-                "_NET_WM_STATE", "_NET_WM_WINDOW_TYPE", "_NET_WM_PID", "_NET_FRAME_EXTENTS",
-                "_GTK_FRAME_EXTENTS",
-            ])
-            ri = run(["xwininfo", "-id", str(wid)])
-            if not rp.ok or not ri.ok:
-                continue
-            props = parse_xprop(rp.out)
-            inner = parse_xwininfo(ri.out)
-            if inner is None:
-                continue
-            result.append(window_from_props(wid, props, inner, _extents(props)))
+            w = self.window(wid)
+            if w is not None:
+                result.append(w)
         return result
 
     def active_window(self) -> int | None:

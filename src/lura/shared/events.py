@@ -36,6 +36,10 @@ AIR_GESTURE = "air.gesture"
 AIR_STATUS = "air.status"
 #: Lura Air acted on the desktop: {"action", "ok", "message"}.
 AIR_ACTION = "air.action"
+#: Lura Air switched gesture mode: {"mode"}.
+AIR_MODE = "air.mode"
+#: Lura Air saw a gesture meant for the assistant: {"intent", "mode", "gesture", "app", "title"}.
+AIR_INTENT = "air.intent"
 
 
 class EventBus:

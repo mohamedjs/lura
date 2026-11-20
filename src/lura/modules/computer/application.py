@@ -59,6 +59,7 @@ class Backend(Protocol):
     def probe(self) -> dict[str, bool]: ...
     def own_pids(self) -> set[int]: ...
     # read
+    def window(self, wid: int) -> Window | None: ...
     def windows(self) -> list[Window]: ...
     def active_window(self) -> int | None: ...
     def monitors(self) -> list[Monitor]: ...
@@ -113,6 +114,7 @@ class ComputerService:
         self._clock = time.monotonic
         self._lock = threading.RLock()
         self._probe: dict[str, bool] | None = None
+        self._monitors_cache: tuple[float, list[Monitor]] | None = None
 
     def _get_probe(self, refresh: bool = False) -> dict[str, bool]:
         if refresh or self._probe is None:
@@ -259,6 +261,28 @@ class ComputerService:
         with self._lock:
             return bounds(self._backend.monitors())
 
+    def active_app(self) -> tuple[int, str, str] | None:
+        with self._lock:
+            wid = self._backend.active_window()
+            if wid is None:
+                return None
+            w = self._backend.window(wid)
+            if w is None or not is_target(w, self._backend.own_pids()):
+                return None
+            return (w.id, w.app, w.title)
+
+    def pointer_to(self, x: int, y: int) -> None:
+        with self._lock:
+            now = self._clock()
+            if self._monitors_cache is None or (now - self._monitors_cache[0]) >= 5.0:
+                self._monitors_cache = (now, self._backend.monitors())
+            mons = self._monitors_cache[1]
+            if mons:
+                b = bounds(mons)
+                x = max(b.x, min(b.x + b.width - 1, x))
+                y = max(b.y, min(b.y + b.height - 1, y))
+            self._backend.pointer_move(x, y)
+
     # ── helpers ─────────────────────────────────────────────────────────────
 
     def _targets(self) -> list[Window]:
@@ -294,7 +318,14 @@ class ComputerService:
             active = self._backend.active_window()
             found = next((w for w in ws if w.id == active), None) if active is not None else None
             if found is None:
-                raise ActionError("There is no active window I can control.")
+                # After a workspace switch or "show desktop" nothing (or the desktop itself) has
+                # focus; 13 of 31 window gestures failed that way in a live test. Use the window
+                # in front on this workspace instead (ws is bottom→top).
+                current, _ = self._backend.desktops()
+                front = [w for w in ws if not w.minimized and w.desktop in (current, -1)]
+                if not front:
+                    raise ActionError("There is no window on this workspace I can control.")
+                found = front[-1]
             return found
         found = next((w for w in ws if w.id == target), None)
         if found is None:
