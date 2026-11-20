@@ -257,9 +257,16 @@ class ComputerService:
             clean = validate_args(ACTIONS_BY_NAME["window_focus"], {"window": window})
             return self._target(clean).maximized
 
-    def screen_bounds(self) -> Rect:
+    def screen_bounds(self, monitor: str = "all") -> Rect:
+        """All monitors, or with ``monitor="active"`` the one the active (or front) window is on."""
         with self._lock:
-            return bounds(self._backend.monitors())
+            mons = self._backend.monitors()
+            if monitor == "active" and mons:
+                try:
+                    return monitor_for(self._target({"window": "active", "app": None}).rect, mons).rect
+                except ActionError:
+                    pass
+            return bounds(mons)
 
     def active_app(self) -> tuple[int, str, str] | None:
         with self._lock:
@@ -270,6 +277,19 @@ class ComputerService:
             if w is None or not is_target(w, self._backend.own_pids()):
                 return None
             return (w.id, w.app, w.title)
+
+    def window_at(self, x: int, y: int) -> tuple[int, str, str] | None:
+        with self._lock:
+            current, _ = self._backend.desktops()
+            for w in reversed(self._targets()):
+                if w.minimized:
+                    continue
+                if w.desktop != current and w.desktop >= 0:
+                    continue
+                r = w.rect
+                if r.x <= x < r.x + r.width and r.y <= y < r.y + r.height:
+                    return (w.id, w.app, w.title)
+            return None
 
     def pointer_to(self, x: int, y: int) -> None:
         with self._lock:

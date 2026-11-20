@@ -30,22 +30,28 @@ from test_air_control import BOUNDS, FakeAir, FakeDesktop, _ev
 
 
 class ModeDesktop(FakeDesktop):
-    """FakeDesktop extended with active_app() and pointer_to()."""
+    """FakeDesktop extended with active_app(), window_at() and pointer_to()."""
 
     def __init__(
         self,
         *,
         maximized: bool = False,
         active: tuple[int, str, str] | None = (10, "Google-chrome", "Docs - Google Chrome"),
+        windows_by_half: dict[str, tuple[int, str, str]] | None = None,
     ) -> None:
         super().__init__(maximized=maximized)
         self.active = active
         self.active_app_calls = 0
         self.pointers: list[tuple[int, int]] = []
+        self.windows_by_half = windows_by_half or {}
 
     def active_app(self) -> tuple[int, str, str] | None:
         self.active_app_calls += 1
         return self.active
+
+    def window_at(self, x: int, y: int) -> tuple[int, str, str] | None:
+        half = "left" if x < BOUNDS.width // 2 else "right"
+        return self.windows_by_half.get(half)
 
     def pointer_to(self, x: int, y: int) -> None:
         self.pointers.append((x, y))
@@ -360,6 +366,89 @@ def check_pointer_mode() -> None:
         ("pointer_down", {"button": "left"}),
         ("pointer_up", {"button": "left"}),
     ]
+
+
+def check_point_to_focus() -> None:
+    win_a = (101, "firefox", "Docs - Firefox")
+    win_b = (202, "code", "main.py - Code")
+    ctrl, air, desk, pub, _ = _make_controller()
+    desk.windows_by_half = {"left": win_a, "right": win_b}
+    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
+
+    # Point held over window A (left half, tip_x=0.25) for 0.5 s ->
+    # window_focus A + one 'target' feedback + one AIR_INTENT point.
+    pub.clear()
+    desk.runs.clear()
+    air.state = AirState(
+        camera="on",
+        hands=(HandView("right", 0.3, 0.5, "point", False, 0.95, tip_x=0.25, tip_y=0.5),),
+    )
+    ctrl.process(_ev("pose", 1.0, data={"pose": "point"}))
+    for t in (1.0, 1.1, 1.2, 1.3, 1.4, 1.5):
+        ctrl.tick(t)
+    assert desk.runs == [("window_focus", {"window": 101})]
+    targets = [p for n, p in pub if n == events.AIR_ACTION and p["action"] == "target"]
+    assert targets == [{"action": "target", "ok": True, "message": "Target: Docs - Firefox."}]
+    intents = [p for n, p in pub if n == events.AIR_INTENT]
+    assert intents == [{
+        "intent": "point",
+        "mode": "universal",
+        "gesture": "pose",
+        "app": "firefox",
+        "title": "Docs - Firefox",
+    }]
+
+    # Finger moves to window B (right half, tip_x=0.75) and dwells -> focuses B.
+    pub.clear()
+    desk.runs.clear()
+    air.state = AirState(
+        camera="on",
+        hands=(HandView("right", 0.7, 0.5, "point", False, 0.95, tip_x=0.75, tip_y=0.5),),
+    )
+    for t in (1.6, 1.8, 2.0, 2.2):
+        ctrl.tick(t)
+    assert desk.runs == [("window_focus", {"window": 202})]
+    targets = [p for n, p in pub if n == events.AIR_ACTION and p["action"] == "target"]
+    assert targets == [{"action": "target", "ok": True, "message": "Target: main.py - Code."}]
+    intents = [p for n, p in pub if n == events.AIR_INTENT]
+    assert intents == [{
+        "intent": "point",
+        "mode": "universal",
+        "gesture": "pose",
+        "app": "code",
+        "title": "main.py - Code",
+    }]
+
+    # End point pose, then point for only 0.2 s -> nothing.
+    ctrl.process(_ev("pose", 2.5, data={"pose": "open_palm"}))
+    pub.clear()
+    desk.runs.clear()
+    air.state = AirState(
+        camera="on",
+        hands=(HandView("right", 0.3, 0.5, "point", False, 0.95, tip_x=0.25, tip_y=0.5),),
+    )
+    ctrl.process(_ev("pose", 3.0, data={"pose": "point"}))
+    ctrl.tick(3.0)
+    ctrl.tick(3.2)
+    ctrl.process(_ev("pose", 3.25, data={"pose": "open_palm"}))
+    ctrl.tick(3.5)
+    assert desk.runs == []
+    assert pub == []
+
+    # AI mode -> no window_focus (only immediate intent).
+    ctrl.set_mode("ai")
+    pub.clear()
+    desk.runs.clear()
+    air.state = AirState(
+        camera="on",
+        hands=(HandView("right", 0.3, 0.5, "point", False, 0.95, tip_x=0.25, tip_y=0.5),),
+    )
+    ctrl.process(_ev("pose", 4.0, data={"pose": "point"}))
+    for t in (4.0, 4.2, 4.4, 4.6):
+        ctrl.tick(t)
+    assert desk.runs == []
+    intents = [p for n, p in pub if n == events.AIR_INTENT]
+    assert len(intents) == 1 and intents[0]["intent"] == "point" and intents[0]["mode"] == "ai"
 
 
 def check_tool_provider() -> None:

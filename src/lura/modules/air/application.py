@@ -19,6 +19,7 @@ from .domain import (
     CONTROL_HZ,
     DRAG_START,
     MODES,
+    POINT_DWELL,
     POINTER_SMOOTH,
     AirState,
     Arming,
@@ -378,6 +379,7 @@ class AirService:
 _DRAG_MODES = frozenset({"universal", "window", "workspace", "files", "media", "developer"})
 _POINTER_HOLD = 0.3
 _POINTER_MIN_PX = 3
+_POINT_POLL = 0.2
 _EPS = 1e-9
 
 AIR_MODE_TOOL = ToolSpec(
@@ -404,8 +406,9 @@ class DesktopPort(Protocol):
     def grip(self, window: str | int = "active") -> WindowGrip: ...
     def place(self, grip: WindowGrip, rect: Rect) -> None: ...
     def is_maximized(self, window: str | int = "active") -> bool: ...
-    def screen_bounds(self) -> Rect: ...
+    def screen_bounds(self, monitor: str = "all") -> Rect: ...   # "all" or "active"
     def active_app(self) -> tuple[int, str, str] | None: ...
+    def window_at(self, x: int, y: int) -> tuple[int, str, str] | None: ...
     def pointer_to(self, x: int, y: int) -> None: ...
 
 
@@ -444,11 +447,25 @@ class AirController:
         self._pointer_down: bool = False
         self._pointer_pinch: tuple[str, tuple[float, float], float] | None = None
         self._pointer_bounds: Rect | None = None
+        self._pointing: tuple[str, float] | None = None
+        self._point_poll_t: float = -math.inf
+        self._point_cand: tuple[int, float] | None = None
+        self._point_selected: int | None = None
+        self._point_bounds: Rect | None = None
+        self._point_told_empty = False
 
     @property
     def mode(self) -> str:
         with self._lock:
             return self._mode
+
+    def _clear_pointing(self) -> None:
+        self._pointing = None
+        self._point_poll_t = -math.inf
+        self._point_cand = None
+        self._point_selected = None
+        self._point_bounds = None
+        self._point_told_empty = False
 
     def set_mode(self, mode: str) -> None:
         if mode not in MODES:
@@ -461,6 +478,7 @@ class AirController:
             self._pointer_pinch = None
             self._pointer = None
             self._pointer_last = None
+            self._clear_pointing()
             if self._pointer_down:
                 self._release_pointer()
             self._mode = mode
@@ -530,6 +548,7 @@ class AirController:
             self._pointer_pinch = None
             self._pointer = None
             self._pointer_last = None
+            self._clear_pointing()
             if self._pointer_down:
                 self._release_pointer()
         while True:
@@ -614,6 +633,20 @@ class AirController:
         except Exception:
             return None
 
+    def _window_at(self, x: int, y: int) -> tuple[int, str, str] | None:
+        try:
+            return self._desktop.window_at(x, y)
+        except Exception:
+            return None
+
+    def _screen_bounds(self, monitor: str = "all") -> Rect | None:
+        try:
+            return self._desktop.screen_bounds(monitor) if monitor != "all" else self._desktop.screen_bounds()
+        except TypeError:   # a DesktopPort without the monitor argument (tests' fakes)
+            return self._desktop.screen_bounds()
+        except Exception:
+            return None
+
     def _kind(self) -> str:
         info = self._active_app()
         if info is None:
@@ -625,6 +658,56 @@ class AirController:
             overrides = None
         return app_kind(app, title, overrides)
 
+    def _tick_pointing(self, t: float, snap: AirState) -> None:
+        if self._pointing is None:
+            return
+        if not self._arming.armed(t) or self._mode == "ai":
+            self._clear_pointing()
+            return
+        side, _ = self._pointing
+        h = next((hv for hv in snap.hands if hv.side == side), None)
+        if h is None or h.pose != "point":
+            self._clear_pointing()
+            return
+        if (t - self._point_poll_t) < _POINT_POLL - _EPS:
+            return
+        self._point_poll_t = t
+        b = self._point_bounds
+        if b is None:
+            b = self._screen_bounds("active")
+            self._point_bounds = b
+        if b is None or b.width <= 0 or b.height <= 0:
+            return
+        sx, sy = hand_to_screen(h.tip_x, h.tip_y, b)
+        hit = self._window_at(sx, sy)
+        if hit is None:
+            self._point_cand = None
+            # Say so once per pointing, instead of silently doing nothing (live test: the user
+            # pointed for a minute at windows that were on the other monitor or minimized).
+            if not self._point_told_empty and (t - self._pointing[1]) >= POINT_DWELL:
+                self._point_told_empty = True
+                self._feedback("target", False, "Nothing I can control is under your finger.")
+            return
+        wid, app, title = hit
+        if self._point_cand is None or self._point_cand[0] != wid:
+            self._point_cand = (wid, t)
+            return
+        if (t - self._point_cand[1]) >= POINT_DWELL - _EPS and wid != self._point_selected:
+            self._point_selected = wid
+            r = self._desktop.run("window_focus", {"window": wid})
+            label = title or app or f"window {wid}"
+            if r.ok:
+                self._feedback("target", True, f"Target: {label}.")
+                self._emit(events.AIR_INTENT, {
+                    "intent": "point",
+                    "mode": self._mode,
+                    "gesture": "pose",
+                    "app": app,
+                    "title": title,
+                })
+            else:
+                self._feedback("target", False, r.message)
+
     def process(self, ev: GestureEvent) -> None:
         with self._lock:
             self._arming.on_event(ev)
@@ -632,6 +715,7 @@ class AirController:
             if not self._arming.armed(ev.t):
                 self._pending = None
                 self._pointer_pinch = None
+                self._clear_pointing()
                 if self._pointer_down:
                     self._release_pointer()
                 if g == "pinch_end" and self._drag is not None and self._drag[0] == ev.hand:
@@ -641,6 +725,15 @@ class AirController:
                     self._resize = None
                     self._last_place = None
                 return
+
+            if self._pointing is not None:
+                pside = self._pointing[0]
+                if (
+                    g in ("pinch_start", "pinch_end", "double_pinch", "spread_start", "spread_end")
+                    or (g == "hand_leave" and ev.hand == pside)
+                    or (g == "pose" and ev.hand == pside and ev.data.get("pose") != "point")
+                ):
+                    self._clear_pointing()
 
             mode = self._mode
 
@@ -733,6 +826,16 @@ class AirController:
                 return
 
             if res.kind == "intent":
+                if res.intent == "point" and mode != "ai":
+                    self._pointing = (ev.hand, ev.t)
+                    self._point_poll_t = -math.inf
+                    self._point_cand = None
+                    self._point_selected = None
+                    self._point_told_empty = False
+                    # The monitor the active window is on: mapping the frame onto both screens put
+                    # the frame's centre on the screen boundary, so windows were hard to reach.
+                    self._point_bounds = self._screen_bounds("active")
+                    return
                 info = self._active_app()
                 app, title = (info[1], info[2]) if info is not None else ("", "")
                 self._emit(events.AIR_INTENT, {
@@ -772,12 +875,14 @@ class AirController:
                 self._pointer_pinch = None
                 self._pointer = None
                 self._pointer_last = None
+                self._clear_pointing()
                 if self._pointer_down:
                     self._release_pointer()
                 self._feedback("disarm", True, "Air control paused.")
                 return
 
             snap = self._air.snapshot()
+            self._tick_pointing(t, snap)
 
             if self._mode == "pointer":
                 if not self._arming.armed(t) or self._drag is not None or self._resize is not None:

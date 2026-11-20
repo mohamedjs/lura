@@ -41,14 +41,17 @@ LEAVE_GRACE = 0.45       # s without the hand before "hand_leave"
 SWIPE_WINDOW = 0.5       # s of palm history examined for a swipe
 SWIPE_DIST = 0.18        # normalized travel needed within the window
 SWIPE_AXIS = 2.0         # main-axis travel must be ≥ SWIPE_AXIS × cross-axis travel
-SWIPE_COOLDOWN = 0.70    # s after a swipe before any other swipe
-SWIPE_REVERSE_BLOCK = 1.5  # s after a swipe during which the opposite swipe is blocked
+SWIPE_SAME_COOLDOWN = 0.35  # s after a swipe before another swipe in the same direction or other axis
+RETURN_WINDOW = 0.8         # s after a swipe during which an opposite stroke is swallowed as a return
+REVERSE_AFTER = 1.0         # s after a swipe when an opposite swipe is allowed without settling
 SETTLE_SPEED = 0.35      # palm speed (normalized units/s) below which the palm counts as settled
-SETTLE_TIME = 0.20       # s palm speed must stay below SETTLE_SPEED after a swipe before swiping again
+SETTLE_TIME = 0.20       # s palm speed must stay below SETTLE_SPEED after a swipe before early reverse
 DOUBLE_PINCH_GAP = 0.45  # s between a short pinch's end and the next pinch's start
 SHORT_PINCH = 0.30       # s a pinch may last to count as the first of a double pinch
 MIN_SCORE = 0.60         # hands with a lower handedness score are ignored
 SPREAD_MIN_DIST = 0.05   # both-hand pinch distance must exceed this to start a spread
+TRACK_JUMP = 0.18        # max palm distance to keep a track when MediaPipe flips left/right
+POINT_DWELL = 0.4        # s a point pose must stay on one window before focusing it
 
 # Control thresholds (Stage D1).
 ARM_IDLE = 8.0                      # s armed after the last hand or gesture
@@ -181,6 +184,8 @@ class HandView:
     pose: str
     pinching: bool
     score: float
+    tip_x: float = 0.0
+    tip_y: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -356,8 +361,10 @@ class _Track:
         self.palm_y = 0.0
         self.pinch_x = 0.0
         self.pinch_y = 0.0
+        self.tip_x = 0.0
+        self.tip_y = 0.0
         self.palm_history: deque[tuple[float, float, float]] = deque()
-        self.needs_settle = False
+        self.settled = True
         self.settle_since: float | None = None
         self.palm_fx = OneEuro()
         self.palm_fy = OneEuro()
@@ -369,14 +376,14 @@ def _match_swipe(history: list[tuple[float, float, float]], min_dist: float) -> 
     """Test a palm-position history for a single-axis swipe exceeding min_dist."""
     if len(history) < 2:
         return None
-    _, x0, y0 = history[0]
     _, x1, y1 = history[-1]
-    dx = x1 - x0
-    dy = y1 - y0
-    if abs(dx) >= min_dist - _EPS and abs(dx) >= SWIPE_AXIS * abs(dy) - _EPS:
-        return "swipe_right" if dx > 0 else "swipe_left"
-    if abs(dy) >= min_dist - _EPS and abs(dy) >= SWIPE_AXIS * abs(dx) - _EPS:
-        return "swipe_down" if dy > 0 else "swipe_up"
+    for _, x0, y0 in reversed(history[:-1]):
+        dx = x1 - x0
+        dy = y1 - y0
+        if abs(dx) >= min_dist - _EPS and abs(dx) >= SWIPE_AXIS * abs(dy) - _EPS:
+            return "swipe_right" if dx > 0 else "swipe_left"
+        if abs(dy) >= min_dist - _EPS and abs(dy) >= SWIPE_AXIS * abs(dx) - _EPS:
+            return "swipe_down" if dy > 0 else "swipe_up"
     return None
 
 
@@ -401,11 +408,25 @@ class Recognizer:
         self._spread_pos = (0.5, 0.5)
         self._spread_conf = 0.0
 
-    def _reverse_blocked(self, swipe: str, t: float) -> bool:
-        return (
-            _SWIPE_OPPOSITE.get(self._last_swipe_dir) == swipe
-            and (t - self._last_swipe) < SWIPE_REVERSE_BLOCK - _EPS
-        )
+    def _record_swipe(self, swipe: str, t: float) -> None:
+        self._last_swipe = t
+        self._last_swipe_dir = swipe
+        for track in self._tracks.values():
+            track.settled = False
+            track.settle_since = None
+
+    def _swipe_decision(self, swipe: str, tr: _Track, t: float) -> str:
+        """Direction-aware swipe gate: 'emit', 'swallow' (return stroke), or 'block'."""
+        dt = t - self._last_swipe
+        if _SWIPE_OPPOSITE.get(self._last_swipe_dir) == swipe:
+            if dt < RETURN_WINDOW - _EPS:
+                return "swallow"
+            if dt >= REVERSE_AFTER - _EPS or tr.settled:
+                return "emit"
+            return "block"
+        if dt >= SWIPE_SAME_COOLDOWN - _EPS:
+            return "emit"
+        return "block"
 
     def update(self, frame: HandFrame) -> list[GestureEvent]:
         t = frame.t
@@ -420,10 +441,26 @@ class Recognizer:
             if existing is None or hand.score > existing.score:
                 present[hand.side] = hand
 
+        # R2-2: if MediaPipe flipped a lone hand's Left/Right label while turning, keep its track.
+        for side, hand in list(present.items()):
+            if side in self._tracks or side not in ("left", "right"):
+                continue
+            other = "right" if side == "left" else "left"
+            tr_other = self._tracks.get(other)
+            if tr_other is None or other in present:
+                continue
+            if (t - tr_other.last_seen) >= LEAVE_GRACE - _EPS:
+                continue
+            pc = palm_center(hand)
+            if math.hypot(pc.x - tr_other.palm_x, pc.y - tr_other.palm_y) <= TRACK_JUMP + _EPS:
+                del present[side]
+                present[other] = Hand(other, hand.score, hand.points)
+
         # 2–5. Process each present hand.
         for side, hand in present.items():
             pc = palm_center(hand)
             pp = pinch_point(hand)
+            tip = hand.points[INDEX_TIP]
             tr = self._tracks.get(side)
             if tr is None:
                 tr = _Track(side, t, hand.score)
@@ -432,6 +469,8 @@ class Recognizer:
                 tr.palm_y = tr.palm_fy(pc.y, t)
                 tr.pinch_x = tr.pinch_fx(pp.x, t)
                 tr.pinch_y = tr.pinch_fy(pp.y, t)
+                tr.tip_x = tip.x
+                tr.tip_y = tip.y
                 events.append(GestureEvent(
                     "hand_enter", side, round(hand.score, 2), tr.palm_x, tr.palm_y, t,
                 ))
@@ -442,6 +481,8 @@ class Recognizer:
                 tr.palm_y = tr.palm_fy(pc.y, t)
                 tr.pinch_x = tr.pinch_fx(pp.x, t)
                 tr.pinch_y = tr.pinch_fy(pp.y, t)
+                tr.tip_x = tip.x
+                tr.tip_y = tip.y
 
             # 3. Pinch hysteresis (with index reach guard, release debounce) and double-pinch detection.
             ratio = pinch_ratio(hand)
@@ -512,42 +553,36 @@ class Recognizer:
             # 5. Swipe detection using raw palm centre (open_palm now or within last 0.5 s).
             recent_open = (t - tr.last_open_palm) <= 0.5 + _EPS
             if not tr.pinching and (tr.stable_pose == "open_palm" or recent_open):
-                if tr.needs_settle:
-                    if tr.palm_history:
-                        t0, x0, y0 = tr.palm_history[-1]
-                        dt = t - t0
-                        if dt > 0.0:
-                            speed = math.hypot(pc.x - x0, pc.y - y0) / dt
-                            if speed < SETTLE_SPEED:
-                                if tr.settle_since is None:
-                                    tr.settle_since = t0
-                                if (t - tr.settle_since) >= SETTLE_TIME - _EPS:
-                                    tr.needs_settle = False
-                                    tr.settle_since = None
-                                    tr.palm_history.clear()
-                            else:
+                if not tr.settled and tr.palm_history:
+                    t0, x0, y0 = tr.palm_history[-1]
+                    dt = t - t0
+                    if dt > 0.0:
+                        speed = math.hypot(pc.x - x0, pc.y - y0) / dt
+                        if speed < SETTLE_SPEED:
+                            if tr.settle_since is None:
+                                tr.settle_since = t0
+                            if (t - tr.settle_since) >= SETTLE_TIME - _EPS:
+                                tr.settled = True
                                 tr.settle_since = None
-                    tr.palm_history.append((t, pc.x, pc.y))
-                    cutoff = t - SWIPE_WINDOW - _EPS
-                    while tr.palm_history and tr.palm_history[0][0] < cutoff:
-                        tr.palm_history.popleft()
-                else:
-                    tr.palm_history.append((t, pc.x, pc.y))
-                    cutoff = t - SWIPE_WINDOW - _EPS
-                    while tr.palm_history and tr.palm_history[0][0] < cutoff:
-                        tr.palm_history.popleft()
-                    if (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS:
-                        swipe = _match_swipe(list(tr.palm_history), SWIPE_DIST)
-                        if swipe is not None and not self._reverse_blocked(swipe, t):
-                            self._last_swipe = t
-                            self._last_swipe_dir = swipe
-                            tr.needs_settle = True
+                        else:
                             tr.settle_since = None
-                            tr.palm_history.clear()
-                            tr.palm_history.append((t, pc.x, pc.y))
-                            events.append(GestureEvent(
-                                swipe, side, round(hand.score, 2), tr.palm_x, tr.palm_y, t,
-                            ))
+                tr.palm_history.append((t, pc.x, pc.y))
+                cutoff = t - SWIPE_WINDOW - _EPS
+                while tr.palm_history and tr.palm_history[0][0] < cutoff:
+                    tr.palm_history.popleft()
+                swipe = _match_swipe(list(tr.palm_history), SWIPE_DIST)
+                if swipe is not None:
+                    decision = self._swipe_decision(swipe, tr, t)
+                    if decision == "emit":
+                        self._record_swipe(swipe, t)
+                        tr.palm_history.clear()
+                        tr.palm_history.append((t, pc.x, pc.y))
+                        events.append(GestureEvent(
+                            swipe, side, round(hand.score, 2), tr.palm_x, tr.palm_y, t,
+                        ))
+                    elif decision == "swallow":
+                        tr.palm_history.clear()
+                        tr.palm_history.append((t, pc.x, pc.y))
             else:
                 tr.palm_history.clear()
                 tr.settle_since = None
@@ -567,17 +602,12 @@ class Recognizer:
                     tr.pinching = False
                     tr.release_since = None
                     tr.pinch_was_double = False
-                elif (
-                    not tr.needs_settle
-                    and tr.palm_history
-                    and (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS
-                ):
+                elif tr.palm_history:
                     cutoff = tr.last_seen - SWIPE_WINDOW - _EPS
                     recent = [entry for entry in tr.palm_history if entry[0] >= cutoff]
                     swipe = _match_swipe(recent, 0.7 * SWIPE_DIST)
-                    if swipe is not None and not self._reverse_blocked(swipe, t):
-                        self._last_swipe = t
-                        self._last_swipe_dir = swipe
+                    if swipe is not None and self._swipe_decision(swipe, tr, tr.last_seen) == "emit":
+                        self._record_swipe(swipe, t)
                         events.append(GestureEvent(
                             swipe, side, round(tr.score, 2), tr.palm_x, tr.palm_y, t,
                         ))
@@ -634,6 +664,7 @@ class Recognizer:
             pose = "pinch" if tr.pinching else tr.stable_pose
             out.append(HandView(
                 side=tr.side, x=x, y=y, pose=pose, pinching=tr.pinching, score=tr.score,
+                tip_x=tr.tip_x, tip_y=tr.tip_y,
             ))
         return tuple(out)
 

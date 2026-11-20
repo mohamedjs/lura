@@ -254,3 +254,52 @@ stage; the terminal flag and voice cover switching); presets by gesture.
   ~1.09–1.14 < EXTENDED, read as point); a per-frame probe with a clearly open V (middle
   1.28–1.37) gave 3/3 victory events from the Recognizer. Not yet verified live: mode cycling
   end to end, pointer / window / files / media / developer / presentation / ai modes.
+- Committed as 127fe99. **Round 2** (Mohamed's requests after live test 2, where same-direction
+  swipes came only every ~1.8 s and a "right" hand kept appearing for < 0.5 s while the left
+  hand swiped). Three fixes:
+
+  **R2-1 Fast repeated swipes, return stroke swallowed** (`air/domain.py` Recognizer). Replace
+  the post-swipe rules (global SWIPE_COOLDOWN for everything, SWIPE_REVERSE_BLOCK, and the
+  "settle before any swipe" rule) with direction-aware ones. After a swipe in direction d at
+  t0 (state: `_last_swipe_dir`, `_last_swipe`, and per-axis):
+  - same direction d again: allowed once `t - t0 >= SWIPE_SAME_COOLDOWN = 0.35` — no settle needed.
+  - opposite direction: a candidate within `RETURN_WINDOW = 0.8` s of t0 is the **return stroke**:
+    swallowed (no event; clear that hand's palm history). After that it is allowed when
+    `t - t0 >= REVERSE_AFTER = 1.0`, or earlier if the palm has settled (SETTLE_SPEED /
+    SETTLE_TIME as now) since the last swipe.
+  - the other axis (e.g. up after right): allowed after SWIPE_SAME_COOLDOWN.
+  Remove SWIPE_COOLDOWN and SWIPE_REVERSE_BLOCK (and any test that only exists for them; adapt
+  the others). The exit-swipe path follows the same rules.
+
+  **R2-2 Palm or back of the hand, one track while the hand turns** (Recognizer step 1). The
+  swipe needs the open hand, palm *or* back towards the camera: classification already works on
+  2-D distances; what breaks is MediaPipe's Left/Right label flipping while the hand turns,
+  which created a new track (hand_enter/hand_leave, history lost). New rule: before creating a
+  track for a hand whose side has no track, if a track of the **other** side exists, is not
+  matched by any hand in this frame, was seen within LEAVE_GRACE, and its smoothed palm is within
+  `TRACK_JUMP = 0.18` of this hand's palm centre → relabel the hand to that track's side and
+  continue that track (no hand_enter). With two real hands both labels are present, so nothing
+  changes for them.
+
+  **R2-3 Point to choose the target window** (two apps on the same screen). In every mode
+  except `ai`, while armed, a stable `point` pose selects the window under the finger:
+  - `HandView` gains `tip_x: float, tip_y: float` = the INDEX_TIP position (raw, normalized) of
+    the latest frame; `views()` fills it.
+  - `computer` (application.py): `window_at(x: int, y: int) -> tuple[int, str, str] | None` —
+    the topmost (stacking) target window, not minimized, on the current desktop (or −1), whose
+    rect contains the point.
+  - `AirController`: on the `point` pose event → `_pointing = (side, t)`. In `tick`, while that
+    hand's view still has pose "point": every 0.2 s map `(tip_x, tip_y)` with `hand_to_screen` to
+    screen px, `window_at`; if the window under the finger is the same for ≥ `POINT_DWELL = 0.4` s
+    and differs from the last one selected → `desktop.run("window_focus", {"window": id})`,
+    feedback `"target"` ok `f"Target: {title}."` and publish `AIR_INTENT` "point" with that
+    window's app/title (the existing intent publish moves here, once per selected window).
+    Any other pose / pinch / hand_leave ends `_pointing`.
+  - From then on every gesture acts on that window (it is the active one).
+- Round 2 implemented by Neon (no deviations). Live test 3: same-direction swipes now in runs of
+  3 at 0.7–1.0 s; hand_enter/leave flicker down to 11 in 4 min. Point-to-select never fired:
+  the frame was mapped onto both monitors (3840 px), so the frame centre landed on the screen
+  boundary, and the test windows were on monitor 2 and minimized by show-desktop. Fixed by
+  Claude: `ComputerService.screen_bounds(monitor="active")` (the monitor of the active/front
+  window) is the pointing area, and "Nothing I can control is under your finger." is said once
+  per pointing after POINT_DWELL. Not yet verified live.

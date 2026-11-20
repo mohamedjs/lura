@@ -383,7 +383,7 @@ def check_swipes() -> None:
     _, evs = _run_motion(rec, t, 0.2, 0.5, 0.3, 0.0, 1.0)
     assert not [e for e in evs if e.gesture.startswith("swipe_")]
 
-    # Cooldown: second swipe 0.3 s after first -> blocked.
+    # Cooldown: opposite return stroke immediately after swipe_right -> swallowed (within RETURN_WINDOW).
     rec = Recognizer()
     t = _stabilize_open(rec, 0.2, 0.5)
     t, evs1 = _run_motion(rec, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
@@ -391,45 +391,69 @@ def check_swipes() -> None:
     assert len(swipe1) == 1
     first_t = swipe1[0].t
     t, evs2 = _run_motion(rec, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
-    assert t - first_t < 0.70
+    assert t - first_t < 0.80
     assert not [e for e in evs2 if e.gesture.startswith("swipe_")]
 
-    # Return stroke: swipe right then hand returns left at the same speed 0.8 s later -> no swipe_left.
-    rec_rev = Recognizer()
-    t = _stabilize_open(rec_rev, 0.2, 0.5)
-    t, evs_a = _run_motion(rec_rev, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    # R2-1: three swipe_right in a row with return strokes in between (each return within 0.5 s,
+    # next right ~0.45 s after the previous one) -> exactly three swipe_right and no swipe_left.
+    rec_fast = Recognizer()
+    t = _stabilize_open(rec_fast, 0.2, 0.5)
+    fast_swipes: list[GestureEvent] = []
+    # Swipe 1 right
+    t, evs_r1 = _run_motion(rec_fast, t, 0.20, 0.5, +0.35, 0.0, 0.20, settle_frames=0)
+    fast_swipes.extend(e for e in evs_r1 if e.gesture.startswith("swipe_"))
+    t_r1 = fast_swipes[-1].t
+    # Return left within 0.5 s, then swipe 2 right starting so it completes ~0.45 s after t_r1
+    t, evs_ret1 = _run_motion(rec_fast, t, 0.55, 0.5, -0.35, 0.0, 0.20, settle_frames=0)
+    fast_swipes.extend(e for e in evs_ret1 if e.gesture.startswith("swipe_"))
+    assert t - t_r1 < 0.50
+    t, evs_r2 = _run_motion(rec_fast, t, 0.20, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    fast_swipes.extend(e for e in evs_r2 if e.gesture.startswith("swipe_"))
+    assert len(fast_swipes) == 2 and fast_swipes[-1].gesture == "swipe_right"
+    t_r2 = fast_swipes[-1].t
+    assert 0.35 <= (t_r2 - t_r1) <= 0.55, f"gap1={t_r2 - t_r1:.3f}"
+    # Return left within 0.5 s, then swipe 3 right ~0.45 s after t_r2
+    t, evs_ret2 = _run_motion(rec_fast, t, 0.55, 0.5, -0.35, 0.0, 0.20, settle_frames=0)
+    fast_swipes.extend(e for e in evs_ret2 if e.gesture.startswith("swipe_"))
+    assert t - t_r2 < 0.50
+    t, evs_r3 = _run_motion(rec_fast, t, 0.20, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    fast_swipes.extend(e for e in evs_r3 if e.gesture.startswith("swipe_"))
+    assert [e.gesture for e in fast_swipes] == ["swipe_right", "swipe_right", "swipe_right"], fast_swipes
+    assert 0.35 <= (fast_swipes[2].t - t_r2) <= 0.55, f"gap2={fast_swipes[2].t - t_r2:.3f}"
+
+    # R2-1: a left 0.6 s after a right -> swallowed (even after pausing still).
+    rec_swallow = Recognizer()
+    t = _stabilize_open(rec_swallow, 0.2, 0.5)
+    t, evs_a = _run_motion(rec_swallow, t, 0.2, 0.5, +0.35, 0.0, 0.20, settle_frames=0)
     first_t = next(e.t for e in evs_a if e.gesture == "swipe_right")
-    while t < first_t + 0.80:
+    while t < first_t + 0.40:
         t += 1.0 / 30.0
-        rec_rev.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
-    _, evs_b = _run_motion(rec_rev, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
+        rec_swallow.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
+    t, evs_b = _run_motion(rec_swallow, t, 0.55, 0.5, -0.35, 0.0, 0.20, settle_frames=0)
+    assert t - first_t < 0.70
     assert not [e for e in evs_b if e.gesture.startswith("swipe_")], f"return stroke leaked: {evs_b}"
 
-    # Deliberate second swipe_right after cooldown and settling (still 0.25 s) -> emitted.
+    # R2-1: deliberate swipe_left 1.1 s after a right -> emitted.
+    rec_opp = Recognizer()
+    t = _stabilize_open(rec_opp, 0.2, 0.5)
+    t, evs_o1 = _run_motion(rec_opp, t, 0.2, 0.5, +0.35, 0.0, 0.20, settle_frames=0)
+    first_t = next(e.t for e in evs_o1 if e.gesture == "swipe_right")
+    while t < first_t + 0.90:
+        t += 1.0 / 30.0
+        rec_opp.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
+    t, evs_o2 = _run_motion(rec_opp, t, 0.55, 0.5, -0.35, 0.0, 0.20, settle_frames=0)
+    opp_swipes = [e for e in evs_o2 if e.gesture.startswith("swipe_")]
+    assert [e.gesture for e in opp_swipes] == ["swipe_left"]
+    assert 1.0 <= (opp_swipes[0].t - first_t) <= 1.2
+
+    # Deliberate second swipe_right after return stroke -> emitted.
     rec_same = Recognizer()
     t = _stabilize_open(rec_same, 0.2, 0.5)
     t, evs_s1 = _run_motion(rec_same, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
-    first_t = next(e.t for e in evs_s1 if e.gesture == "swipe_right")
-    # Return to 0.20 (blocked by reverse block & unsettled), then hold still for 0.25 s (>= SETTLE_TIME).
     t, evs_ret = _run_motion(rec_same, t, 0.55, 0.5, -0.35, 0.0, 0.30, settle_frames=0)
     assert not [e for e in evs_ret if e.gesture.startswith("swipe_")]
-    settle_end = max(t + 0.25, first_t + 0.75)
-    while t < settle_end:
-        t += 1.0 / 30.0
-        rec_same.update(HandFrame(t, (make_hand("open_palm", cx=0.20, cy=0.5),)))
     _, evs_s2 = _run_motion(rec_same, t, 0.20, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
     assert [e.gesture for e in evs_s2 if e.gesture.startswith("swipe_")] == ["swipe_right"]
-
-    # Opposite swipe 2.0 s after a right swipe (after settling) -> emitted.
-    rec_opp = Recognizer()
-    t = _stabilize_open(rec_opp, 0.2, 0.5)
-    t, evs_o1 = _run_motion(rec_opp, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
-    first_t = next(e.t for e in evs_o1 if e.gesture == "swipe_right")
-    while t < first_t + 2.0:
-        t += 1.0 / 30.0
-        rec_opp.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
-    _, evs_o2 = _run_motion(rec_opp, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
-    assert [e.gesture for e in evs_o2 if e.gesture.startswith("swipe_")] == ["swipe_left"]
 
     # Pinching hand moving fast -> no swipe.
     rec = Recognizer()
@@ -454,6 +478,47 @@ def check_swipes() -> None:
     assert not [e for e in evs_in if e.gesture.startswith("swipe_")]
     evs_out = rec_exit.update(HandFrame(0.65, ()))  # 0.50 s after last_seen (>= LEAVE_GRACE 0.45)
     assert [e.gesture for e in evs_out] == ["swipe_right", "hand_leave"]
+
+
+def check_track_flip_and_tip() -> None:
+    # R2-2: one hand whose label flips right -> left mid-swipe at the same position ->
+    # one track, no extra hand_enter / hand_leave, and the swipe still fires.
+    rec = Recognizer()
+    t = _stabilize_open(rec, 0.20, 0.5)
+    evs: list[GestureEvent] = []
+    dt = 1.0 / 30.0
+    steps = 8
+    for i in range(1, steps + 1):
+        t += dt
+        cx = 0.20 + 0.35 * (i / steps)
+        side = "right" if i <= 3 else "left"
+        evs.extend(rec.update(HandFrame(t, (make_hand("open_palm", cx=cx, cy=0.5, side=side),))))
+    # Keep holding as "left" past LEAVE_GRACE to prove the original track never leaves.
+    for _ in range(18):
+        t += dt
+        evs.extend(rec.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5, side="left"),))))
+    names = [e.gesture for e in evs]
+    assert "hand_enter" not in names, f"unexpected hand_enter: {evs}"
+    assert "hand_leave" not in names, f"unexpected hand_leave: {evs}"
+    assert [e.gesture for e in evs if e.gesture.startswith("swipe_")] == ["swipe_right"]
+    views = rec.views(t)
+    assert len(views) == 1 and views[0].side == "right"
+
+    # Two real hands far apart keep both tracks.
+    rec2 = Recognizer()
+    lh = make_hand("open_palm", cx=0.20, cy=0.5, side="left")
+    rh = make_hand("open_palm", cx=0.80, cy=0.5, side="right")
+    evs2 = rec2.update(HandFrame(0.0, (lh, rh)))
+    assert sorted(e.hand for e in evs2 if e.gesture == "hand_enter") == ["left", "right"]
+    assert sorted(v.side for v in rec2.views(0.0)) == ["left", "right"]
+
+    # R2-3: views() populates tip_x and tip_y from INDEX_TIP.
+    pt = make_hand("point", cx=0.4, cy=0.6, side="right")
+    rec3 = Recognizer()
+    rec3.update(HandFrame(0.0, (pt,)))
+    v = rec3.views(0.0)[0]
+    assert abs(v.tip_x - pt.points[INDEX_TIP].x) < 1e-9
+    assert abs(v.tip_y - pt.points[INDEX_TIP].y) < 1e-9
 
 
 def check_leave() -> None:

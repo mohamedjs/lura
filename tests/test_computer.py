@@ -805,6 +805,31 @@ def check_preset_errors_and_delete() -> None:
         path.write_text(saved_bytes, encoding="utf-8")
 
 
+def check_window_at() -> None:
+    fb = FakeBackend()
+    # Stacking order is bottom -> top:
+    # 101 (100..900, 100..700), 102 (200..1400, 120..920), 103 (300..1200, 150..850),
+    # plus 200 DESKTOP (0..1920, 0..1080) and 201 Lura (own pid).
+    # Add a minimized window and an other-desktop window on top of everything.
+    fb._wins.extend([
+        Window(104, "Minimized", "vlc", 1004, 0, Rect(0, 0, 1920, 1080), False, True, "NORMAL"),
+        Window(105, "OtherWS", "kitty", 1005, 1, Rect(0, 0, 1920, 1080), False, False, "NORMAL"),
+        Window(106, "Sticky", "spotify", 1006, -1, Rect(1500, 100, 300, 300), False, False, "NORMAL"),
+    ])
+    svc = ComputerService(fb)
+
+    # Overlap of 101, 102, 103 (and minimized 104, other-ws 105) -> topmost normal on ws 0 is 103.
+    assert svc.window_at(500, 500) == (103, "Code", "Notes — Code")
+    # Inside 101 only -> 101.
+    assert svc.window_at(150, 150) == (101, "Gnome-terminal", "Terminal — zsh")
+    # Sticky window (desktop -1) is matched on current desktop.
+    assert svc.window_at(1600, 200) == (106, "spotify", "Sticky")
+    # Empty area covered only by DESKTOP (200), minimized (104), other-ws (105) -> None.
+    assert svc.window_at(5, 5) is None
+    # Area covered by Lura window (201) + DESKTOP (200) -> None.
+    assert svc.window_at(20, 20) is None
+
+
 def main() -> int:
     for name, fn in list(globals().items()):
         if name.startswith("check_"):
