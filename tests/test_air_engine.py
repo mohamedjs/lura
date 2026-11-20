@@ -1,4 +1,4 @@
-"""Air v2 interaction engine: ring table, pure engine phases, controller, and fixture replay."""
+"""Air v3 hand mouse: ring table, pure engine phases, controller, and fixture replay."""
 
 from __future__ import annotations
 
@@ -22,16 +22,15 @@ from lura.modules.air import (
 from lura.modules.air.domain import KINDS, Hand, Point
 from lura.modules.air.engine import (
     DISENGAGE_AFTER,
-    ENGAGE_HOLD,
-    GRAB_HOLD,
+    DRAG_HOLD,
     HINT_AFTER,
     HINT_EVERY,
-    LEAN,
+    POINT_ENTER,
     RELEASE_HOLD,
-    REWIND,
-    RING_TIMEOUT,
     SCROLL_ENTER,
     SCROLL_STEP,
+    SWIPE_COOLDOWN,
+    SWIPE_RETURN,
     THUMB_HOLD,
     THUMB_PALM,
     ZONE_PALM,
@@ -65,11 +64,14 @@ def _step_hand(
     return t, out
 
 
-def _engage(eng: InteractionEngine, t0: float = 0.0, cx: float = 0.5, cy: float = 0.5) -> float:
-    t, cmds = _step_hand(eng, t0, ENGAGE_HOLD + 0.05, "open_palm", cx=cx, cy=cy, size=0.28)
-    assert any(c.kind == "engage" for c in cmds), f"failed to engage: {cmds}"
-    assert eng.state["engaged"] is True and eng.state["phase"] == "pointing"
+def _point(eng: InteractionEngine, t0: float = 0.0, cx: float = 0.5, cy: float = 0.5) -> float:
+    t, cmds = _step_hand(eng, t0, POINT_ENTER + 0.1, "point", cx=cx, cy=cy, size=0.28)
+    assert eng.state["engaged"] and eng.state["phase"] == "point", cmds
     return t
+
+
+def _kinds(cmds: list[Command]) -> list[str]:
+    return [c.kind for c in cmds if c.kind != "cursor"]
 
 
 def check_ring_table() -> None:
@@ -171,252 +173,139 @@ def check_ring_table() -> None:
     assert ring_action("bogus", "universal", "other") == ("ignore", {})
 
 
-def check_phases_and_cursor() -> None:
+def check_point_moves_cursor() -> None:
     eng = InteractionEngine()
-    assert eng.state == {
-        "engaged": False, "zone": "none", "phase": "idle", "ring_hover": "", "grab_progress": 0.0,
-    }
-
-    # Moving palm never engages.
-    t = 0.0
-    for i in range(40):
-        t = i * (1.0 / 30.0)
-        cx = 0.3 + 0.015 * (i % 20)
-        cmds = eng.update(t, (make_hand("open_palm", cx=cx, cy=0.5, size=0.28),))
-        assert not any(c.kind == "engage" for c in cmds)
-    assert eng.state["phase"] == "idle"
-
-    # Still open palm in zone for ENGAGE_HOLD -> engage, phase pointing.
-    t = _engage(eng, t + 0.05)
-
-    # Moving open palm emits cursor deltas; fractional pixels accumulate.
-    cursor_cmds: list[Command] = []
-    for i in range(1, 20):
-        t += 1.0 / 30.0
-        cx = 0.5 + 0.01 * i
-        cursor_cmds.extend(eng.update(t, (make_hand("open_palm", cx=cx, cy=0.5, size=0.28),)))
-    total_dx = sum(c.dx for c in cursor_cmds if c.kind == "cursor")
-    assert total_dx > 100.0, f"expected positive cursor movement, got {total_dx}"
-
-    # Non-open pose freezes cursor; returning to open palm re-seeds filter with no jump.
-    t += 0.05
-    eng.update(t, (make_hand("fist", cx=0.69, cy=0.5, size=0.28),))
-    assert eng.state["phase"] == "frozen"
-    t += 0.05
-    assert eng.update(t, (make_hand("fist", cx=0.30, cy=0.5, size=0.28),)) == []
-    t += 0.05
-    reseed_cmds = eng.update(t, (make_hand("open_palm", cx=0.30, cy=0.5, size=0.28),))
-    assert eng.state["phase"] == "pointing"
-    assert not any(c.kind == "cursor" for c in reseed_cmds), f"filter jumped on re-seed: {reseed_cmds}"
-
-    # Clipped hand (touching frame edge) freezes cursor and does NOT start disengage clock.
-    t += 0.05
-    eng.update(t, (make_hand("open_palm", cx=0.02, cy=0.5, size=0.25),))
-    assert eng.state["phase"] == "frozen"
-    t += DISENGAGE_AFTER + 0.5
-    cmds = eng.update(t, (make_hand("open_palm", cx=0.02, cy=0.5, size=0.25),))
-    assert not any(c.kind == "disengage" for c in cmds)
-    assert eng.state["engaged"] is True
-
-
-def check_disengage_closes_open_phases() -> None:
-    # Disengage while ring is open emits ring_cancel then disengage.
+    # Open palm held still no longer does anything (no engage step).
+    _, cmds = _step_hand(eng, 0.0, 2.0, "open_palm", size=0.28)
+    assert not cmds, cmds
+    # Typing-distance hand never starts the cursor.
     eng = InteractionEngine()
-    t = _engage(eng, 0.0)
-    t += 0.05
-    cmds = eng.update(t, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-    assert [c.kind for c in cmds] == ["ring_open"]
-    assert eng.state["phase"] == "ring"
-    # Jump straight past DISENGAGE_AFTER with no hand -> closes ring and disengages.
-    t += DISENGAGE_AFTER + 0.1
-    cmds = eng.update(t, ())
-    assert [c.kind for c in cmds] == ["ring_cancel", "disengage"]
-    assert eng.state["engaged"] is False and eng.state["phase"] == "idle"
-
-    # Disengage while grab is active emits grab_end then disengage.
-    t = _engage(eng, t + 0.1)
-    t += 0.05
-    eng.update(t, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-    t, cmds = _step_hand(eng, t + 0.05, GRAB_HOLD + 0.05, "pinch", cx=0.5, cy=0.5, size=0.28)
-    assert any(c.kind == "grab_start" for c in cmds)
-    assert eng.state["phase"] == "grab"
-    t += DISENGAGE_AFTER + 0.1
-    cmds = eng.update(t, ())
-    assert [c.kind for c in cmds] == ["grab_end", "disengage"]
+    _, cmds = _step_hand(eng, 0.0, 1.0, "point", size=0.13)
+    assert not any(c.kind in ("engage", "cursor") for c in cmds), cmds
+    # Close pointing finger: engage after POINT_ENTER, then moving it moves the cursor right/down.
+    eng = InteractionEngine()
+    t = _point(eng)
+    out: list[Command] = []
+    for i in range(1, 31):
+        out.extend(eng.update(t + i / 30.0, (make_hand("point", cx=0.5 + 0.01 * i, cy=0.5 + 0.005 * i, size=0.28),)))
+    dx = sum(c.dx for c in out if c.kind == "cursor")
+    dy = sum(c.dy for c in out if c.kind == "cursor")
+    assert dx > 300 and dy > 50, (dx, dy)
+    # Fist = lift the mouse: moving does nothing.
+    t += 1.1
+    _, cmds = _step_hand(eng, t, 0.3, "fist", cx=0.3, size=0.28)
+    assert not any(c.kind == "cursor" for c in cmds)
     assert eng.state["phase"] == "idle"
 
 
-def check_rewind_and_ring_axis() -> None:
-    # REWIND undoes cursor movement emitted in the last 0.10 s before pinch onset.
+def check_tap_click_and_hold_drag() -> None:
     eng = InteractionEngine()
-    t = _engage(eng, 0.0, cx=0.4, cy=0.5)
-    emitted: list[tuple[float, float, float]] = []
+    t = _point(eng)
+    # Quick tap -> click (once), back to pointing.
+    t, cmds = _step_hand(eng, t + 0.03, 0.15, "point", size=0.28, pinch_gap=0.0)
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.2, "point", size=0.28)
+    assert _kinds(cmds + cmds2) == ["click"], _kinds(cmds + cmds2)
+    # Hold -> press, move -> cursor, release -> release.
+    t, cmds = _step_hand(eng, t + 0.03, DRAG_HOLD + 0.1, "point", size=0.28, pinch_gap=0.0)
+    assert _kinds(cmds) == ["press"], _kinds(cmds)
+    assert eng.state["phase"] == "drag"
+    out: list[Command] = []
     for i in range(1, 16):
-        t += 0.02
-        cx = 0.4 + 0.01 * i
-        for c in eng.update(t, (make_hand("open_palm", cx=cx, cy=0.5, size=0.28),)):
-            if c.kind == "cursor":
-                emitted.append((c.t, c.dx, c.dy))
-    t += 0.02
-    pinch_t = t
-    want_dx = -sum(dx for ct, dx, _ in emitted if pinch_t - ct <= REWIND + 1e-9)
-    want_dy = -sum(dy for ct, _, dy in emitted if pinch_t - ct <= REWIND + 1e-9)
-    assert want_dx < 0.0
-    cmds = eng.update(t, (make_hand("pinch", cx=0.55, cy=0.5, size=0.28),))
-    assert [c.kind for c in cmds] == ["cursor", "ring_open"]
-    assert abs(cmds[0].dx - want_dx) < 1e-6 and abs(cmds[0].dy - want_dy) < 1e-6
-
-    # All four directions + diagonal rejected + release in centre cancels + lost hand cancels.
-    cases = [
-        ((-LEAN - 0.04, 0.0), "left"),
-        ((LEAN + 0.04, 0.0), "right"),
-        ((0.0, -LEAN - 0.04), "up"),
-        ((0.0, LEAN + 0.04), "down"),
-        ((LEAN + 0.04, LEAN + 0.04), ""),   # diagonal rejected by LEAN_AXIS
-        ((0.0, 0.0), ""),                   # release in centre cancels
-    ]
-    for (dx, dy), want in cases:
-        e = InteractionEngine()
-        tt = _engage(e, 0.0, cx=0.5, cy=0.5)
-        tt += 0.05
-        e.update(tt, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-        tt += 0.05
-        hover_cmds = e.update(tt, (make_hand("pinch", cx=0.5 + dx, cy=0.5 + dy, size=0.28),))
-        if want:
-            assert any(c.kind == "ring_hover" and c.direction == want for c in hover_cmds), hover_cmds
-        # Hold release >= RELEASE_HOLD
-        tt, rel_cmds = _step_hand(
-            e, tt + 0.03, RELEASE_HOLD + 0.05, "open_palm", cx=0.5 + dx, cy=0.5 + dy, size=0.28,
-        )
-        if want:
-            sels = [c for c in rel_cmds if c.kind == "ring_select"]
-            assert len(sels) == 1 and sels[0].direction == want, rel_cmds
-        else:
-            assert any(c.kind == "ring_cancel" for c in rel_cmds), rel_cmds
-            assert not any(c.kind == "ring_select" for c in rel_cmds), rel_cmds
-
-    # Lost hand while leaning NEVER selects a direction (cancels after RELEASE_HOLD).
-    e_lost = InteractionEngine()
-    tt = _engage(e_lost, 0.0, cx=0.5, cy=0.5)
-    tt += 0.05
-    e_lost.update(tt, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-    tt += 0.05
-    e_lost.update(tt, (make_hand("pinch", cx=0.66, cy=0.5, size=0.28),))
-    assert e_lost.state["ring_hover"] == "right"
-    tt += 0.05
-    assert e_lost.update(tt, ()) == []
-    tt += RELEASE_HOLD + 0.02
-    lost_cmds = e_lost.update(tt, ())
-    assert [c.kind for c in lost_cmds] == ["ring_cancel"]
-    assert e_lost.state["phase"] == "frozen"
-
-
-def check_grab_and_ring_timeout() -> None:
-    # Hold pinch in centre -> ring_hover progress >= 0.05 steps -> grab_start -> grab_move -> grab_end.
+        out.extend(eng.update(t + i / 30.0, (make_hand("point", cx=0.5 + 0.01 * i, size=0.28, pinch_gap=0.0),)))
+    assert sum(c.dx for c in out if c.kind == "cursor") > 100
+    t += 0.6
+    _, cmds = _step_hand(eng, t, 0.2, "point", cx=0.65, size=0.28)
+    assert _kinds(cmds) == ["release"], _kinds(cmds)
+    # Losing the hand mid-drag releases the button.
+    t = _point(eng, t + 0.5)
+    t, cmds = _step_hand(eng, t + 0.03, DRAG_HOLD + 0.1, "point", size=0.28, pinch_gap=0.0)
+    assert "press" in _kinds(cmds)
+    out = []
+    for i in range(1, 8):
+        out.extend(eng.update(t + i / 30.0, ()))
+    assert _kinds(out) == ["release"], _kinds(out)
+    # A pinch without pointing first (e.g. picking something up) never clicks.
     eng = InteractionEngine()
-    t = _engage(eng, 0.0)
-    t += 0.05
-    eng.update(t, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-    t, cmds = _step_hand(eng, t + 0.03, GRAB_HOLD + 0.05, "pinch", cx=0.5, cy=0.5, size=0.28)
-    hovers = [c for c in cmds if c.kind == "ring_hover"]
-    assert len(hovers) >= 5 and all(c.direction == "" for c in hovers)
-    assert hovers[-1].progress > hovers[0].progress
-    assert any(c.kind == "grab_start" for c in cmds)
-    assert eng.state["phase"] == "grab"
-
-    t += 0.05
-    mv = eng.update(t, (make_hand("pinch", cx=0.55, cy=0.52, size=0.28),))
-    assert any(c.kind == "grab_move" and c.dx > 0.0 and c.dy > 0.0 for c in mv), mv
-
-    t, rel = _step_hand(eng, t + 0.03, RELEASE_HOLD + 0.05, "fist", cx=0.55, cy=0.52, size=0.28)
-    assert any(c.kind == "grab_end" for c in rel)
-    assert eng.state["phase"] == "frozen"
-
-    # Tight pinch (ratio < PINCH_TIGHT = 0.15) starts even with curled index (reach < PINCH_REACH),
-    # stays held while ratio <= PINCH_SLIP (0.24), and releases when curled & ratio > PINCH_SLIP.
-    eng3 = InteractionEngine()
-    t = _engage(eng3, 0.0, cx=0.5, cy=0.5)
-    t += 0.05
-    # Curled fist with ratio 0.10 (< PINCH_TIGHT) -> opens ring.
-    cmds = eng3.update(t, (make_hand("fist", cx=0.5, cy=0.5, size=0.28, pinch_gap=0.10),))
-    assert [c.kind for c in cmds] == ["ring_open"], cmds
-    # Curled fist with ratio 0.20 (<= PINCH_SLIP) held > RELEASE_HOLD -> stays in ring / enters grab.
-    t, cmds = _step_hand(
-        eng3, t + 0.03, GRAB_HOLD + 0.05, "fist", cx=0.5, cy=0.5, size=0.28, pinch_gap=0.20,
-    )
-    assert any(c.kind == "grab_start" for c in cmds), cmds
-    # Curled fist with ratio 0.28 (> PINCH_SLIP) held >= RELEASE_HOLD -> releases grab.
-    t, cmds = _step_hand(
-        eng3, t + 0.03, RELEASE_HOLD + 0.05, "fist", cx=0.5, cy=0.5, size=0.28, pinch_gap=0.28,
-    )
-    assert any(c.kind == "grab_end" for c in cmds), cmds
-
-    # RING_TIMEOUT: stay in deadzone (between HOLD_RADIUS and LEAN) for RING_TIMEOUT -> cancel + ignore pinch.
-    eng2 = InteractionEngine()
-    t = _engage(eng2, 0.0, cx=0.5, cy=0.5)
-    t += 0.05
-    eng2.update(t, (make_hand("pinch", cx=0.5, cy=0.5, size=0.28),))
-    t, cmds = _step_hand(eng2, t + 0.05, RING_TIMEOUT + 0.1, "pinch", cx=0.56, cy=0.5, size=0.28)
-    assert any(c.kind == "ring_cancel" for c in cmds), cmds
-    assert eng2.state["phase"] == "frozen"
-    # Keeping the same pinch held must NOT re-open the ring.
-    t += 0.05
-    assert eng2.update(t, (make_hand("pinch", cx=0.56, cy=0.5, size=0.28),)) == []
-    # Releasing and pinching again opens a fresh ring.
-    t += 0.05
-    eng2.update(t, (make_hand("open_palm", cx=0.56, cy=0.5, size=0.28),))
-    t += 0.05
-    reopen = eng2.update(t, (make_hand("pinch", cx=0.56, cy=0.5, size=0.28),))
-    assert any(c.kind == "ring_open" for c in reopen)
+    _, cmds = _step_hand(eng, 0.0, 1.0, "pinch", size=0.28)
+    assert not cmds, cmds
 
 
-def check_scroll_thumbs_and_hints() -> None:
-    # Scroll: V held SCROLL_ENTER -> scroll +1 up / -1 down per SCROLL_STEP; non-V 0.2 s -> frozen.
+def check_swipe_workspace() -> None:
     eng = InteractionEngine()
-    t = _engage(eng, 0.0)
-    t, cmds = _step_hand(eng, t + 0.05, SCROLL_ENTER + 0.05, "victory", cx=0.5, cy=0.5, size=0.28)
+    out: list[Command] = []
+    t = 0.0
+    for i in range(12):            # 0.4 s, 0.3 of the frame to the right
+        t = i / 30.0
+        out.extend(eng.update(t, (make_hand("open_palm", cx=0.35 + 0.025 * i, size=0.26),)))
+    swipes = [c for c in out if c.kind == "swipe"]
+    assert [c.direction for c in swipes] == ["right"], out
+    # Bringing the hand back (opposite) right after is ignored.
+    out = []
+    for i in range(12):
+        out.extend(eng.update(t + 0.05 + i / 30.0, (make_hand("open_palm", cx=0.63 - 0.025 * i, size=0.26),)))
+    assert not [c for c in out if c.kind == "swipe"], out
+    # After SWIPE_RETURN the other direction works.
+    t += SWIPE_RETURN + SWIPE_COOLDOWN
+    out = []
+    for i in range(12):
+        out.extend(eng.update(t + i / 30.0, (make_hand("open_palm", cx=0.65 - 0.025 * i, size=0.26),)))
+    assert [c.direction for c in out if c.kind == "swipe"] == ["left"], out
+    # A slow drift is not a swipe.
+    eng = InteractionEngine()
+    out = []
+    for i in range(60):
+        out.extend(eng.update(i / 30.0, (make_hand("open_palm", cx=0.3 + 0.004 * i, size=0.26),)))
+    assert not [c for c in out if c.kind == "swipe"], out
+    # Back of the hand / half-closed hand moving works too (fist frames, not only open palm).
+    eng = InteractionEngine()
+    out = []
+    for i in range(12):
+        out.extend(eng.update(i / 30.0, (make_hand("fist", cx=0.65 - 0.025 * i, size=0.26),)))
+    assert [c.direction for c in out if c.kind == "swipe"] == ["left"], out
+    # Moving the pointing finger is the mouse, never a swipe.
+    eng = InteractionEngine()
+    out = []
+    for i in range(12):
+        out.extend(eng.update(i / 30.0, (make_hand("point", cx=0.35 + 0.025 * i, size=0.26),)))
+    assert not [c for c in out if c.kind == "swipe"], out
+
+
+def check_scroll_thumbs_disengage_hint() -> None:
+    eng = InteractionEngine()
+    t, cmds = _step_hand(eng, 0.0, SCROLL_ENTER + 0.1, "victory", size=0.28)
     assert eng.state["phase"] == "scroll"
-    scrolls: list[Command] = []
-    # Move hand up by 2.5 * SCROLL_STEP -> 2 up (+1) scrolls.
-    for i in range(1, 11):
-        t += 0.03
-        cy = 0.5 - (2.5 * SCROLL_STEP) * (i / 10.0)
-        scrolls.extend(eng.update(t, (make_hand("victory", cx=0.5, cy=cy, size=0.28),)))
-    assert [c.steps for c in scrolls if c.kind == "scroll"] == [1, 1]
-    # Move hand down by 2.5 * SCROLL_STEP -> 2 down (-1) scrolls.
-    scrolls.clear()
-    y_start = 0.5 - 2.5 * SCROLL_STEP
-    for i in range(1, 11):
-        t += 0.03
-        cy = y_start + (2.5 * SCROLL_STEP) * (i / 10.0)
-        scrolls.extend(eng.update(t, (make_hand("victory", cx=0.5, cy=cy, size=0.28),)))
-    assert [c.steps for c in scrolls if c.kind == "scroll"] == [-1, -1]
-    # Drop V pose for 0.2 s -> frozen.
-    t, _ = _step_hand(eng, t + 0.03, 0.25, "fist", cx=0.5, cy=0.5, size=0.28)
-    assert eng.state["phase"] == "frozen"
+    out: list[Command] = []
+    for i in range(1, 16):
+        out.extend(eng.update(t + i / 30.0, (make_hand("victory", cy=0.5 - 0.01 * i, size=0.28),)))
+    # Phone-style (SCROLL_NATURAL): hand up -> the page moves up -> wheel down (negative steps).
+    downs = -sum(c.steps for c in out if c.kind == "scroll")
+    assert downs >= int(0.15 / SCROLL_STEP) - 1 and all(c.steps < 0 for c in out if c.kind == "scroll"), out
+    # Hand back down -> wheel up.
+    t2 = t + 16 / 30.0
+    out = []
+    for i in range(1, 16):
+        out.extend(eng.update(t2 + i / 30.0, (make_hand("victory", cy=0.35 + 0.01 * i, size=0.28),)))
+    assert out and all(c.steps > 0 for c in out if c.kind == "scroll"), out
+    t = t2 + 16 / 30.0
+    # Disengage after DISENGAGE_AFTER without a hand.
+    t += 0.6
+    out = []
+    for i in range(int((DISENGAGE_AFTER + 0.2) * 30)):
+        out.extend(eng.update(t + i / 30.0, ()))
+    assert _kinds(out) == ["disengage"], _kinds(out)
 
-    # Thumbs: works even while idle and outside zone (palm >= THUMB_PALM), fires once per hold.
     eng_t = InteractionEngine()
-    t, cmds = _step_hand(eng_t, 0.0, THUMB_HOLD + 0.3, "thumbs_up", cx=0.5, cy=0.6, size=THUMB_PALM + 0.02)
-    intents = [c for c in cmds if c.kind == "intent"]
-    assert len(intents) == 1 and intents[0].text == "confirm"
-    # Release and show thumbs_down -> deny once.
-    t += 0.05
-    eng_t.update(t, (make_hand("fist", cx=0.5, cy=0.6, size=0.15),))
-    t, cmds = _step_hand(eng_t, t + 0.05, THUMB_HOLD + 0.3, "thumbs_down", cx=0.5, cy=0.6, size=0.15)
-    intents = [c for c in cmds if c.kind == "intent"]
-    assert len(intents) == 1 and intents[0].text == "deny"
+    t, cmds = _step_hand(eng_t, 0.0, THUMB_HOLD + 0.3, "thumbs_up", cy=0.6, size=THUMB_PALM + 0.02)
+    assert [c.text for c in cmds if c.kind == "intent"] == ["confirm"]
+    t, cmds = _step_hand(eng_t, t + 0.05, THUMB_HOLD + 0.3, "thumbs_down", cy=0.6, size=0.15)
+    assert [c.text for c in cmds if c.kind == "intent"] == ["deny"]
 
-    # Far-hand hint cadence: fires after HINT_AFTER (1.5 s), not again until HINT_EVERY (10.0 s).
     eng_h = InteractionEngine()
-    t, cmds1 = _step_hand(eng_h, 0.0, HINT_AFTER + 0.1, "open_palm", cx=0.5, cy=0.5, size=ZONE_PALM - 0.05)
-    hints1 = [c for c in cmds1 if c.kind == "hint"]
-    assert len(hints1) == 1 and hints1[0].text == "Move your hand closer to the camera."
-    assert eng_h.state["zone"] == "far"
-    t, cmds2 = _step_hand(eng_h, t + 0.1, 5.0, "open_palm", cx=0.5, cy=0.5, size=0.15, dt=0.2)
-    assert not any(c.kind == "hint" for c in cmds2)
-    t, cmds3 = _step_hand(eng_h, t + 0.1, HINT_EVERY - 4.0, "open_palm", cx=0.5, cy=0.5, size=0.15, dt=0.2)
-    assert len([c for c in cmds3 if c.kind == "hint"]) == 1
+    _, cmds = _step_hand(eng_h, 0.0, HINT_AFTER + 0.1, "point", size=ZONE_PALM - 0.05)
+    hints = [c for c in cmds if c.kind == "hint"]
+    assert len(hints) == 1 and hints[0].text == "Move your hand closer to the camera."
+    _, cmds = _step_hand(eng_h, HINT_AFTER + 0.2, HINT_EVERY - 3.0, "point", size=0.15, dt=0.2)
+    assert not any(c.kind == "hint" for c in cmds)
 
 
 def check_controller_cursor_and_coalescing() -> None:
@@ -557,9 +446,86 @@ def check_controller_ring_grab_scroll_intent() -> None:
     }]
 
 
+def check_controller_click_drag_swipe() -> None:
+    air = FakeAir()
+    desk = FakeDesktop(pointer_pos=(400, 300))
+    ctrl = AirController(air, desk)  # type: ignore[arg-type]
+    ctrl.process(Command("engage", 0.0))
+    desk.runs.clear()
+    ctrl.process(Command("click", 0.1))
+    ctrl.process(Command("press", 0.2))
+    ctrl.process(Command("release", 0.3))
+    ctrl.process(Command("release", 0.35))          # no second button-up
+    ctrl.process(Command("swipe", 0.4, direction="right"))
+    ctrl.process(Command("swipe", 0.5, direction="left"))
+    assert desk.runs == [
+        ("pointer_click", {"button": "left", "count": 1}),
+        ("pointer_down", {"button": "left"}),
+        ("pointer_up", {"button": "left"}),
+        ("workspace_switch", {"target": "next"}),
+        ("workspace_switch", {"target": "prev"}),
+    ], desk.runs
+    # Disengage while the button is held lets it go.
+    desk.runs.clear()
+    ctrl.process(Command("press", 1.0))
+    ctrl.process(Command("disengage", 1.1))
+    assert desk.runs == [("pointer_down", {"button": "left"}), ("pointer_up", {"button": "left"})], desk.runs
+
+
+def check_camera_fallback() -> None:
+    from lura.modules.air.application import CameraChain
+    from lura.modules.air.domain import CameraInfo, camera_candidates
+
+    cams = [
+        CameraInfo(0, "Integrated Camera", "uvcvideo", True),
+        CameraInfo(9, "Mobile Webcam", "v4l2loopback", False),
+    ]
+    assert [c.index for c in camera_candidates(cams, "mobile")] == [9, 0]
+    assert [c.index for c in camera_candidates(cams, "")] == [0]
+    assert [c.index for c in camera_candidates(cams[1:], "nothing")] == []
+    assert [c.index for c in camera_candidates(cams, "nothing")] == [0]   # asked-for one gone -> internal
+
+    chain = CameraChain(camera_candidates(cams, "mobile"), lambda info: info.index)  # type: ignore[arg-type,return-value]
+    assert chain() == 9
+    assert chain.failed() is True and chain() == 0
+    single = CameraChain([cams[0]], lambda info: info.index)  # type: ignore[arg-type,return-value]
+    assert single.failed() is False
+
+    # AirService: a camera that never delivers frames is replaced by the next one.
+    class DeadCamera(FakeCamera):
+        name = "Mobile Webcam"
+
+        def read(self):  # type: ignore[override]
+            return None
+
+    good = FakeCamera()
+    made: list[str] = []
+
+    class Chain:
+        def __init__(self) -> None:
+            self.pos = 0
+
+        def __call__(self):
+            made.append("dead" if self.pos == 0 else "good")
+            return DeadCamera() if self.pos == 0 else good
+
+        def failed(self) -> bool:
+            self.pos = 1
+            return True
+
+    script = [(make_hand("point", size=0.28),) for _ in range(40)]
+    svc = AirService(None, camera_factory=Chain(), landmarker_factory=lambda: FakeLandmarker(script))
+    svc.start()
+    deadline = time.monotonic() + 3.0
+    while "good" not in made and time.monotonic() < deadline:
+        time.sleep(0.01)
+    svc.stop()
+    assert made[:2] == ["dead", "good"], made
+
+
 def check_air_service_commands() -> None:
     # AirService feeds InteractionEngine and dispatches Commands + updates engine_state().
-    script = [(make_hand("open_palm", cx=0.5, cy=0.5, size=0.28),) for _ in range(32)]
+    script = [(make_hand("point", cx=0.5, cy=0.5, size=0.28),) for _ in range(32)]
     clock_t = [0.0]
 
     def fake_clock() -> float:
@@ -603,124 +569,26 @@ def _replay(path: Path) -> list[tuple[str, str, Command]]:
     return out
 
 
-def check_replay_session1() -> None:
-    path = FIXTURES / "session1-free.jsonl.gz"
-    if not path.is_file():
-        print(
-            "replay skipped: tests/fixtures/air/session1-free.jsonl.gz "
-            "not found (local recordings, not in git)"
-        )
-        return
-    emitted = _replay(path)
-    normal = [c for lbl, _, c in emitted if lbl == "normal"]
-    engages = [c for c in normal if c.kind == "engage"]
-    triggers = [c for c in normal if c.kind in ("ring_select", "grab_start")]
-    assert len(engages) == 0, f"session1 normal engages={len(engages)}: {engages}"
-    assert len(triggers) <= 1, f"session1 normal ring_select/grab_start={len(triggers)}: {triggers}"
-
-
-def _cue_direction(cue: str) -> str:
-    up = cue.upper()
-    for d in ("LEFT", "RIGHT", "UP", "DOWN"):
-        if d in up:
-            return d.lower()
-    return ""
-
-
-def check_replay_session2() -> None:
-    path = FIXTURES / "session2-cued.jsonl.gz"
-    if not path.is_file():
-        print(
-            "replay skipped: tests/fixtures/air/session2-cued.jsonl.gz "
-            "not found (local recordings, not in git)"
-        )
-        return
-    emitted = _replay(path)
-
-    # 1. normal: ignore commands before the first disengage inside normal; zero of every kind after it.
-    normal_cmds = [(cue, c) for lbl, cue, c in emitted if lbl == "normal"]
-    disengage_idx = next((i for i, (_, c) in enumerate(normal_cmds) if c.kind == "disengage"), None)
-    assert disengage_idx is not None, f"session2 normal: no disengage emitted: {normal_cmds}"
-    after_disengage = normal_cmds[disengage_idx + 1 :]
-    assert not after_disengage, (
-        f"session2 normal commands after disengage ({len(after_disengage)}): {after_disengage}"
-    )
-
-    # 2. near_still: engage within the label, and cursor moves <= 40 px over 5 s after engage
-    still_cmds = [c for lbl, _, c in emitted if lbl == "near_still"]
-    still_engages = [c for c in still_cmds if c.kind == "engage"]
-    assert still_engages, "session2 near_still: no engage"
-    eng_t = still_engages[0].t
-    still_move = sum(
-        math.hypot(c.dx, c.dy) for c in still_cmds
-        if c.kind == "cursor" and eng_t <= c.t <= eng_t + 5.0
-    )
-    assert still_move <= 40.0, f"session2 near_still cursor drift={still_move:.1f} px"
-
-    # 3. near_move: cursor path >= 300 px
-    move_path = sum(
-        math.hypot(c.dx, c.dy) for lbl, _, c in emitted
-        if lbl == "near_move" and c.kind == "cursor"
-    )
-    assert move_path >= 300.0, f"session2 near_move cursor path={move_path:.1f} px"
-
-    # 4. pinch_tap: >= 5 ring_open and no ring_select
-    tap_cmds = [c for lbl, _, c in emitted if lbl == "pinch_tap"]
-    tap_opens = [c for c in tap_cmds if c.kind == "ring_open"]
-    tap_selects = [c for c in tap_cmds if c.kind == "ring_select"]
-    assert len(tap_opens) >= 5, f"session2 pinch_tap ring_open={len(tap_opens)}"
-    assert len(tap_selects) == 0, f"session2 pinch_tap ring_select={tap_selects}"
-
-    # 5. pinch_lean: >= 6 of 8 equal cue direction; tolerate at most one mismatch (first RIGHT)
-    opposite = {"left": "right", "right": "left", "up": "down", "down": "up"}
-    open_cue = ""
-    lean_matches = 0
-    lean_mismatches: list[tuple[str, str]] = []
-    for lbl, cue, c in emitted:
-        if lbl != "pinch_lean":
+def check_replay_recordings() -> None:
+    """Recorded sessions (open palm / pinch / normal typing, no pointing): v3 must stay quiet."""
+    for name in ("session1-free.jsonl.gz", "session2-cued.jsonl.gz"):
+        path = FIXTURES / name
+        if not path.is_file():
+            print(f"replay skipped: tests/fixtures/air/{name} not found (local recordings, not in git)")
             continue
-        if c.kind == "ring_open":
-            open_cue = cue
-        elif c.kind == "ring_select":
-            want = _cue_direction(open_cue or cue)
-            if c.direction == want:
-                lean_matches += 1
-            else:
-                lean_mismatches.append((want, c.direction))
-    assert lean_matches >= 6, f"session2 pinch_lean matches={lean_matches}, mismatches={lean_mismatches}"
-    assert len(lean_mismatches) <= 1, f"session2 pinch_lean mismatches={lean_mismatches}"
-    for want, got in lean_mismatches:
-        if got == opposite.get(want):
-            assert want == "right", f"unexpected opposite mismatch: want={want}, got={got}"
-
-    # 6. pinch_hold: >= 2 grab_start, each followed by grab_end (even if release crosses into next label)
-    grab_start_idxs = [
-        i for i, (lbl, _, c) in enumerate(emitted)
-        if lbl == "pinch_hold" and c.kind == "grab_start"
-    ]
-    assert len(grab_start_idxs) >= 2, f"session2 pinch_hold grab_start={len(grab_start_idxs)}"
-    for idx in grab_start_idxs:
-        nxt = next(
-            (c.kind for _, _, c in emitted[idx + 1 :] if c.kind in ("grab_start", "grab_end")),
-            None,
-        )
-        assert nxt == "grab_end", f"session2 pinch_hold unclosed grab at {emitted[idx][2]} (next={nxt})"
-
-    # 7. thumbs: >= 1 confirm in THUMBS UP and >= 1 deny in THUMBS DOWN
-    up_confirms = [
-        c for lbl, cue, c in emitted
-        if lbl == "thumbs" and "THUMBS UP" in cue.upper() and c.kind == "intent" and c.text == "confirm"
-    ]
-    down_denies = [
-        c for lbl, cue, c in emitted
-        if lbl == "thumbs" and "THUMBS DOWN" in cue.upper() and c.kind == "intent" and c.text == "deny"
-    ]
-    assert len(up_confirms) >= 1, f"session2 thumbs confirm={len(up_confirms)}"
-    assert len(down_denies) >= 1, f"session2 thumbs deny={len(down_denies)}"
-
-    # 8. v_scroll: >= 3 scroll commands
-    scrolls = [c for lbl, _, c in emitted if lbl == "v_scroll" and c.kind == "scroll"]
-    assert len(scrolls) >= 3, f"session2 v_scroll scrolls={len(scrolls)}"
+        emitted = _replay(path)
+        normal = [c for lbl, _, c in emitted if lbl == "normal"]
+        bad = [c for c in normal if c.kind in ("click", "press", "swipe")]
+        assert not bad, f"{name} normal activity triggered {bad}"
+        if name.startswith("session2"):
+            # Open hand held still or moved slowly: no swipe, no click.
+            calm = [c for lbl, _, c in emitted if lbl in ("near_still", "sit_normal", "ready")
+                    and c.kind in ("click", "press", "swipe", "cursor")]
+            assert not calm, calm
+            thumbs = [c.text for lbl, _, c in emitted if lbl == "thumbs" and c.kind == "intent"]
+            assert "confirm" in thumbs and "deny" in thumbs, thumbs
+            scrolls = [c for lbl, _, c in emitted if lbl == "v_scroll" and c.kind == "scroll"]
+            assert len(scrolls) >= 3, len(scrolls)
 
 
 def main() -> int:

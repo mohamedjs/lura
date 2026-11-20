@@ -17,6 +17,7 @@ from .domain import (
     MODES,
     WELCOME,
     AirState,
+    CameraInfo,
     GestureEvent,
     Hand,
     HandFrame,
@@ -25,8 +26,8 @@ from .domain import (
     Stats,
     app_kind,
     edge_snap,
+    camera_candidates,
     moved,
-    pick_camera,
     ring_action,
     ring_labels,
 )
@@ -54,6 +55,36 @@ class Camera(Protocol):
 class Landmarker(Protocol):
     def detect(self, frame: object, t_ms: int) -> tuple[Hand, ...]: ...
     def close(self) -> None: ...
+
+
+class CameraChain:
+    """Camera factory over an ordered list of cameras; ``failed()`` moves to the next one."""
+
+    def __init__(self, chain: list[CameraInfo], make: Callable[[CameraInfo], Camera]) -> None:
+        self._chain = list(chain)
+        self._make = make
+        self._pos = 0
+
+    @property
+    def current(self) -> CameraInfo:
+        return self._chain[self._pos]
+
+    def __call__(self) -> Camera:
+        return self._make(self.current)
+
+    def failed(self) -> bool:
+        """Switch to the next camera; True when there is another one to try right away."""
+        if len(self._chain) < 2:
+            return False
+        before = self.current
+        self._pos = (self._pos + 1) % len(self._chain)
+        log.warning("Air camera %s not working; trying %s", before.name, self.current.name)
+        return True
+
+
+def _next_camera(factory: object) -> bool:
+    fn = getattr(factory, "failed", None)
+    return bool(fn()) if callable(fn) else False
 
 
 def _rss_mb() -> float:
@@ -151,11 +182,11 @@ class AirService:
         if cam_factory is None:
             from .infrastructure.cameras import OpenCVCamera, list_cameras
 
-            info = pick_camera(list_cameras(), self._camera_wanted)
-            if info is None:
+            chain = camera_candidates(list_cameras(), self._camera_wanted)
+            if not chain:
                 self._set_status("error", "No camera found.", emit=True)
                 return
-            cam_factory = lambda info=info: OpenCVCamera(info)  # noqa: E731
+            cam_factory = CameraChain(chain, OpenCVCamera)
 
         if lm_factory is None:
             from .infrastructure.landmarker import MediaPipeLandmarker, air_available, model_path
@@ -327,7 +358,8 @@ class AirService:
                     self._safe_close(cam)
                     cam = None
                     self._set_status("lost", str(exc), emit=True)
-                    self._stop.wait(_RETRY_DELAY)
+                    if not _next_camera(cam_factory):
+                        self._stop.wait(_RETRY_DELAY)
                     continue
 
                 cam_name = cam.name
@@ -348,7 +380,8 @@ class AirService:
                             self._set_status("lost", f"{cam_name} disconnected.", emit=True)
                             self._safe_close(cam)
                             cam = None
-                            self._stop.wait(_RETRY_DELAY)
+                            if not _next_camera(cam_factory):
+                                self._stop.wait(_RETRY_DELAY)
                             break
                         continue
                     misses = 0
@@ -496,6 +529,7 @@ class AirController:
         self._grab_dy: float = 0.0
         self._last_place: Rect | None = None
         self._grab_target: str = ""
+        self._pressed: bool = False
 
     @property
     def mode(self) -> str:
@@ -503,6 +537,12 @@ class AirController:
             return self._mode
 
     def _clear_active(self) -> None:
+        if self._pressed:
+            self._pressed = False
+            try:
+                self._desktop.run("pointer_up", {"button": "left"})
+            except Exception:
+                log.warning("Air pointer_up failed", exc_info=True)
         self._ring_target = None
         self._ring_labels = None
         self._grab = None
@@ -814,6 +854,31 @@ class AirController:
                 else:
                     label = grip.title or f"window {grip.id}"
                     self._feedback("window_move", True, f"Moved {label}.")
+                return
+
+            if k == "click":
+                r = self._desktop.run("pointer_click", {"button": "left", "count": 1})
+                self._feedback("pointer_click", r.ok, r.message)
+                return
+
+            if k == "press":
+                r = self._desktop.run("pointer_down", {"button": "left"})
+                self._pressed = r.ok
+                self._feedback("pointer_down", r.ok, r.message)
+                return
+
+            if k == "release":
+                if not self._pressed:
+                    return
+                self._pressed = False
+                r = self._desktop.run("pointer_up", {"button": "left"})
+                self._feedback("pointer_up", r.ok, r.message)
+                return
+
+            if k == "swipe":
+                target = "next" if cmd.direction == "right" else "prev"
+                r = self._desktop.run("workspace_switch", {"target": target})
+                self._feedback("workspace_switch", r.ok, r.message)
                 return
 
             if k == "scroll":

@@ -60,7 +60,8 @@ CONTROL_HZ = 30                     # controller poll timeout rate
 HINT_EDGE = 0.10        # a hand within this of the left/right frame edge, or below 1 - this, is "at the edge"
 HINT_AFTER = 1.5        # s at the edge before the hint
 HINT_EVERY = 10.0       # s between two hints
-WELCOME = "Air on: pinch to grab, swipe to switch, V for modes, fist to stop."
+WELCOME = ("Air on: point one finger to move the mouse, pinch to click, pinch and hold to drag, "
+           "two fingers to scroll, move your hand left or right to switch workspace.")
 
 MODES: tuple[str, ...] = (
     "universal", "window", "workspace", "pointer", "files", "media", "developer",
@@ -729,6 +730,19 @@ def pick_camera(cams: list[CameraInfo], wanted: str = "") -> CameraInfo | None:
     if not usable:
         return None
     return min(usable, key=lambda c: (0 if c.driver == "uvcvideo" else 1, c.index))
+
+
+def camera_candidates(cams: list[CameraInfo], wanted: str = "") -> list[CameraInfo]:
+    """Cameras to try in order: the one asked for, then the best built-in one as a fallback.
+
+    A phone camera (v4l2loopback) that is switched off, unplugged or not delivering frames is
+    replaced by the laptop's internal camera instead of leaving Air without a camera.
+    """
+    out: list[CameraInfo] = []
+    for cam in (pick_camera(cams, wanted) if wanted.strip() else None, pick_camera(cams, "")):
+        if cam is not None and all(c.index != cam.index for c in out):
+            out.append(cam)
+    return out
 
 
 # ── control geometry & command ring ─────────────────────────────────────────
