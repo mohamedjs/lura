@@ -106,13 +106,26 @@ def cmd_run(args) -> int:
     overlay.state.subtitles_enabled = s.subtitles
     overlay.state.look = settings_look(s)
 
+    def apply_air():
+        c.air_control.stop()
+        c.air.stop()
+        if c.settings.current.air_enabled:
+            c.air.set_camera(c.settings.current.air_camera)
+            c.air.start()
+            snap = c.air.snapshot()
+            if snap.camera == "error":
+                log.warning("Lura Air unavailable: %s", snap.detail)
+            c.air_control.start()
+
     def on_settings(payload):
-        # Applied live, no restart: the subtitles switch and the look.
+        # Applied live, no restart: the subtitles switch, the look and Lura Air.
         changed = payload.get("changed", ())
         if "subtitles" in changed:
             overlay.state.subtitles_enabled = c.settings.current.subtitles
         if any(k in changed for k in LOOK_SETTINGS):
             overlay.state.look = settings_look(c.settings.current)
+        if "air_enabled" in changed or "air_camera" in changed:
+            apply_air()
 
     c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
     c.bus.subscribe(events.TOOL_USED, lambda p: overlay.state.set_tool(p["connector"]))
@@ -171,6 +184,7 @@ def cmd_run(args) -> int:
             failed.set()
             stop.set()
 
+    apply_air()
     worker = threading.Thread(target=assistant_loop, daemon=True, name="assistant")
     worker.start()
     try:
@@ -182,6 +196,8 @@ def cmd_run(args) -> int:
         stop.set()
         c.assistant.interrupt()
         worker.join(timeout=5)
+        c.air_control.stop()
+        c.air.stop()
         c.connectors.stop_all()
         server.stop()
     if restart.is_set():
@@ -492,19 +508,19 @@ def cmd_air(args) -> int:
 
     svc = AirService(None, camera=args.camera)
 
-    if args.action == "watch":
-        def on_event(ev) -> None:
-            now = time.time()
-            ms = int((now - int(now)) * 1000)
-            stamp = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{ms:03d}"
-            extra = json.dumps(ev.data, ensure_ascii=False) if ev.data else ""
-            line = (
-                f"{stamp}  {ev.gesture:13} {ev.hand:5} {ev.confidence:.2f}  "
-                f"{ev.x:.3f},{ev.y:.3f}"
-            )
-            print(f"{line}  {extra}" if extra else line, flush=True)
+    def _print_gesture(ev) -> None:
+        now = time.time()
+        ms = int((now - int(now)) * 1000)
+        stamp = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{ms:03d}"
+        extra = json.dumps(ev.data, ensure_ascii=False) if ev.data else ""
+        line = (
+            f"{stamp}  {ev.gesture:13} {ev.hand:5} {ev.confidence:.2f}  "
+            f"{ev.x:.3f},{ev.y:.3f}"
+        )
+        print(f"{line}  {extra}" if extra else line, flush=True)
 
-        svc.subscribe(on_event)
+    if args.action == "watch":
+        svc.subscribe(_print_gesture)
         svc.start()
         deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
         next_status = time.monotonic() + 2.0
@@ -528,6 +544,35 @@ def cmd_air(args) -> int:
         except KeyboardInterrupt:
             pass
         finally:
+            svc.stop()
+        return 0
+
+    if args.action == "control":
+        from .modules.air import AirController
+        from .modules.computer import ComputerService, default_backend
+
+        def on_action(_name: str, payload: dict) -> None:
+            stamp = time.strftime("%H:%M:%S")
+            ok = "ok" if payload.get("ok") else "FAIL"
+            print(
+                f"{stamp}  {payload.get('action', ''):18} {ok:4}  {payload.get('message', '')}",
+                flush=True,
+            )
+
+        ctrl = AirController(svc, ComputerService(default_backend()), on_action)
+        svc.subscribe(_print_gesture)
+        svc.start()
+        ctrl.start()
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            ctrl.stop()
             svc.stop()
         return 0
 
@@ -595,9 +640,9 @@ def main(argv=None) -> int:
     desk.add_argument("action", nargs="?", default="capabilities")
     desk.add_argument("params", nargs="*")
     desk.add_argument("--yes", action="store_true")
-    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, bench")
+    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, control, bench")
     air.add_argument("action", nargs="?", default="watch",
-                     choices=["cameras", "setup", "watch", "bench"])
+                     choices=["cameras", "setup", "watch", "control", "bench"])
     air.add_argument("--camera", default="")
     air.add_argument("--seconds", type=float, default=0.0)
 

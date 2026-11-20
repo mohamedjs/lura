@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from .application import AirService, Camera, Landmarker
-from .domain import GESTURES, AirState, GestureEvent, HandView, pick_camera
+from .application import AirController, AirService, Camera, Landmarker
+from .domain import GESTURES, AirState, Arming, GestureEvent, HandView, pick_camera
 from .infrastructure.cameras import list_cameras
 from .infrastructure.landmarker import air_available, download_model, model_path, model_ready
 
 __all__ = [
     "AirService",
+    "AirController",
     "AirState",
+    "Arming",
     "HandView",
     "GestureEvent",
     "GESTURES",

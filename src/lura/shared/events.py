@@ -34,6 +34,8 @@ EXIT_REQUESTED = "app.exit"
 AIR_GESTURE = "air.gesture"
 #: The Air camera changed state: {"camera": "on" | "lost" | "off" | "error", "detail": str}.
 AIR_STATUS = "air.status"
+#: Lura Air acted on the desktop: {"action", "ok", "message"}.
+AIR_ACTION = "air.action"
 
 
 class EventBus:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from .modules.air import AirController, AirService
 from .modules.assistant import Assistant
 from .modules.brain import BrainService
 from .modules.computer import ComputerService, default_backend
@@ -40,6 +41,8 @@ class Container:
     updates: UpdateService
     assistant: Assistant
     computer: ComputerService
+    air: AirService
+    air_control: AirController
 
 
 def build(presence: Presence | None = None) -> Container:
@@ -55,6 +58,10 @@ def build(presence: Presence | None = None) -> Container:
                            lambda: settings.current.user_name)
     skills = SkillsService()
     computer = ComputerService(default_backend())
+    air = AirService(lambda name, payload: bus.publish(name, **payload),
+                     camera=settings.current.air_camera)
+    air_control = AirController(air, computer,
+                                lambda name, payload: bus.publish(name, **payload))
     from . import __version__
     updates = UpdateService(__version__, lambda: settings.current.check_updates,
                             lambda how: bus.publish(events.RESTART_REQUESTED if how == "restart"
@@ -71,4 +78,4 @@ def build(presence: Presence | None = None) -> Container:
 
     bus.subscribe(events.SETTINGS_CHANGED, on_settings)
     return Container(bus, settings, connectors, tools, brain, voice, memory, skills, updates, assistant,
-                     computer)
+                     computer, air, air_control)

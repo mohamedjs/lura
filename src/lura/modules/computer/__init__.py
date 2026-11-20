@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .application import Backend, ComputerService
-from .domain import ACTIONS, CONFIRM, DESKTOP_TOOL, SAFE, ActionError, ActionResult
+from .domain import ACTIONS, CONFIRM, DESKTOP_TOOL, SAFE, ActionError, ActionResult, Rect, WindowGrip
 from .infrastructure import default_backend
 
 __all__ = [
@@ -16,4 +16,6 @@ __all__ = [
     "DESKTOP_TOOL",
     "SAFE",
     "CONFIRM",
+    "Rect",
+    "WindowGrip",
 ]

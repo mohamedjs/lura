@@ -22,6 +22,7 @@ from .domain import (
     Monitor,
     Rect,
     Window,
+    WindowGrip,
     bounds,
     catalog_text,
     clamp_visible,
@@ -205,6 +206,36 @@ class ComputerService:
                 result = ActionResult(False, f"{name} failed: {exc}")
             result.ms = round((time.perf_counter() - t0) * 1000, 1)
             return result
+
+    # ── fast path (continuous moves) ────────────────────────────────────────
+
+    def grip(self, window: str | int = "active") -> WindowGrip:
+        with self._lock:
+            clean = validate_args(ACTIONS_BY_NAME["window_focus"], {"window": window})
+            w = self._target(clean)
+            mons = self._backend.monitors()
+            b = bounds(mons)
+            start = w.rect
+            if w.maximized:
+                area = work_area(monitor_for(w.rect, mons), self._backend.workarea())
+                start = snap_rect(area, "center")
+                self._backend.set_maximized(w.id, False)
+                self._backend.move_resize(w.id, start)
+            log.info("desktop grip %s", w.id)
+            return WindowGrip(id=w.id, title=w.title, start=start, bounds=b)
+
+    def place(self, grip: WindowGrip, rect: Rect) -> None:
+        with self._lock:
+            self._backend.move_resize(grip.id, clamp_visible(rect, grip.bounds))
+
+    def is_maximized(self, window: str | int = "active") -> bool:
+        with self._lock:
+            clean = validate_args(ACTIONS_BY_NAME["window_focus"], {"window": window})
+            return self._target(clean).maximized
+
+    def screen_bounds(self) -> Rect:
+        with self._lock:
+            return bounds(self._backend.monitors())
 
     # ── helpers ─────────────────────────────────────────────────────────────
 

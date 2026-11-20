@@ -3,22 +3,34 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
+import queue
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 from ...shared import events
+from ..computer import ActionError, Rect, WindowGrip
 from .domain import (
+    ACTION_MIN_CONF,
+    CONTROL_HZ,
+    DRAG_START,
+    SWIPE_ACTIONS,
     AirState,
+    Arming,
     GestureEvent,
     Hand,
     HandFrame,
     HandView,
     Recognizer,
     Stats,
+    drag_rect,
+    edge_snap,
+    moved,
     pick_camera,
+    spread_rect,
 )
 
 log = logging.getLogger(__name__)
@@ -88,6 +100,12 @@ class AirService:
     def running(self) -> bool:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
+
+    def set_camera(self, name: str) -> None:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                raise RuntimeError("stop Air first")
+            self._camera_wanted = name
 
     def subscribe(self, fn: Callable[[GestureEvent], None]) -> None:
         with self._lock:
@@ -350,3 +368,270 @@ class AirService:
             self._safe_close(landmarker)
             if not fatal:
                 self._set_status("off", "", emit=True)
+
+
+class DesktopPort(Protocol):
+    def run(self, name: str, args: dict | None = None, *, confirmed: bool = False) -> Any: ...  # ActionResult
+    def grip(self, window: str | int = "active") -> WindowGrip: ...
+    def place(self, grip: WindowGrip, rect: Rect) -> None: ...
+    def is_maximized(self, window: str | int = "active") -> bool: ...
+    def screen_bounds(self) -> Rect: ...
+
+
+class AirController:
+    """Translates Air gesture events and hand snapshots into desktop actions on its own thread."""
+
+    def __init__(
+        self,
+        air: AirService,
+        desktop: DesktopPort,
+        publish: Callable[[str, dict], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._air = air
+        self._desktop = desktop
+        self._publish_fn = publish
+        self._clock = clock
+
+        self._lock = threading.Lock()
+        self._queue: queue.Queue[GestureEvent] = queue.Queue(maxsize=64)
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._subscribed = False
+
+        self._arming = Arming()
+        self._pending: tuple[str, tuple[float, float], float] | None = None
+        self._drag: tuple[str, WindowGrip, tuple[float, float]] | None = None
+        self._resize: WindowGrip | None = None
+        self._last_place: Rect | None = None
+        self._last_action: str = ""
+
+    def start(self) -> None:
+        with self._lock:
+            if self._thread is not None and self._thread.is_alive():
+                return
+            if not self._subscribed:
+                self._air.subscribe(self._enqueue)
+                self._subscribed = True
+            self._stop.clear()
+            thread = threading.Thread(
+                target=self._run,
+                daemon=True,
+                name="air-control",
+            )
+            self._thread = thread
+            thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        with self._lock:
+            thread = self._thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=1.0)
+        with self._lock:
+            self._thread = None
+            self._pending = None
+            self._drag = None
+            self._resize = None
+            self._last_place = None
+        while True:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
+    def _enqueue(self, ev: GestureEvent) -> None:
+        try:
+            self._queue.put_nowait(ev)
+        except queue.Full:
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                self._queue.put_nowait(ev)
+            except queue.Full:
+                pass
+
+    def _run(self) -> None:
+        period = 1.0 / CONTROL_HZ
+        while not self._stop.is_set():
+            ev: GestureEvent | None = None
+            try:
+                ev = self._queue.get(timeout=period)
+            except queue.Empty:
+                pass
+            if self._stop.is_set():
+                break
+            if ev is not None:
+                try:
+                    self.process(ev)
+                except Exception:
+                    log.exception("AirController.process failed")
+            if self._stop.is_set():
+                break
+            try:
+                self.tick(self._clock())
+            except Exception:
+                log.exception("AirController.tick failed")
+
+    def state(self) -> dict:
+        t = self._clock()
+        return {
+            "armed": self._arming.armed(t),
+            "dragging": self._drag is not None,
+            "resizing": self._resize is not None,
+            "last_action": self._last_action,
+        }
+
+    def _feedback(self, action: str, ok: bool, message: str) -> None:
+        self._last_action = action
+        log.info("air action %s ok=%s: %s", action, ok, message)
+        if self._publish_fn is not None:
+            try:
+                self._publish_fn(events.AIR_ACTION, {
+                    "action": action,
+                    "ok": ok,
+                    "message": message,
+                })
+            except Exception:
+                log.exception("Air action publish failed for %s", action)
+
+    def process(self, ev: GestureEvent) -> None:
+        self._arming.on_event(ev)
+        g = ev.gesture
+        if not self._arming.armed(ev.t):
+            self._pending = None
+            if g == "pinch_end" and self._drag is not None and self._drag[0] == ev.hand:
+                self._drag = None
+                self._last_place = None
+            elif g == "spread_end" and self._resize is not None:
+                self._resize = None
+                self._last_place = None
+            return
+
+        if g == "pinch_start":
+            if self._drag is None and self._resize is None:
+                self._pending = (ev.hand, (ev.x, ev.y), ev.t)
+            return
+
+        if g == "double_pinch":
+            self._pending = None
+            if self._drag is not None and self._drag[0] == ev.hand and self._last_place is None:
+                self._drag = None
+            try:
+                action = "window_restore" if self._desktop.is_maximized() else "window_maximize"
+            except Exception as exc:
+                self._feedback("window_maximize", False, str(exc))
+                return
+            r = self._desktop.run(action)
+            self._feedback(action, r.ok, r.message)
+            return
+
+        if g == "pinch_end":
+            if self._drag is not None and self._drag[0] == ev.hand:
+                _, grip, _ = self._drag
+                last = self._last_place or grip.start
+                self._drag = None
+                self._last_place = None
+                if not ev.data.get("lost"):
+                    snap = edge_snap(last, grip.bounds)
+                    if snap is not None:
+                        r = self._desktop.run("window_snap", {"window": grip.id, "where": snap})
+                        self._feedback("window_snap", r.ok, r.message)
+                    else:
+                        label = grip.title or f"window {grip.id}"
+                        self._feedback("window_move", True, f"Moved {label}.")
+            elif self._pending is not None and self._pending[0] == ev.hand:
+                self._pending = None
+            return
+
+        if g == "spread_start":
+            self._pending = None
+            if self._drag is not None:
+                grip = self._drag[1]
+                self._drag = None
+            else:
+                try:
+                    grip = self._desktop.grip()
+                except Exception as exc:
+                    self._feedback("window_resize", False, str(exc))
+                    return
+            self._resize = grip
+            self._last_place = grip.start
+            return
+
+        if g == "spread_end":
+            if self._resize is not None:
+                grip = self._resize
+                self._resize = None
+                self._last_place = None
+                label = grip.title or f"window {grip.id}"
+                self._feedback("window_resize", True, f"Resized {label}.")
+            return
+
+        if g in SWIPE_ACTIONS:
+            if self._drag is None and self._resize is None and ev.confidence >= ACTION_MIN_CONF:
+                name, args = SWIPE_ACTIONS[g]
+                r = self._desktop.run(name, dict(args))
+                self._feedback(name, r.ok, r.message)
+            return
+
+    def tick(self, t: float) -> None:
+        if self._arming.consume_disarm(t):
+            self._drag = None
+            self._resize = None
+            self._pending = None
+            self._last_place = None
+            self._feedback("disarm", True, "Air control paused.")
+            return
+        snap = self._air.snapshot()
+        if self._pending is not None and self._drag is None:
+            side, hand0, _ = self._pending
+            h = next((hv for hv in snap.hands if hv.side == side), None)
+            if h is None or not h.pinching:
+                self._pending = None
+            elif math.hypot(h.x - hand0[0], h.y - hand0[1]) >= DRAG_START:
+                self._pending = None
+                try:
+                    grip = self._desktop.grip()
+                except ActionError as exc:
+                    self._feedback("window_move", False, str(exc))
+                    return
+                except Exception as exc:
+                    log.warning("Air grip failed: %s", exc)
+                    self._feedback("window_move", False, str(exc))
+                    return
+                # Measure from where the hand is now, not where the pinch began: the hand has
+                # already travelled DRAG_START, and that would make the window jump ~180 px.
+                self._drag = (side, grip, (h.x, h.y))
+                self._last_place = None
+
+        if self._drag is not None:
+            side, grip, hand0 = self._drag
+            h = next((hv for hv in snap.hands if hv.side == side), None)
+            if h is not None and h.pinching:
+                rect = drag_rect(grip.start, hand0, (h.x, h.y), grip.bounds)
+                if self._last_place is None or moved(rect, self._last_place):
+                    try:
+                        self._desktop.place(grip, rect)
+                    except Exception as exc:
+                        self._drag = None
+                        self._last_place = None
+                        self._feedback("window_move", False, str(exc))
+                        return
+                    self._last_place = rect
+
+        if self._resize is not None:
+            scale = snap.spread_scale
+            if scale is not None:
+                rect = spread_rect(self._resize.start, scale)
+                if self._last_place is None or moved(rect, self._last_place):
+                    try:
+                        self._desktop.place(self._resize, rect)
+                    except Exception as exc:
+                        self._resize = None
+                        self._last_place = None
+                        self._feedback("window_resize", False, str(exc))
+                        return
+                    self._last_place = rect

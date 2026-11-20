@@ -7,6 +7,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..computer import Rect
+
 # MediaPipe 21-landmark indices.
 WRIST = 0
 THUMB_IP = 3
@@ -31,6 +33,7 @@ PINCH_OFF = 0.40         # … above which it ends (hysteresis)
 #: a fist (thumb over the index) 0.58–0.72, real pinches 0.81–1.20 (1.0 rejected some of them).
 PINCH_REACH = 0.80
 PINCH_REACH_END = 0.70   # an active pinch ends below this (the hand closed into a fist)
+RELEASE_HOLD = 0.10      # s the pinch-release condition must hold before pinch_end
 EXTENDED = 1.15          # finger extended when wrist→tip > EXTENDED × wrist→pip
 THUMB_OUT = 0.60         # thumb extended when thumb tip→index MCP > THUMB_OUT × palm size
 POSE_STABLE = 0.15       # s a pose must hold before a "pose" event
@@ -39,10 +42,39 @@ SWIPE_WINDOW = 0.5       # s of palm history examined for a swipe
 SWIPE_DIST = 0.18        # normalized travel needed within the window
 SWIPE_AXIS = 2.0         # main-axis travel must be ≥ SWIPE_AXIS × cross-axis travel
 SWIPE_COOLDOWN = 0.70    # s after a swipe before any other swipe
+SWIPE_REVERSE_BLOCK = 1.5  # s after a swipe during which the opposite swipe is blocked
+SETTLE_SPEED = 0.35      # palm speed (normalized units/s) below which the palm counts as settled
+SETTLE_TIME = 0.20       # s palm speed must stay below SETTLE_SPEED after a swipe before swiping again
 DOUBLE_PINCH_GAP = 0.45  # s between a short pinch's end and the next pinch's start
 SHORT_PINCH = 0.30       # s a pinch may last to count as the first of a double pinch
 MIN_SCORE = 0.60         # hands with a lower handedness score are ignored
 SPREAD_MIN_DIST = 0.05   # both-hand pinch distance must exceed this to start a spread
+
+# Control thresholds (Stage D1).
+ARM_IDLE = 8.0                      # s armed after the last hand or gesture
+FIST_HOLD = 0.5                     # s a fist pose must stay uncancelled before disarming
+ACTION_MIN_CONF = 0.75              # discrete gestures below this confidence are ignored
+DRAG_START = 0.03                   # normalized hand travel while pinching before a window is grabbed
+DRAG_GAIN = 1.6                     # screen pixels moved per pixel of hand travel (hand travel × bounds size × gain)
+SNAP_PX = 40                        # releasing a window within this many px of a screen edge snaps it
+PLACE_MIN_PX = 4                    # skip a place() that moves less than this
+CONTROL_HZ = 30                     # how often an active drag/resize is updated
+SPREAD_MIN, SPREAD_MAX = 0.5, 2.5   # resize scale clamp
+MIN_W, MIN_H = 320, 240             # smallest size a spread can make a window
+
+SWIPE_ACTIONS: dict[str, tuple[str, dict]] = {
+    "swipe_left": ("workspace_switch", {"target": "prev"}),
+    "swipe_right": ("workspace_switch", {"target": "next"}),
+    "swipe_up": ("workspace_overview", {}),
+    "swipe_down": ("show_desktop", {}),
+}
+
+_SWIPE_OPPOSITE: dict[str, str] = {
+    "swipe_left": "swipe_right",
+    "swipe_right": "swipe_left",
+    "swipe_up": "swipe_down",
+    "swipe_down": "swipe_up",
+}
 
 _EPS = 1e-9              # float comparison tolerance for exact step boundaries
 _PALM_POINTS = (WRIST, INDEX_MCP, MIDDLE_MCP, RING_MCP, PINKY_MCP)
@@ -293,6 +325,7 @@ class _Track:
         self.score = score
         self.pinching = False
         self.pinch_start = 0.0
+        self.release_since: float | None = None
         self.pinch_was_double = False
         self.last_pinch_end: float | None = None
         self.last_pinch_dur = 0.0
@@ -306,6 +339,8 @@ class _Track:
         self.pinch_x = 0.0
         self.pinch_y = 0.0
         self.palm_history: deque[tuple[float, float, float]] = deque()
+        self.needs_settle = False
+        self.settle_since: float | None = None
         self.palm_fx = OneEuro()
         self.palm_fy = OneEuro()
         self.pinch_fx = OneEuro()
@@ -333,6 +368,7 @@ class Recognizer:
     def __init__(self) -> None:
         self._tracks: dict[str, _Track] = {}
         self._last_swipe: float = -math.inf
+        self._last_swipe_dir: str = ""
         self._spread_d0: float | None = None
         self._spread_d: float | None = None
         self._spread_pos: tuple[float, float] = (0.5, 0.5)
@@ -341,10 +377,17 @@ class Recognizer:
     def reset(self) -> None:
         self._tracks.clear()
         self._last_swipe = -math.inf
+        self._last_swipe_dir = ""
         self._spread_d0 = None
         self._spread_d = None
         self._spread_pos = (0.5, 0.5)
         self._spread_conf = 0.0
+
+    def _reverse_blocked(self, swipe: str, t: float) -> bool:
+        return (
+            _SWIPE_OPPOSITE.get(self._last_swipe_dir) == swipe
+            and (t - self._last_swipe) < SWIPE_REVERSE_BLOCK - _EPS
+        )
 
     def update(self, frame: HandFrame) -> list[GestureEvent]:
         t = frame.t
@@ -382,13 +425,14 @@ class Recognizer:
                 tr.pinch_x = tr.pinch_fx(pp.x, t)
                 tr.pinch_y = tr.pinch_fy(pp.y, t)
 
-            # 3. Pinch hysteresis (with index reach guard) and double-pinch detection.
+            # 3. Pinch hysteresis (with index reach guard, release debounce) and double-pinch detection.
             ratio = pinch_ratio(hand)
             wrist_tip = dist(hand.points[WRIST], hand.points[INDEX_TIP])
             wrist_pip = dist(hand.points[WRIST], hand.points[INDEX_PIP])
             if not tr.pinching and ratio < PINCH_ON and wrist_tip > PINCH_REACH * wrist_pip:
                 tr.pinching = True
                 tr.pinch_start = t
+                tr.release_since = None
                 tr.palm_history.clear()
                 events.append(GestureEvent(
                     "pinch_start", side, round(hand.score, 2), tr.pinch_x, tr.pinch_y, t,
@@ -406,20 +450,27 @@ class Recognizer:
                     tr.last_pinch_dur = 0.0
                 else:
                     tr.pinch_was_double = False
-            elif tr.pinching and (ratio > PINCH_OFF or wrist_tip < PINCH_REACH_END * wrist_pip):
-                tr.pinching = False
-                dur = max(0.0, t - tr.pinch_start)
-                events.append(GestureEvent(
-                    "pinch_end", side, round(hand.score, 2), tr.pinch_x, tr.pinch_y, t,
-                    {"duration": round(dur, 2)},
-                ))
-                if tr.pinch_was_double:
-                    tr.last_pinch_end = None
-                    tr.last_pinch_dur = 0.0
+            elif tr.pinching:
+                if ratio > PINCH_OFF or wrist_tip < PINCH_REACH_END * wrist_pip:
+                    if tr.release_since is None:
+                        tr.release_since = t
+                    elif (t - tr.release_since) >= RELEASE_HOLD - _EPS:
+                        tr.pinching = False
+                        tr.release_since = None
+                        dur = max(0.0, t - tr.pinch_start)
+                        events.append(GestureEvent(
+                            "pinch_end", side, round(hand.score, 2), tr.pinch_x, tr.pinch_y, t,
+                            {"duration": round(dur, 2)},
+                        ))
+                        if tr.pinch_was_double:
+                            tr.last_pinch_end = None
+                            tr.last_pinch_dur = 0.0
+                        else:
+                            tr.last_pinch_end = t
+                            tr.last_pinch_dur = dur
+                        tr.pinch_was_double = False
                 else:
-                    tr.last_pinch_end = t
-                    tr.last_pinch_dur = dur
-                tr.pinch_was_double = False
+                    tr.release_since = None
 
             # 4. Pose stability filter (with finger extension hysteresis).
             pose, clarity = classify_pose(hand, tr.pinching, tr.last_ext)
@@ -443,20 +494,45 @@ class Recognizer:
             # 5. Swipe detection using raw palm centre (open_palm now or within last 0.5 s).
             recent_open = (t - tr.last_open_palm) <= 0.5 + _EPS
             if not tr.pinching and (tr.stable_pose == "open_palm" or recent_open):
-                tr.palm_history.append((t, pc.x, pc.y))
-                cutoff = t - SWIPE_WINDOW - _EPS
-                while tr.palm_history and tr.palm_history[0][0] < cutoff:
-                    tr.palm_history.popleft()
-                if (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS:
-                    swipe = _match_swipe(list(tr.palm_history), SWIPE_DIST)
-                    if swipe is not None:
-                        self._last_swipe = t
-                        tr.palm_history.clear()
-                        events.append(GestureEvent(
-                            swipe, side, round(hand.score, 2), tr.palm_x, tr.palm_y, t,
-                        ))
+                if tr.needs_settle:
+                    if tr.palm_history:
+                        t0, x0, y0 = tr.palm_history[-1]
+                        dt = t - t0
+                        if dt > 0.0:
+                            speed = math.hypot(pc.x - x0, pc.y - y0) / dt
+                            if speed < SETTLE_SPEED:
+                                if tr.settle_since is None:
+                                    tr.settle_since = t0
+                                if (t - tr.settle_since) >= SETTLE_TIME - _EPS:
+                                    tr.needs_settle = False
+                                    tr.settle_since = None
+                                    tr.palm_history.clear()
+                            else:
+                                tr.settle_since = None
+                    tr.palm_history.append((t, pc.x, pc.y))
+                    cutoff = t - SWIPE_WINDOW - _EPS
+                    while tr.palm_history and tr.palm_history[0][0] < cutoff:
+                        tr.palm_history.popleft()
+                else:
+                    tr.palm_history.append((t, pc.x, pc.y))
+                    cutoff = t - SWIPE_WINDOW - _EPS
+                    while tr.palm_history and tr.palm_history[0][0] < cutoff:
+                        tr.palm_history.popleft()
+                    if (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS:
+                        swipe = _match_swipe(list(tr.palm_history), SWIPE_DIST)
+                        if swipe is not None and not self._reverse_blocked(swipe, t):
+                            self._last_swipe = t
+                            self._last_swipe_dir = swipe
+                            tr.needs_settle = True
+                            tr.settle_since = None
+                            tr.palm_history.clear()
+                            tr.palm_history.append((t, pc.x, pc.y))
+                            events.append(GestureEvent(
+                                swipe, side, round(hand.score, 2), tr.palm_x, tr.palm_y, t,
+                            ))
             else:
                 tr.palm_history.clear()
+                tr.settle_since = None
 
         # 6. Tracks missing past LEAVE_GRACE: release pinch or check exit swipe, then leave.
         for side in list(self._tracks):
@@ -471,13 +547,19 @@ class Recognizer:
                         {"duration": round(dur, 2), "lost": True},
                     ))
                     tr.pinching = False
+                    tr.release_since = None
                     tr.pinch_was_double = False
-                elif tr.palm_history and (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS:
+                elif (
+                    not tr.needs_settle
+                    and tr.palm_history
+                    and (t - self._last_swipe) >= SWIPE_COOLDOWN - _EPS
+                ):
                     cutoff = tr.last_seen - SWIPE_WINDOW - _EPS
                     recent = [entry for entry in tr.palm_history if entry[0] >= cutoff]
                     swipe = _match_swipe(recent, 0.7 * SWIPE_DIST)
-                    if swipe is not None:
+                    if swipe is not None and not self._reverse_blocked(swipe, t):
                         self._last_swipe = t
+                        self._last_swipe_dir = swipe
                         events.append(GestureEvent(
                             swipe, side, round(tr.score, 2), tr.palm_x, tr.palm_y, t,
                         ))
@@ -501,13 +583,13 @@ class Recognizer:
             my = (lp.y + rp.y) / 2.0
             conf = round(min(left.score, right.score), 2)
             if self._spread_d0 is None:
-                if d > SPREAD_MIN_DIST:
+                if d > SPREAD_MIN_DIST and left.release_since is None and right.release_since is None:
                     self._spread_d0 = d
                     self._spread_d = d
                     self._spread_pos = (mx, my)
                     self._spread_conf = conf
                     events.append(GestureEvent("spread_start", "both", conf, mx, my, t))
-            else:
+            elif left.release_since is None and right.release_since is None:
                 self._spread_d = d
                 self._spread_pos = (mx, my)
                 self._spread_conf = conf
@@ -604,3 +686,97 @@ def pick_camera(cams: list[CameraInfo], wanted: str = "") -> CameraInfo | None:
     if not usable:
         return None
     return min(usable, key=lambda c: (0 if c.driver == "uvcvideo" else 1, c.index))
+
+
+# ── control geometry & arming ───────────────────────────────────────────────
+
+def drag_rect(
+    start: Rect,
+    hand0: tuple[float, float],
+    hand: tuple[float, float],
+    bounds: Rect,
+) -> Rect:
+    """Translate ``start`` by scaled hand travel in screen pixels."""
+    dx = round((hand[0] - hand0[0]) * bounds.width * DRAG_GAIN)
+    dy = round((hand[1] - hand0[1]) * bounds.height * DRAG_GAIN)
+    return start.translate(dx, dy)
+
+
+def edge_snap(rect: Rect, bounds: Rect) -> str | None:
+    """Return 'left' or 'right' when ``rect`` touches within SNAP_PX of a screen edge."""
+    if rect.x <= bounds.x + SNAP_PX:
+        return "left"
+    if rect.x + rect.width >= bounds.x + bounds.width - SNAP_PX:
+        return "right"
+    return None
+
+
+def spread_rect(start: Rect, scale: float) -> Rect:
+    """Scale ``start`` around its centre, clamped to [SPREAD_MIN, SPREAD_MAX] and MIN_W/MIN_H."""
+    s = max(SPREAD_MIN, min(SPREAD_MAX, scale))
+    w = max(MIN_W, round(start.width * s))
+    h = max(MIN_H, round(start.height * s))
+    cx, cy = start.center
+    return Rect(cx - w // 2, cy - h // 2, w, h)
+
+
+def moved(a: Rect, b: Rect) -> bool:
+    """True when any edge coordinate or size differs by at least PLACE_MIN_PX."""
+    return (
+        abs(a.x - b.x) >= PLACE_MIN_PX
+        or abs(a.y - b.y) >= PLACE_MIN_PX
+        or abs(a.width - b.width) >= PLACE_MIN_PX
+        or abs(a.height - b.height) >= PLACE_MIN_PX
+    )
+
+
+class Arming:
+    """Pure arming gate: open palm arms for ARM_IDLE s; events extend; fist disarms after FIST_HOLD."""
+
+    def __init__(self) -> None:
+        self._until: float = -math.inf
+        self._pending_disarm: tuple[str, float] | None = None
+        self._disarmed_notice: bool = False
+
+    def _apply_pending(self, t: float) -> None:
+        if self._pending_disarm is not None and t >= self._pending_disarm[1] - _EPS:
+            self._pending_disarm = None
+            if t < self._until:
+                self._disarmed_notice = True
+            self._until = -math.inf
+
+    def on_event(self, ev: GestureEvent) -> None:
+        self._apply_pending(ev.t)
+        if ev.gesture == "pose":
+            pose = ev.data.get("pose")
+            if pose == "fist":
+                if ev.t < self._until and self._pending_disarm is None:
+                    self._pending_disarm = (ev.hand, ev.t + FIST_HOLD)
+                return
+            if self._pending_disarm is not None and self._pending_disarm[0] == ev.hand:
+                self._pending_disarm = None
+            if pose == "open_palm":
+                self._until = max(self._until, ev.t + ARM_IDLE)
+                return
+        elif ev.gesture == "pinch_start":
+            if self._pending_disarm is not None and self._pending_disarm[0] == ev.hand:
+                self._pending_disarm = None
+        if ev.t < self._until:
+            self._until = max(self._until, ev.t + ARM_IDLE)
+
+    def armed(self, t: float) -> bool:
+        self._apply_pending(t)
+        return t < self._until
+
+    def consume_disarm(self, t: float) -> bool:
+        """Apply any due disarm at ``t`` and return True once when a fist disarm takes effect."""
+        self._apply_pending(t)
+        if self._disarmed_notice:
+            self._disarmed_notice = False
+            return True
+        return False
+
+    def disarm(self) -> None:
+        self._until = -math.inf
+        self._pending_disarm = None
+        self._disarmed_notice = False

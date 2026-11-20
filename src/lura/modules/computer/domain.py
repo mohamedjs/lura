@@ -68,6 +68,14 @@ class Window:
 
 
 @dataclass(frozen=True)
+class WindowGrip:
+    id: int
+    title: str
+    start: Rect           # frame rect at grip time (after un-maximizing)
+    bounds: Rect          # union of monitors at grip time
+
+
+@dataclass(frozen=True)
 class Param:
     kind: str
     required: bool = False

@@ -158,12 +158,16 @@ def check_pinch_hysteresis() -> None:
     assert "pinch_end" not in [e.gesture for e in evs]
     assert rec.views(t)[0].pinching is True
 
-    # Ratio 0.45 -> ends pinch with duration 0.2 s.
+    # Ratio 0.45 held for RELEASE_HOLD (0.10 s) -> ends pinch with duration = end - start.
     t += 0.1
+    evs = rec.update(HandFrame(t, (make_hand("open_palm", pinch_gap=0.45),)))
+    assert "pinch_end" not in [e.gesture for e in evs]
+    assert rec.views(t)[0].pinching is True
+    t += 0.12
     evs = rec.update(HandFrame(t, (make_hand("open_palm", pinch_gap=0.45),)))
     ends = [e for e in evs if e.gesture == "pinch_end"]
     assert len(ends) == 1
-    assert ends[0].data["duration"] == 0.2
+    assert ends[0].data["duration"] == 0.32
 
     # Fist with thumb right on the index tip is NOT a pinch (index reach < PINCH_REACH).
     rec_fist = Recognizer()
@@ -171,13 +175,49 @@ def check_pinch_hysteresis() -> None:
     assert "pinch_start" not in [e.gesture for e in evs_f]
     assert rec_fist.views(0.0)[0].pinching is False
 
-    # Active pinch ends when the hand closes into a fist (index reach < 0.85).
+    # Active pinch ends when the hand closes into a fist for RELEASE_HOLD (index reach < PINCH_REACH_END).
     rec_close = Recognizer()
     evs_s = rec_close.update(HandFrame(0.0, (make_hand("open_palm", pinch_gap=0.10),)))
     assert "pinch_start" in [e.gesture for e in evs_s]
-    evs_e = rec_close.update(HandFrame(0.2, (make_hand("fist", pinch_gap=0.05),)))
+    assert rec_close.update(HandFrame(0.20, (make_hand("fist", pinch_gap=0.05),))) == []
+    evs_e = rec_close.update(HandFrame(0.32, (make_hand("fist", pinch_gap=0.05),)))
     assert [e.gesture for e in evs_e] == ["pinch_end"]
-    assert rec_close.views(0.2)[0].pinching is False
+    assert rec_close.views(0.32)[0].pinching is False
+
+
+def check_pinch_release_debounce() -> None:
+    # 1-3 frame release (< 0.10 s) does not end the pinch and produces no double_pinch.
+    rec = Recognizer()
+    evs: list[GestureEvent] = []
+    for t, gap in (
+        (0.00, 0.10),  # pinch_start
+        (0.10, 0.50),  # flicker frame 1
+        (0.13, 0.50),  # flicker frame 2 (0.03 s)
+        (0.16, 0.50),  # flicker frame 3 (0.06 s < 0.10 s)
+        (0.19, 0.10),  # back to pinching -> cancels pending release
+    ):
+        evs.extend(rec.update(HandFrame(t, (make_hand("open_palm", pinch_gap=gap),))))
+    names = [e.gesture for e in evs]
+    assert "pinch_end" not in names, f"flicker should not end pinch: {names}"
+    assert "double_pinch" not in names, f"flicker should not emit double_pinch: {names}"
+    assert rec.views(0.19)[0].pinching is True
+
+    # Release held 0.12 s ends the pinch cleanly at the frame where it ends.
+    evs_rel: list[GestureEvent] = []
+    for t in (0.30, 0.34, 0.38, 0.42):
+        evs_rel.extend(rec.update(HandFrame(t, (make_hand("open_palm", pinch_gap=0.50),))))
+    ends = [e for e in evs_rel if e.gesture == "pinch_end"]
+    assert len(ends) == 1
+    assert abs(ends[0].t - 0.42) < 1e-6
+    assert ends[0].data["duration"] == 0.42
+    assert rec.views(0.42)[0].pinching is False
+
+    # Hand loss still ends an active pinch at once with lost=True (no extra RELEASE_HOLD wait).
+    rec_loss = Recognizer()
+    rec_loss.update(HandFrame(0.0, (make_hand("pinch"),)))
+    evs_loss = rec_loss.update(HandFrame(0.50, ()))
+    assert [e.gesture for e in evs_loss] == ["pinch_end", "hand_leave"]
+    assert evs_loss[0].data["lost"] is True
 
 
 def check_double_pinch() -> None:
@@ -187,9 +227,11 @@ def check_double_pinch() -> None:
     for t, gap in (
         (0.00, 0.50),
         (0.05, 0.10),  # pinch 1 start
-        (0.20, 0.50),  # pinch 1 end (dur = 0.15 <= 0.30)
-        (0.50, 0.10),  # pinch 2 start (gap = 0.30 <= 0.45) -> double_pinch
-        (0.65, 0.50),  # pinch 2 end
+        (0.15, 0.50),  # pinch 1 release begins
+        (0.27, 0.50),  # pinch 1 end (dur = 0.22 <= 0.30)
+        (0.55, 0.10),  # pinch 2 start (gap = 0.28 <= 0.45) -> double_pinch
+        (0.65, 0.50),  # pinch 2 release begins
+        (0.77, 0.50),  # pinch 2 end
     ):
         all_evs.extend(rec.update(HandFrame(t, (make_hand("open_palm", pinch_gap=gap),))))
     assert [e.gesture for e in all_evs].count("double_pinch") == 1
@@ -200,11 +242,14 @@ def check_double_pinch() -> None:
     for t, gap in (
         (0.00, 0.50),
         (0.05, 0.10),  # pinch 1 start
-        (0.20, 0.50),  # pinch 1 end
-        (0.45, 0.10),  # pinch 2 start -> double_pinch
-        (0.60, 0.50),  # pinch 2 end (must NOT count as first of another double_pinch)
-        (0.85, 0.10),  # pinch 3 start -> must NOT emit a second double_pinch
-        (1.00, 0.50),  # pinch 3 end
+        (0.15, 0.50),  # pinch 1 release begins
+        (0.27, 0.50),  # pinch 1 end
+        (0.50, 0.10),  # pinch 2 start -> double_pinch
+        (0.60, 0.50),  # pinch 2 release begins
+        (0.72, 0.50),  # pinch 2 end (must NOT count as first of another double_pinch)
+        (0.95, 0.10),  # pinch 3 start -> must NOT emit a second double_pinch
+        (1.05, 0.50),  # pinch 3 release begins
+        (1.17, 0.50),  # pinch 3 end
     ):
         evs_triple.extend(rec_triple.update(HandFrame(t, (make_hand("open_palm", pinch_gap=gap),))))
     assert [e.gesture for e in evs_triple].count("double_pinch") == 1
@@ -215,8 +260,9 @@ def check_double_pinch() -> None:
     for t, gap in (
         (0.00, 0.50),
         (0.05, 0.10),  # start
-        (0.65, 0.50),  # end (dur = 0.60 > 0.30)
-        (0.95, 0.10),  # second pinch 0.30 s later -> must NOT be double_pinch
+        (0.65, 0.50),  # release begins
+        (0.77, 0.50),  # end (dur = 0.72 > 0.30)
+        (1.05, 0.10),  # second pinch 0.28 s later -> must NOT be double_pinch
     ):
         all_evs2.extend(rec2.update(HandFrame(t, (make_hand("open_palm", pinch_gap=gap),))))
     assert "double_pinch" not in [e.gesture for e in all_evs2]
@@ -348,16 +394,42 @@ def check_swipes() -> None:
     assert t - first_t < 0.70
     assert not [e for e in evs2 if e.gesture.startswith("swipe_")]
 
-    # After cooldown (> 0.8 s with hand resting) -> next swipe succeeds.
-    rec_cd = Recognizer()
-    t = _stabilize_open(rec_cd, 0.2, 0.5)
-    t, evs_a = _run_motion(rec_cd, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    # Return stroke: swipe right then hand returns left at the same speed 0.8 s later -> no swipe_left.
+    rec_rev = Recognizer()
+    t = _stabilize_open(rec_rev, 0.2, 0.5)
+    t, evs_a = _run_motion(rec_rev, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
     first_t = next(e.t for e in evs_a if e.gesture == "swipe_right")
     while t < first_t + 0.80:
         t += 1.0 / 30.0
-        rec_cd.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
-    _, evs_b = _run_motion(rec_cd, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
-    assert [e.gesture for e in evs_b if e.gesture.startswith("swipe_")] == ["swipe_left"]
+        rec_rev.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
+    _, evs_b = _run_motion(rec_rev, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
+    assert not [e for e in evs_b if e.gesture.startswith("swipe_")], f"return stroke leaked: {evs_b}"
+
+    # Deliberate second swipe_right after cooldown and settling (still 0.25 s) -> emitted.
+    rec_same = Recognizer()
+    t = _stabilize_open(rec_same, 0.2, 0.5)
+    t, evs_s1 = _run_motion(rec_same, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    first_t = next(e.t for e in evs_s1 if e.gesture == "swipe_right")
+    # Return to 0.20 (blocked by reverse block & unsettled), then hold still for 0.25 s (>= SETTLE_TIME).
+    t, evs_ret = _run_motion(rec_same, t, 0.55, 0.5, -0.35, 0.0, 0.30, settle_frames=0)
+    assert not [e for e in evs_ret if e.gesture.startswith("swipe_")]
+    settle_end = max(t + 0.25, first_t + 0.75)
+    while t < settle_end:
+        t += 1.0 / 30.0
+        rec_same.update(HandFrame(t, (make_hand("open_palm", cx=0.20, cy=0.5),)))
+    _, evs_s2 = _run_motion(rec_same, t, 0.20, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    assert [e.gesture for e in evs_s2 if e.gesture.startswith("swipe_")] == ["swipe_right"]
+
+    # Opposite swipe 2.0 s after a right swipe (after settling) -> emitted.
+    rec_opp = Recognizer()
+    t = _stabilize_open(rec_opp, 0.2, 0.5)
+    t, evs_o1 = _run_motion(rec_opp, t, 0.2, 0.5, +0.35, 0.0, 0.25, settle_frames=0)
+    first_t = next(e.t for e in evs_o1 if e.gesture == "swipe_right")
+    while t < first_t + 2.0:
+        t += 1.0 / 30.0
+        rec_opp.update(HandFrame(t, (make_hand("open_palm", cx=0.55, cy=0.5),)))
+    _, evs_o2 = _run_motion(rec_opp, t, 0.55, 0.5, -0.35, 0.0, 0.25, settle_frames=0)
+    assert [e.gesture for e in evs_o2 if e.gesture.startswith("swipe_")] == ["swipe_left"]
 
     # Pinching hand moving fast -> no swipe.
     rec = Recognizer()
@@ -422,8 +494,13 @@ def check_spread() -> None:
     scale = rec.spread_scale()
     assert scale is not None and abs(scale - 1.5) < 0.05, f"expected ~1.5, got {scale}"
 
-    # Release right pinch -> spread_end with scale ~1.5.
+    # Release right pinch (held >= RELEASE_HOLD) -> spread_end with scale ~1.5.
     t += 0.05
+    rec.update(HandFrame(t, (
+        make_hand("pinch", cx=0.35, cy=0.5, side="left"),
+        make_hand("open_palm", cx=0.65, cy=0.5, side="right"),
+    )))
+    t += 0.12
     evs = rec.update(HandFrame(t, (
         make_hand("pinch", cx=0.35, cy=0.5, side="left"),
         make_hand("open_palm", cx=0.65, cy=0.5, side="right"),
