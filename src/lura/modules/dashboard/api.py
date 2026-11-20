@@ -52,6 +52,9 @@ class DashboardApi:
     #: Whether a restart applies the changes made since Lura started. False
     #: for the standalone dashboard, which has no assistant to restart.
     can_restart: bool = True
+    #: Lura Air's status for the Hands tab: {"camera": "off"|"on"|"error"|"lost"|..., "detail": str,
+    #: "downloading": bool}. None for the standalone dashboard.
+    air: Callable[[], dict] | None = None
     _pending: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -71,6 +74,7 @@ class DashboardApi:
         r("POST", "/api/update/check", lambda b, m: self.update_status(check=True))
         r("POST", "/api/update/install", lambda b, m: self.update_install())
         r("GET", "/api/state", lambda b, m: self.state())
+        r("GET", "/api/air", lambda b, m: self.air_status())
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
                                               "connectors": self.connectors.list(),
@@ -131,6 +135,11 @@ class DashboardApi:
             "paths": {"config": str(self.settings.settings_path.parent)},
             "restart_pending": self.restart_pending, "can_restart": self.can_restart,
         }
+
+    def air_status(self) -> dict:
+        if self.air is None:
+            return {"camera": "off", "detail": "", "downloading": False, "running": False}
+        return {**self.air(), "running": True}
 
     # ── updates ──
     def update_status(self, check: bool = False) -> dict:

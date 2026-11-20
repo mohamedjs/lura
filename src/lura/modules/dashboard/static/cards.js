@@ -250,6 +250,7 @@ function renderCards() {
   lastStatus = S.status;
   renderAudio();
   renderLook();
+  renderAir();
   renderMemory();
   renderSkills();
 }
@@ -294,4 +295,31 @@ function renderLook() {
   show();
   size.oninput = show;
   size.onchange = () => save({ overlay_scale: Number(size.value) });
+}
+
+// ── Lura Air: hand gestures through the webcam (on/off live, no restart)
+let airStatus = null;
+let airTimer = null;
+function renderAir() {
+  bindCheck("#air-enabled", "air_enabled");
+  const box = $("#air-status");
+  const on = !!S.settings.air_enabled;
+  if (!on || !airStatus) { box.hidden = true; }
+  else {
+    const a = airStatus;
+    const key = a.downloading ? "air.st.downloading"
+      : a.camera === "on" ? "air.st.on"
+      : a.camera === "error" ? "air.st.error"
+      : a.camera === "lost" ? "air.st.lost"
+      : "air.st.starting";
+    box.textContent = t(key) + (a.camera === "error" || a.camera === "lost" ? ` — ${a.detail}` : "");
+    box.hidden = false;
+  }
+  // Ask for the camera's state only while Air is on.
+  if (on && !airTimer) { loadAir(); airTimer = setInterval(loadAir, 2000); }
+  if (!on && airTimer) { clearInterval(airTimer); airTimer = null; airStatus = null; }
+}
+async function loadAir() {
+  try { airStatus = await api("GET", "/api/air"); } catch (_) { airStatus = null; }
+  if (S) renderAir();
 }

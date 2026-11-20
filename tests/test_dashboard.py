@@ -63,6 +63,19 @@ def main() -> int:
         assert set(state["i18n"]) == {"en", "ar"} and "plan" not in state
         assert [x["name"] for x in state["connectors"]][:4] == ["chrome", "playwright", "web", "files"]
 
+        # Lura Air: the Hands tab's switch is a live setting; standalone dashboard reports it not running.
+        assert b'id="air-enabled"' in page and b'data-tab="air"' in page
+        assert state["i18n"]["ar"]["tab.air"] and state["i18n"]["en"]["air.enable"]
+        status, res, _ = call(server, "GET", "/api/air")
+        assert status == 200 and res["running"] is False and res["camera"] == "off", res
+        status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"air_enabled": True}})
+        assert status == 200 and res["settings"]["air_enabled"] is True and not res["restart_pending"], res
+        call(server, "PUT", "/api/settings", {"patch": {"air_enabled": False}})
+        server._api.air = lambda: {"camera": "on", "detail": "", "downloading": False, "enabled": True}
+        assert call(server, "GET", "/api/air")[1] == {"camera": "on", "detail": "", "downloading": False,
+                                                       "enabled": True, "running": True}
+        server._api.air = None
+
         status, res, _ = call(server, "PUT", "/api/settings", {"patch": {"language": "ar", "voice_gender": "male"}})
         assert status == 200 and res["settings"]["voice_name"] == "Puck"
         assert c.settings.current.language == "ar"

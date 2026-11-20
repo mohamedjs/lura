@@ -25,7 +25,7 @@ datas = [
 binaries = []
 hidden = collect_submodules("lura")
 for package in ("certifi", "vosk", "sounddevice", "_sounddevice_data", "anthropic", "google.genai", "cairo",
-                "webview", "clr_loader", "pythonnet"):
+                "webview", "clr_loader", "pythonnet", "mediapipe", "cv2"):
     try:
         d, b, h = collect_all(package)
         datas += d

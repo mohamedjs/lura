@@ -265,3 +265,6 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 .update-banner .bar { height: 6px; border-radius: 3px; background: var(--line-strong); margin-top: 6px; overflow: hidden; }
 .update-banner .bar span { display: block; height: 100%; width: 0; background: var(--teal); transition: width .3s; }
 @media (max-width: 560px) { .update-banner { flex-wrap: wrap; } }
+
+.air-list { margin: .2em 0 .8em; padding-inline-start: 1.2em; line-height: 1.9; }
+#air-status { margin-top: 4px; }

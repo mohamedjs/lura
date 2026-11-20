@@ -262,5 +262,22 @@
   "tray.theme": "Colours",
   "voice.or_model": "Speech model (OpenRouter)",
   "voice.free": "free",
-  "voice.el_model": "Speech model (ElevenLabs)"
+  "voice.el_model": "Speech model (ElevenLabs)",
+  "tab.air": "Hands",
+  "air.title": "Lura Air: control with your hand",
+  "air.hint": "Lura watches your hand through the webcam and moves the mouse, scrolls and switches workspaces for you. Turn it off and she is the voice-only Lura again. Works right away, no restart.",
+  "air.enable": "See my hand and follow my gestures",
+  "air.gestures": "Gestures (hand close to the camera)",
+  "air.g.point": "Point one finger: the mouse follows it. Close the finger to lift the mouse and move your hand back.",
+  "air.g.click": "Touch thumb and index finger and let go: click (twice: double-click).",
+  "air.g.drag": "Touch and hold: grab and drag, e.g. a window by its title bar.",
+  "air.g.scroll": "Two fingers (V) up or down: scroll, like a phone.",
+  "air.g.swipe": "Move your hand right or left: next or previous workspace.",
+  "air.g.thumbs": "Thumbs up / down: answer yes or no to Lura's question.",
+  "air.privacy": "Everything stays on this computer: frames are read by a local model and never saved or sent.",
+  "air.st.on": "● Camera on — watching for your hand",
+  "air.st.starting": "Starting the camera…",
+  "air.st.downloading": "Downloading the hand model (8 MB)…",
+  "air.st.error": "Not working",
+  "air.st.lost": "Camera lost, retrying"
 }

@@ -73,9 +73,18 @@ def cmd_run(args) -> int:
     c = _container()
     s = c.settings.current
     stop = threading.Event()
+    air_dl = {"active": False, "error": ""}
+
+    def air_status() -> dict:
+        snap = c.air.snapshot()
+        detail = air_dl["error"] or snap.detail
+        camera = "error" if air_dl["error"] else snap.camera
+        return {"camera": camera, "detail": detail, "downloading": air_dl["active"],
+                "enabled": c.settings.current.air_enabled}
+
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: c.assistant.status, c.memory, c.skills,
-                                          c.updates), s.dashboard_port)
+                                          c.updates, air=air_status), s.dashboard_port)
     try:
         server.start()
     except OSError as exc:
@@ -106,16 +115,53 @@ def cmd_run(args) -> int:
     overlay.state.subtitles_enabled = s.subtitles
     overlay.state.look = settings_look(s)
 
-    def apply_air():
-        c.air_control.stop()
-        c.air.stop()
-        if c.settings.current.air_enabled:
+    air_lock = threading.Lock()
+
+    def start_air():
+        with air_lock:
+            if not c.settings.current.air_enabled:
+                return
             c.air.set_camera(c.settings.current.air_camera)
             c.air.start()
             snap = c.air.snapshot()
             if snap.camera == "error":
                 log.warning("Lura Air unavailable: %s", snap.detail)
             c.air_control.start()
+
+    def download_then_start():
+        from .modules.air import download_model
+        try:
+            log.info("Lura Air: downloading the hand model…")
+            download_model()
+            air_dl["error"] = ""
+        except Exception as exc:
+            log.warning("Lura Air: hand model download failed: %s", exc)
+            air_dl["error"] = f"Could not download the hand model: {exc}"
+        finally:
+            air_dl["active"] = False
+        if not air_dl["error"]:
+            start_air()
+
+    def apply_air():
+        with air_lock:
+            c.air_control.stop()
+            c.air.stop()
+        air_dl["error"] = ""
+        if not c.settings.current.air_enabled:
+            return
+        # Switched on from the dashboard on a machine without the hand model yet: fetch it
+        # (7.8 MB, checked against its SHA-256) instead of asking for `lura air setup`.
+        try:
+            from .modules.air import air_available, model_ready
+            needs_model = not model_ready() and air_available().startswith("Run")
+        except Exception:
+            needs_model = False
+        if needs_model:
+            if not air_dl["active"]:
+                air_dl["active"] = True
+                threading.Thread(target=download_then_start, daemon=True, name="air-model").start()
+            return
+        start_air()
 
     def on_settings(payload):
         # Applied live, no restart: the subtitles switch, the look and Lura Air.
