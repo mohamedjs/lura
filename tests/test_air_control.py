@@ -1,25 +1,13 @@
-"""Air control (Stage D1): pure geometry, Arming, AirController, computer grip/place and settings."""
+"""Air control: pure geometry, place error recovery, Command queue/lifecycle, computer fast path, settings."""
 
 from __future__ import annotations
 
 import _setup  # noqa: F401
 import sys
+import time
 
-from lura.modules.air import (
-    AirController,
-    AirService,
-    AirState,
-    Arming,
-    GestureEvent,
-    HandView,
-)
-from lura.modules.air.domain import (
-    ARM_IDLE,
-    drag_rect,
-    edge_snap,
-    moved,
-    spread_rect,
-)
+from lura.modules.air import AirController, AirService, AirState, Command
+from lura.modules.air.domain import edge_snap, moved
 from lura.modules.computer import ActionError, ActionResult, ComputerService, Rect, WindowGrip
 from lura.modules.computer.domain import Monitor, Window, snap_rect, work_area
 from lura.modules.settings import Settings
@@ -29,13 +17,23 @@ BOUNDS = Rect(0, 0, 3840, 1080)
 
 
 class FakeDesktop:
-    """In-memory DesktopPort recording run/grip/place calls."""
+    """In-memory DesktopPort recording run/grip/place/pointer calls."""
 
-    def __init__(self, *, maximized: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        maximized: bool = False,
+        pointer_pos: tuple[int, int] = (500, 400),
+        target: tuple[int, str, str] | None = (7, "code", "Notes"),
+    ) -> None:
         self.maximized = maximized
+        self.pointer_pos = pointer_pos
+        self.target = target
         self.runs: list[tuple[str, dict | None]] = []
         self.grips: list[str | int] = []
         self.places: list[tuple[WindowGrip, Rect]] = []
+        self.pointers: list[tuple[int, int]] = []
+        self.pointer_reads = 0
         self.place_error: Exception | None = None
         self.grip_error: Exception | None = None
 
@@ -57,34 +55,50 @@ class FakeDesktop:
     def is_maximized(self, window: str | int = "active") -> bool:
         return self.maximized
 
-    def screen_bounds(self) -> Rect:
+    def screen_bounds(self, monitor: str = "all") -> Rect:
         return BOUNDS
+
+    def active_app(self) -> tuple[int, str, str] | None:
+        return self.target
+
+    def window_at(self, x: int, y: int) -> tuple[int, str, str] | None:
+        return self.target
+
+    def pointer(self) -> tuple[int, int]:
+        self.pointer_reads += 1
+        return self.pointer_pos
+
+    def pointer_to(self, x: int, y: int) -> None:
+        self.pointer_pos = (x, y)
+        self.pointers.append((x, y))
 
 
 class FakeAir:
-    """In-memory AirService double with a settable snapshot and subscribe counter."""
+    """In-memory AirService double with settable snapshot, engine state and command subscribers."""
 
     def __init__(self) -> None:
         self.subscribers: list = []
+        self.cmd_subscribers: list = []
         self.state = AirState(camera="on", detail="FakeCam")
+        self.eng_state: dict = {
+            "engaged": False,
+            "zone": "none",
+            "phase": "idle",
+            "ring_hover": "",
+            "grab_progress": 0.0,
+        }
 
     def subscribe(self, fn) -> None:
         self.subscribers.append(fn)
 
+    def subscribe_commands(self, fn) -> None:
+        self.cmd_subscribers.append(fn)
+
     def snapshot(self) -> AirState:
         return self.state
 
-
-def _ev(
-    gesture: str,
-    t: float,
-    hand: str = "right",
-    x: float = 0.5,
-    y: float = 0.5,
-    conf: float = 0.95,
-    data: dict | None = None,
-) -> GestureEvent:
-    return GestureEvent(gesture, hand, conf, x, y, t, dict(data) if data else {})
+    def engine_state(self) -> dict:
+        return dict(self.eng_state)
 
 
 def _make_controller(
@@ -103,311 +117,62 @@ def _make_controller(
 
 
 def check_pure_geometry() -> None:
-    start = Rect(100, 100, 800, 600)
-    r = drag_rect(start, (0.5, 0.5), (0.6, 0.5), BOUNDS)
-    assert r == Rect(100 + 614, 100, 800, 600), f"got {r}"
-
     assert edge_snap(Rect(0, 100, 800, 600), BOUNDS) == "left"
     assert edge_snap(Rect(1500, 100, 800, 600), BOUNDS) is None
     assert edge_snap(Rect(3040, 100, 800, 600), BOUNDS) == "right"
-
-    big = spread_rect(start, 2.0)
-    assert big.width == 1600 and big.height == 1200
-    assert big.center == start.center
-
-    small = spread_rect(start, 0.1)
-    assert small.width == 400 and small.height == 300
-    assert small.center == start.center
-
-    tiny = spread_rect(Rect(100, 100, 500, 400), 0.1)
-    assert tiny.width == 320 and tiny.height == 240
-    assert tiny.center == Rect(100, 100, 500, 400).center
 
     assert moved(Rect(0, 0, 100, 100), Rect(3, 3, 103, 103)) is False
     assert moved(Rect(0, 0, 100, 100), Rect(4, 0, 100, 100)) is True
     assert moved(Rect(0, 0, 100, 100), Rect(0, 0, 104, 100)) is True
 
 
-def check_arming() -> None:
-    arm = Arming()
-    assert not arm.armed(0.0)
-    arm.on_event(_ev("swipe_left", 1.0))
-    assert not arm.armed(1.0)
-
-    arm.on_event(_ev("pose", 2.0, data={"pose": "open_palm"}))
-    assert arm.armed(2.0)
-    assert arm.armed(2.0 + ARM_IDLE - 0.01)
-    assert not arm.armed(2.0 + ARM_IDLE)
-
-    # Events extend while armed.
-    arm.on_event(_ev("pose", 10.0, data={"pose": "open_palm"}))
-    arm.on_event(_ev("hand_enter", 15.0))
-    assert arm.armed(15.0 + ARM_IDLE - 0.1)
-    assert not arm.armed(15.0 + ARM_IDLE)
-
-    # Fist disarms after FIST_HOLD (0.5 s).
-    arm.on_event(_ev("pose", 30.0, data={"pose": "open_palm"}))
-    assert arm.armed(31.0)
-    arm.on_event(_ev("pose", 32.0, data={"pose": "fist"}))
-    assert arm.armed(32.0)
-    assert arm.armed(32.49)
-    assert not arm.armed(32.5)
-
-    # Fist cancelled by a pinch_start of the same hand within 0.5 s -> stays armed.
-    arm.on_event(_ev("pose", 40.0, data={"pose": "open_palm"}))
-    arm.on_event(_ev("pose", 41.0, hand="right", data={"pose": "fist"}))
-    arm.on_event(_ev("pinch_start", 41.3, hand="right"))
-    assert arm.armed(41.6)
-
-
-def check_swipes_and_arming_gate() -> None:
-    ctrl, _, desk, pub, _ = _make_controller()
-    # Not armed: swipe ignored.
-    ctrl.process(_ev("swipe_left", 1.0))
-    assert desk.runs == []
-
-    # Arm with open palm, then all four swipes map to expected calls.
-    ctrl.process(_ev("pose", 2.0, data={"pose": "open_palm"}))
-    for i, g in enumerate(("swipe_left", "swipe_right", "swipe_up", "swipe_down"), start=1):
-        ctrl.process(_ev(g, 2.0 + i * 0.5))
-    assert desk.runs == [
-        ("workspace_switch", {"target": "prev"}),
-        ("workspace_switch", {"target": "next"}),
-        ("workspace_overview", {}),
-        ("show_desktop", {}),
-    ]
-
-    # Low confidence (0.6) -> ignored.
-    desk.runs.clear()
-    ctrl.process(_ev("swipe_left", 5.0, conf=0.60))
-    assert desk.runs == []
-
-    # Check AIR_ACTION payload keys.
-    assert pub
-    for name, payload in pub:
-        assert name == events.AIR_ACTION
-        assert set(payload.keys()) == {"action", "ok", "message"}
-
-
-def check_drag_snap_lost_and_tap() -> None:
-    ctrl, air, desk, pub, _ = _make_controller()
-    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
-
-    # Pinch and move 0.02 (< DRAG_START 0.03) -> no grip.
-    ctrl.process(_ev("pinch_start", 1.0, x=0.5, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.52, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.05)
-    assert desk.grips == []
-    assert desk.places == []
-
-    # Move 0.05 (>= DRAG_START) -> one grip, one place.
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.55, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.10)
-    assert len(desk.grips) == 1
-    assert len(desk.places) == 1
-
-    # Tiny further move (< 4 px: 0.0002 * 3840 * 1.6 = 1.2 px) -> no extra place.
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.5502, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.15)
-    assert len(desk.places) == 1
-
-    # Release at x=0.5 -> no snap, feedback window_move.
-    ctrl.process(_ev("pinch_end", 1.2, x=0.5, y=0.5))
-    assert desk.runs == []
-    assert pub[-1][1]["action"] == "window_move"
-    assert pub[-1][1]["ok"] is True
-    assert "Notes" in pub[-1][1]["message"]
-    assert not ctrl.state()["dragging"]
-
-    # New drag pushing window to the right screen edge -> window_snap right.
-    ctrl.process(_ev("pinch_start", 2.0, x=0.2, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.25, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(2.05)  # grips at x=0.25
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.75, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(2.08)  # moves window +3072 px -> right edge >= 3840
-    ctrl.process(_ev("pinch_end", 2.1, x=0.75, y=0.5))
-    assert desk.runs == [("window_snap", {"window": 7, "where": "right"})]
-    assert pub[-1][1]["action"] == "window_snap"
-
-    # Lost pinch after pushing window to right edge -> no snap, drag cleared.
-    desk.runs.clear()
-    pub.clear()
-    ctrl.process(_ev("pinch_start", 3.0, x=0.2, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.25, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(3.05)
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.75, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(3.08)
-    assert ctrl.state()["dragging"] is True
-    ctrl.process(_ev("pinch_end", 3.1, x=0.75, y=0.5, data={"lost": True}))
-    assert desk.runs == []
-    assert pub == []
-    assert ctrl.state()["dragging"] is False
-
-    # Quick pinch without movement (tap) -> no grip at all.
-    desk.grips.clear()
-    ctrl.process(_ev("pinch_start", 4.0, x=0.5, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.5, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(4.05)
-    ctrl.process(_ev("pinch_end", 4.1, x=0.5, y=0.5))
-    assert desk.grips == []
-
-
-def check_double_pinch() -> None:
-    # Maximized -> window_restore, no grip.
-    ctrl, _, desk, pub, _ = _make_controller(maximized=True)
-    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
-    ctrl.process(_ev("pinch_start", 1.0))
-    ctrl.process(_ev("double_pinch", 1.0))
-    assert desk.grips == []
-    assert desk.runs == [("window_restore", None)]
-    assert pub[-1][1]["action"] == "window_restore"
-
-    # Not maximized -> window_maximize, no grip.
-    desk.maximized = False
-    desk.runs.clear()
-    ctrl.process(_ev("pinch_start", 2.0))
-    ctrl.process(_ev("double_pinch", 2.0))
-    assert desk.grips == []
-    assert desk.runs == [("window_maximize", None)]
-    assert pub[-1][1]["action"] == "window_maximize"
-
-
-def check_spread() -> None:
-    ctrl, air, desk, pub, _ = _make_controller()
-    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
-    ctrl.process(_ev("spread_start", 1.0, hand="both"))
-    assert len(desk.grips) == 1
-    assert ctrl.state()["resizing"] is True
-
-    air.state = AirState(camera="on", spread_scale=1.5)
-    ctrl.tick(1.05)
-    assert len(desk.places) == 1
-    grip, rect = desk.places[0]
-    assert rect.width == 1200 and rect.height == 900
-    assert rect.center == grip.start.center
-
-    ctrl.process(_ev("spread_end", 1.2, hand="both", data={"scale": 1.5}))
-    assert ctrl.state()["resizing"] is False
-    assert pub[-1][1]["action"] == "window_resize"
-    assert pub[-1][1]["ok"] is True
-
-
-def check_fist_during_drag() -> None:
-    ctrl, air, desk, pub, now = _make_controller()
-    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
-    ctrl.process(_ev("pinch_start", 1.0, x=0.5, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.6, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.05)
-    assert ctrl.state()["dragging"] is True
-    places_before = len(desk.places)
-    assert [p["action"] for _, p in pub] == ["welcome"]
-    pub.clear()
-
-    # Fist followed within 0.3 s by a pinch_start -> stays armed, drag continues.
-    now[0] = 1.1
-    ctrl.process(_ev("pose", 1.1, data={"pose": "fist"}))
-    assert ctrl.state()["dragging"] is True
-    assert ctrl.state()["armed"] is True
-    assert pub == []
-
-    now[0] = 1.4
-    ctrl.process(_ev("pinch_start", 1.4, x=0.6, y=0.5))
-    now[0] = 1.7
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.65, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.7)
-    assert ctrl.state()["armed"] is True
-    assert ctrl.state()["dragging"] is True
-    assert len(desk.places) == places_before + 1
-    assert pub == []
-
-    # Fist held (no other event) -> disarmed after 0.5 s via tick, one disarm feedback.
-    places_before = len(desk.places)
-    now[0] = 2.0
-    ctrl.process(_ev("pose", 2.0, data={"pose": "fist"}))
-    now[0] = 2.3
-    ctrl.tick(2.3)
-    assert ctrl.state()["armed"] is True
-    assert ctrl.state()["dragging"] is True
-    assert pub == []
-
-    now[0] = 2.55
-    ctrl.tick(2.55)
-    assert ctrl.state()["dragging"] is False
-    assert ctrl.state()["armed"] is False
-    assert [p["action"] for _, p in pub] == ["disarm"]
-
-    # Further ticks & hand movement cause no more places and no duplicate disarm feedback.
-    now[0] = 2.7
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.8, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(2.7)
-    assert len(desk.places) == places_before
-    assert [p["action"] for _, p in pub] == ["disarm"]
-
-
 def check_place_error_recovery() -> None:
-    ctrl, air, desk, pub, _ = _make_controller()
-    ctrl.process(_ev("pose", 0.0, data={"pose": "open_palm"}))
+    ctrl, _, desk, pub, _ = _make_controller()
+    ctrl.process(Command("engage", 0.0))
     desk.place_error = RuntimeError("X11 disconnected")
-    ctrl.process(_ev("pinch_start", 1.0, x=0.5, y=0.5))
-    air.state = AirState(
-        camera="on",
-        hands=(HandView("right", 0.6, 0.5, "pinch", True, 0.95),),
-    )
-    ctrl.tick(1.05)
-    assert ctrl.state()["dragging"] is False
+
+    ctrl.process(Command("grab_start", 1.0))
+    assert ctrl._grab is not None
+    ctrl.process(Command("grab_move", 1.05, dx=20.0, dy=0.0))
+    assert ctrl._grab is None
     assert pub[-1][1]["ok"] is False
     assert set(pub[-1][1].keys()) == {"action", "ok", "message"}
 
     # Controller keeps working afterwards.
     desk.place_error = None
-    ctrl.process(_ev("swipe_right", 2.0))
+    desk.runs.clear()
+    desk.target = None
+    ctrl.process(Command("ring_open", 2.0))
+    ctrl.process(Command("ring_select", 2.2, direction="right"))
     assert desk.runs == [("workspace_switch", {"target": "next"})]
 
 
 def check_queue_and_lifecycle() -> None:
-    ctrl, air, _, _, _ = _make_controller()
+    ctrl, air, desk, _, _ = _make_controller()
+    # Non-coalescing commands are bounded at 64.
     for i in range(100):
-        ctrl._enqueue(_ev("hand_enter", float(i)))
-    assert ctrl._queue.qsize() <= 64
+        ctrl._enqueue(Command("hint", float(i), text=f"h{i}"))
+    assert len(ctrl._queue) <= 64
+    ctrl._queue.clear()
 
+    # Consecutive cursor commands coalesce into one summed command.
+    for i in range(25):
+        ctrl._enqueue(Command("cursor", float(i) * 0.01, dx=2.0, dy=-1.0))
+    assert len(ctrl._queue) == 1
+    merged = ctrl._queue[0]
+    assert merged.kind == "cursor" and merged.dx == 50.0 and merged.dy == -25.0
+
+    # start -> stop -> start subscribes to AirService commands once.
     ctrl.start()
+    deadline = time.monotonic() + 2.0
+    while not desk.pointers and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(desk.pointers) == 1
+    assert desk.pointers[0] == (550, 375)
     ctrl.stop()
     ctrl.start()
     ctrl.stop()
-    assert len(air.subscribers) == 1
+    assert len(air.cmd_subscribers) == 1
 
     # AirService.set_camera works when stopped.
     svc = AirService(None)

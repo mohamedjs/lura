@@ -291,6 +291,10 @@ class ComputerService:
                     return (w.id, w.app, w.title)
             return None
 
+    def pointer(self) -> tuple[int, int]:
+        with self._lock:
+            return self._backend.pointer()
+
     def pointer_to(self, x: int, y: int) -> None:
         with self._lock:
             now = self._clock()

@@ -147,15 +147,16 @@ def cmd_run(args) -> int:
             return None
         st = c.air_control.state()
         now = time.monotonic()
-        hs = st.get("hand_since")
         last = last_air[0]
         return AirView(
             on=True,
-            armed=st["armed"],
+            engaged=st["engaged"],
+            zone=st["zone"],
             mode=st["mode"],
             hands=tuple((h.x, h.y, h.pinching) for h in snap.hands),
-            dwell=st.get("dwell", 0.0),
-            hand_age=(now - hs) if hs is not None else 99.0,
+            ring=st["ring_labels"],
+            ring_hover=st["ring_hover"],
+            grab_progress=st["grab_progress"],
             pulse_ok=last["ok"],
             pulse_age=now - last["t"],
             message=last["message"],
@@ -629,6 +630,61 @@ def cmd_air(args) -> int:
             svc.stop()
         return 0
 
+    if args.action == "record":
+        import gzip
+        from pathlib import Path
+        from .modules.air import InteractionEngine
+
+        if not args.out:
+            print("Usage: lura air record [--seconds N] OUT.jsonl", file=sys.stderr)
+            return 2
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Recording hand landmarks only (no camera images are saved) -> {out_path}", flush=True)
+        frames = [0]
+        t0: list[float | None] = [None]
+        handle = (
+            gzip.open(out_path, "wt", encoding="utf-8")
+            if out_path.suffix == ".gz"
+            else out_path.open("w", encoding="utf-8")
+        )
+
+        class _RecorderEngine(InteractionEngine):
+            def update(self, t, hands):
+                if t0[0] is None:
+                    t0[0] = t
+                row = {
+                    "t": round(t - t0[0], 4),
+                    "label": "record",
+                    "hands": [
+                        {
+                            "side": h.side,
+                            "score": round(h.score, 4),
+                            "pts": [[round(p.x, 4), round(p.y, 4), round(p.z, 4)] for p in h.points],
+                        }
+                        for h in hands
+                    ],
+                }
+                handle.write(json.dumps(row) + "\n")
+                frames[0] += 1
+                return []
+
+        rec_svc = AirService(None, camera=args.camera, engine_factory=_RecorderEngine)
+        rec_svc.start()
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            rec_svc.stop()
+            handle.close()
+        print(f"Saved {frames[0]} landmark frames (no images) to {out_path}.")
+        return 0
+
     duration = args.seconds if args.seconds > 0 else 15.0
     svc.start()
     deadline = time.monotonic() + duration
@@ -694,9 +750,10 @@ def main(argv=None) -> int:
     desk.add_argument("params", nargs="*")
     desk.add_argument("--yes", action="store_true")
     from .modules.air import MODES as AIR_MODES
-    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, control, bench")
+    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, control, bench, record")
     air.add_argument("action", nargs="?", default="watch",
-                     choices=["cameras", "setup", "watch", "control", "bench"])
+                     choices=["cameras", "setup", "watch", "control", "bench", "record"])
+    air.add_argument("out", nargs="?", help="output .jsonl or .jsonl.gz path for record")
     air.add_argument("--camera", default="")
     air.add_argument("--seconds", type=float, default=0.0)
     air.add_argument("--mode", choices=AIR_MODES, default="universal")

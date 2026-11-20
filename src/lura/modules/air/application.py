@@ -1,31 +1,22 @@
-"""AirService: camera thread lifecycle, hand tracking loop, snapshots and gesture publishing."""
+"""AirService: camera thread lifecycle, hand tracking loop, snapshots, Commands and AirController."""
 
 from __future__ import annotations
 
 import logging
-import math
 import os
-import queue
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from ...shared import events
 from ..brain import ToolSpec
-from ..computer import ActionError, Rect, WindowGrip
+from ..computer import Rect, WindowGrip
 from .domain import (
-    ACTION_MIN_CONF,
-    CONTROL_HZ,
-    DRAG_START,
-    HINT_AFTER,
-    HINT_EVERY,
     MODES,
-    POINT_DWELL,
-    POINTER_SMOOTH,
     WELCOME,
     AirState,
-    Arming,
     GestureEvent,
     Hand,
     HandFrame,
@@ -33,15 +24,13 @@ from .domain import (
     Recognizer,
     Stats,
     app_kind,
-    drag_rect,
     edge_snap,
-    framing_hint,
-    hand_to_screen,
     moved,
     pick_camera,
-    resolve,
-    spread_rect,
+    ring_action,
+    ring_labels,
 )
+from .engine import Command, InteractionEngine
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +38,9 @@ _MISS_LIMIT = 15
 _RETRY_DELAY = 2.0
 _IDLE_AFTER = 10.0
 _IDLE_INTERVAL = 1.0 / 8.0
+_QUEUE_MAX = 64
+_POINTER_RESYNC_S = 1.0
+_BOUNDS_CACHE_S = 5.0
 
 
 class Camera(Protocol):
@@ -84,6 +76,7 @@ class AirService:
         camera: str = "",
         camera_factory: Callable[[], Camera] | None = None,
         landmarker_factory: Callable[[], Landmarker] | None = None,
+        engine_factory: Callable[[], InteractionEngine] = InteractionEngine,
         clock: Callable[[], float] = time.monotonic,
         mode: str = "universal",
     ) -> None:
@@ -91,13 +84,17 @@ class AirService:
         self._camera_wanted = camera
         self._camera_factory = camera_factory
         self._landmarker_factory = landmarker_factory
+        self._engine_factory = engine_factory
         self._clock = clock
         self._mode = mode
 
         self._lock = threading.Lock()
         self._state = AirState()
+        self._engine = engine_factory()
+        self._engine_state: dict = dict(self._engine.state)
         self._stats = Stats()
         self._subscribers: list[Callable[[GestureEvent], None]] = []
+        self._cmd_subscribers: list[Callable[[Command], None]] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._published_status: str | None = None
@@ -121,9 +118,17 @@ class AirService:
         with self._lock:
             self._subscribers.append(fn)
 
+    def subscribe_commands(self, fn: Callable[[Command], None]) -> None:
+        with self._lock:
+            self._cmd_subscribers.append(fn)
+
     def snapshot(self) -> AirState:
         with self._lock:
             return self._state
+
+    def engine_state(self) -> dict:
+        with self._lock:
+            return dict(self._engine_state)
 
     def stats(self) -> dict:
         with self._lock:
@@ -165,6 +170,8 @@ class AirService:
             if self._thread is not None and self._thread.is_alive():
                 return
             self._stop.clear()
+            self._engine = self._engine_factory()
+            self._engine_state = dict(self._engine.state)
             self._stats = Stats()
             self._last_gesture = ""
             self._last_gesture_t = 0.0
@@ -172,7 +179,7 @@ class AirService:
             self._cpu_last_wall = time.monotonic()
             thread = threading.Thread(
                 target=self._run,
-                args=(cam_factory, lm_factory),
+                args=(cam_factory, lm_factory, self._engine),
                 daemon=True,
                 name="air-camera",
             )
@@ -234,6 +241,7 @@ class AirService:
         loop_ms: float,
         t: float,
         raw_hands: int,
+        eng_state: dict | None = None,
     ) -> None:
         with self._lock:
             self._stats.add(detect_ms, loop_ms, t, raw_hands)
@@ -247,6 +255,8 @@ class AirService:
                 last_gesture=self._last_gesture,
                 last_gesture_t=self._last_gesture_t,
             )
+            if eng_state is not None:
+                self._engine_state = eng_state
 
     def _dispatch_events(self, gesture_events: list[GestureEvent]) -> None:
         if not gesture_events:
@@ -264,6 +274,18 @@ class AirService:
                 except Exception:
                     log.exception("Air gesture subscriber failed")
 
+    def _dispatch_commands(self, cmds: list[Command]) -> None:
+        if not cmds:
+            return
+        with self._lock:
+            subs = list(self._cmd_subscribers)
+        for cmd in cmds:
+            for fn in subs:
+                try:
+                    fn(cmd)
+                except Exception:
+                    log.exception("Air command subscriber failed")
+
     @staticmethod
     def _safe_close(obj: object | None) -> None:
         if obj is None:
@@ -277,6 +299,7 @@ class AirService:
         self,
         cam_factory: Callable[[], Camera],
         lm_factory: Callable[[], Landmarker],
+        engine: InteractionEngine,
     ) -> None:
         recognizer = Recognizer()
         cam: Camera | None = None
@@ -354,7 +377,16 @@ class AirService:
                         log.exception("Gesture recognizer update failed")
                         continue
 
+                    try:
+                        cmds = engine.update(t, hands)
+                        eng_state: dict | None = dict(engine.state)
+                    except Exception:
+                        log.exception("InteractionEngine update failed")
+                        cmds = []
+                        eng_state = None
+
                     self._dispatch_events(evs)
+                    self._dispatch_commands(cmds)
                     loop_ms = (time.perf_counter() - loop_start) * 1000.0
                     self._update_snapshot(
                         cam_name,
@@ -364,6 +396,7 @@ class AirService:
                         loop_ms,
                         t,
                         len(hands),
+                        eng_state,
                     )
 
                     # Idle throttle: slow to at most 8 fps after 10 s without any hand.
@@ -376,21 +409,18 @@ class AirService:
         finally:
             self._safe_close(cam)
             self._safe_close(landmarker)
+            engine.reset()
+            with self._lock:
+                self._engine_state = dict(engine.state)
             if not fatal:
                 self._set_status("off", "", emit=True)
 
 
-_DRAG_MODES = frozenset({"universal", "window", "workspace", "files", "media", "developer"})
-_POINTER_HOLD = 0.3
-_POINTER_MIN_PX = 3
-_POINT_POLL = 0.2
-_EPS = 1e-9
-
 AIR_MODE_TOOL = ToolSpec(
     "air_mode",
     "Switch Lura Air (hand gesture control) mode, or report it. Modes: universal "
-    "(gestures follow the active app), window, workspace, pointer (hand moves the mouse), "
-    "files, media, developer, presentation (swipes change slides), ai (gestures go to you).",
+    "(command ring follows the window under the cursor), window, workspace, pointer, "
+    "files, media, developer, presentation (ring changes slides), ai (ring starts talking).",
     {
         "type": "object",
         "properties": {
@@ -406,18 +436,28 @@ AIR_MODE_TOOL = ToolSpec(
 
 
 class DesktopPort(Protocol):
-    def run(self, name: str, args: dict | None = None, *, confirmed: bool = False) -> Any: ...  # ActionResult
+    def run(self, name: str, args: dict | None = None, *, confirmed: bool = False) -> Any: ...
     def grip(self, window: str | int = "active") -> WindowGrip: ...
     def place(self, grip: WindowGrip, rect: Rect) -> None: ...
     def is_maximized(self, window: str | int = "active") -> bool: ...
-    def screen_bounds(self, monitor: str = "all") -> Rect: ...   # "all" or "active"
+    def screen_bounds(self, monitor: str = "all") -> Rect: ...
     def active_app(self) -> tuple[int, str, str] | None: ...
     def window_at(self, x: int, y: int) -> tuple[int, str, str] | None: ...
+    def pointer(self) -> tuple[int, int]: ...
     def pointer_to(self, x: int, y: int) -> None: ...
 
 
+_DEFAULT_ENGINE_STATE: dict[str, Any] = {
+    "engaged": False,
+    "zone": "none",
+    "phase": "idle",
+    "ring_hover": "",
+    "grab_progress": 0.0,
+}
+
+
 class AirController:
-    """Translates Air gesture events and hand snapshots into desktop actions on its own thread."""
+    """Executes InteractionEngine Commands against the desktop on its own thread."""
 
     def __init__(
         self,
@@ -434,82 +474,51 @@ class AirController:
         self._kinds = app_kinds
 
         self._lock = threading.RLock()
-        self._queue: queue.Queue[GestureEvent] = queue.Queue(maxsize=64)
+        self._q_cond = threading.Condition()
+        self._queue: deque[Command] = deque()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._subscribed = False
 
-        self._arming = Arming()
         self._mode: str = "universal"
-        self._pending: tuple[str, tuple[float, float], float] | None = None
-        self._drag: tuple[str, WindowGrip, tuple[float, float]] | None = None
-        self._resize: WindowGrip | None = None
-        self._last_place: Rect | None = None
-        self._last_action: str = ""
-        self._pointer: tuple[float, float] | None = None
-        self._pointer_last: tuple[int, int] | None = None
-        self._pointer_down: bool = False
-        self._pointer_pinch: tuple[str, tuple[float, float], float] | None = None
-        self._pointer_bounds: Rect | None = None
-        self._pointing: tuple[str, float] | None = None
-        self._point_poll_t: float = -math.inf
-        self._point_cand: tuple[int, float] | None = None
-        self._point_selected: int | None = None
-        self._point_target: str = ""
-        self._point_bounds: Rect | None = None
-        self._point_told_empty = False
-        self._hands_present: set[str] = set()
-        self._hand_since: float | None = None
-        self._hint_text: str | None = None
-        self._hint_since: float = 0.0
-        self._last_hint_t: float = -math.inf
         self._welcomed: bool = False
+        self._last_action: str = ""
+
+        self._cursor: tuple[float, float] | None = None
+        self._last_move_t: float = -1e9
+        self._bounds_cache: tuple[float, Rect] | None = None
+
+        self._ring_target: tuple[int, str, str] | None = None
+        self._ring_labels: tuple[str, str, str, str] | None = None
+
+        self._grab: WindowGrip | None = None
+        self._grab_dx: float = 0.0
+        self._grab_dy: float = 0.0
+        self._last_place: Rect | None = None
+        self._grab_target: str = ""
 
     @property
     def mode(self) -> str:
         with self._lock:
             return self._mode
 
-    def _clear_pointing(self) -> None:
-        self._pointing = None
-        self._point_poll_t = -math.inf
-        self._point_cand = None
-        self._point_selected = None
-        self._point_target = ""
-        self._point_bounds = None
-        self._point_told_empty = False
+    def _clear_active(self) -> None:
+        self._ring_target = None
+        self._ring_labels = None
+        self._grab = None
+        self._grab_dx = 0.0
+        self._grab_dy = 0.0
+        self._last_place = None
+        self._grab_target = ""
 
     def set_mode(self, mode: str) -> None:
         if mode not in MODES:
             raise ValueError(f"Unknown Air mode: {mode!r}")
         with self._lock:
-            self._pending = None
-            self._drag = None
-            self._resize = None
-            self._last_place = None
-            self._pointer_pinch = None
-            self._pointer = None
-            self._pointer_last = None
-            self._clear_pointing()
-            if self._pointer_down:
-                self._release_pointer()
+            self._clear_active()
             self._mode = mode
-            if mode == "pointer":
-                try:
-                    self._pointer_bounds = self._desktop.screen_bounds()
-                except Exception:
-                    log.warning("Could not read screen bounds for pointer mode", exc_info=True)
-                    self._pointer_bounds = None
-            else:
-                self._pointer_bounds = None
         self._emit(events.AIR_MODE, {"mode": mode})
         self._feedback("mode", True, f"Air mode: {mode}.")
-
-    def next_mode(self) -> None:
-        with self._lock:
-            idx = MODES.index(self._mode)
-            nxt = MODES[(idx + 1) % len(MODES)]
-        self.set_mode(nxt)
 
     # ── ToolProvider ────────────────────────────────────────────────────────
 
@@ -529,12 +538,14 @@ class AirController:
         self.set_mode(mode)
         return f"Air mode is now {self.mode}."
 
+    # ── lifecycle & command queue ───────────────────────────────────────────
+
     def start(self) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return
             if not self._subscribed:
-                self._air.subscribe(self._enqueue)
+                self._air.subscribe_commands(self._enqueue)
                 self._subscribed = True
             self._stop.clear()
             thread = threading.Thread(
@@ -547,82 +558,74 @@ class AirController:
 
     def stop(self) -> None:
         self._stop.set()
+        with self._q_cond:
+            self._q_cond.notify_all()
         with self._lock:
             thread = self._thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=1.0)
         with self._lock:
             self._thread = None
-            self._pending = None
-            self._drag = None
-            self._resize = None
-            self._last_place = None
-            self._pointer_pinch = None
-            self._pointer = None
-            self._pointer_last = None
-            self._clear_pointing()
-            self._hands_present.clear()
-            self._hand_since = None
-            self._hint_text = None
-            if self._pointer_down:
-                self._release_pointer()
-        while True:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                break
+            self._clear_active()
+            self._cursor = None
+        with self._q_cond:
+            self._queue.clear()
 
-    def _enqueue(self, ev: GestureEvent) -> None:
-        try:
-            self._queue.put_nowait(ev)
-        except queue.Full:
-            try:
-                self._queue.get_nowait()
-            except queue.Empty:
-                pass
-            try:
-                self._queue.put_nowait(ev)
-            except queue.Full:
-                pass
+    def _enqueue(self, cmd: Command) -> None:
+        with self._q_cond:
+            if (
+                cmd.kind in ("cursor", "grab_move")
+                and self._queue
+                and self._queue[-1].kind == cmd.kind
+            ):
+                prev = self._queue[-1]
+                self._queue[-1] = Command(
+                    cmd.kind,
+                    cmd.t,
+                    dx=prev.dx + cmd.dx,
+                    dy=prev.dy + cmd.dy,
+                )
+            else:
+                if len(self._queue) >= _QUEUE_MAX:
+                    self._queue.popleft()
+                self._queue.append(cmd)
+            self._q_cond.notify()
 
     def _run(self) -> None:
-        period = 1.0 / CONTROL_HZ
         while not self._stop.is_set():
-            ev: GestureEvent | None = None
+            with self._q_cond:
+                while not self._queue and not self._stop.is_set():
+                    self._q_cond.wait(timeout=0.1)
+                if self._stop.is_set():
+                    break
+                cmd = self._queue.popleft()
             try:
-                ev = self._queue.get(timeout=period)
-            except queue.Empty:
-                pass
-            if self._stop.is_set():
-                break
-            if ev is not None:
-                try:
-                    self.process(ev)
-                except Exception:
-                    log.exception("AirController.process failed")
-            if self._stop.is_set():
-                break
-            try:
-                self.tick(self._clock())
+                self.process(cmd)
             except Exception:
-                log.exception("AirController.tick failed")
+                log.exception("AirController.process failed for %s", cmd.kind)
 
     def state(self) -> dict:
-        t = self._clock()
+        fn = getattr(self._air, "engine_state", None)
+        est = fn() if callable(fn) else dict(_DEFAULT_ENGINE_STATE)
         with self._lock:
-            dwell = 0.0
-            if self._point_cand is not None and self._point_cand[0] != self._point_selected:
-                dwell = max(0.0, min(1.0, (t - self._point_cand[1]) / POINT_DWELL))
+            if self._grab_target:
+                target = self._grab_target
+            elif self._ring_target is not None:
+                target = self._ring_target[2] or self._ring_target[1]
+            else:
+                target = ""
             return {
                 "mode": self._mode,
-                "armed": self._arming.armed(t),
-                "dragging": self._drag is not None,
-                "resizing": self._resize is not None,
-                "last_action": self._last_action,
-                "target": self._point_target,
-                "dwell": dwell,
-                "hand_since": self._hand_since,
+                "engaged": bool(est.get("engaged", False)),
+                "zone": str(est.get("zone", "none")),
+                "phase": str(est.get("phase", "idle")),
+                "ring_hover": str(est.get("ring_hover", "")),
+                "grab_progress": float(est.get("grab_progress", 0.0)),
+                "ring_labels": self._ring_labels,
+                "target": target,
             }
+
+    # ── desktop & event helpers ─────────────────────────────────────────────
 
     def _emit(self, name: str, payload: dict) -> None:
         if self._publish_fn is None:
@@ -641,18 +644,29 @@ class AirController:
             "message": message,
         })
 
-    def _release_pointer(self) -> None:
-        self._pointer_down = False
+    def _read_pointer(self) -> tuple[float, float]:
         try:
-            self._desktop.run("pointer_up", {"button": "left"})
+            px, py = self._desktop.pointer()
+            return (float(px), float(py))
         except Exception:
-            log.warning("Releasing pointer button failed", exc_info=True)
+            log.warning("Could not read pointer position", exc_info=True)
+            return (0.0, 0.0)
 
-    def _active_app(self) -> tuple[int, str, str] | None:
+    def _ensure_cursor(self) -> tuple[float, float]:
+        if self._cursor is None:
+            self._cursor = self._read_pointer()
+        return self._cursor
+
+    def _screen_bounds(self) -> Rect | None:
+        now = self._clock()
+        if self._bounds_cache is not None and (now - self._bounds_cache[0]) < _BOUNDS_CACHE_S:
+            return self._bounds_cache[1]
         try:
-            return self._desktop.active_app()
+            b = self._desktop.screen_bounds()
         except Exception:
-            return None
+            return self._bounds_cache[1] if self._bounds_cache is not None else None
+        self._bounds_cache = (now, b)
+        return b
 
     def _window_at(self, x: int, y: int) -> tuple[int, str, str] | None:
         try:
@@ -660,370 +674,226 @@ class AirController:
         except Exception:
             return None
 
-    def _screen_bounds(self, monitor: str = "all") -> Rect | None:
-        try:
-            return self._desktop.screen_bounds(monitor) if monitor != "all" else self._desktop.screen_bounds()
-        except TypeError:   # a DesktopPort without the monitor argument (tests' fakes)
-            return self._desktop.screen_bounds()
-        except Exception:
-            return None
-
-    def _kind(self) -> str:
-        info = self._active_app()
-        if info is None:
+    def _kind_for(self, target: tuple[int, str, str] | None) -> str:
+        if target is None:
             return "other"
-        _, app, title = info
+        _, app, title = target
         try:
             overrides = self._kinds()
         except Exception:
             overrides = None
         return app_kind(app, title, overrides)
 
-    def _tick_pointing(self, t: float, snap: AirState) -> None:
-        if self._pointing is None:
-            return
-        if not self._arming.armed(t) or self._mode == "ai":
-            self._clear_pointing()
-            return
-        side, _ = self._pointing
-        h = next((hv for hv in snap.hands if hv.side == side), None)
-        if h is None or h.pose != "point":
-            self._clear_pointing()
-            return
-        if (t - self._point_poll_t) < _POINT_POLL - _EPS:
-            return
-        self._point_poll_t = t
-        b = self._point_bounds
-        if b is None:
-            b = self._screen_bounds("active")
-            self._point_bounds = b
-        if b is None or b.width <= 0 or b.height <= 0:
-            return
-        sx, sy = hand_to_screen(h.tip_x, h.tip_y, b)
-        hit = self._window_at(sx, sy)
-        if hit is None:
-            self._point_cand = None
-            # Say so once per pointing, instead of silently doing nothing (live test: the user
-            # pointed for a minute at windows that were on the other monitor or minimized).
-            if not self._point_told_empty and (t - self._pointing[1]) >= POINT_DWELL:
-                self._point_told_empty = True
-                self._feedback("target", False, "Nothing I can control is under your finger.")
-            return
-        wid, app, title = hit
-        if self._point_cand is None or self._point_cand[0] != wid:
-            self._point_cand = (wid, t)
-            return
-        if (t - self._point_cand[1]) >= POINT_DWELL - _EPS and wid != self._point_selected:
-            self._point_selected = wid
-            r = self._desktop.run("window_focus", {"window": wid})
-            label = title or app or f"window {wid}"
-            if r.ok:
-                self._point_target = title or app
-                self._feedback("target", True, f"Target: {label}.")
-                self._emit(events.AIR_INTENT, {
-                    "intent": "point",
-                    "mode": self._mode,
-                    "gesture": "pose",
-                    "app": app,
-                    "title": title,
-                })
-            else:
-                self._feedback("target", False, r.message)
+    # ── Command execution ───────────────────────────────────────────────────
 
-    def _tick_hint(self, t: float, snap: AirState) -> None:
-        hint = framing_hint(snap.hands)
-        if hint is None:
-            self._hint_text = None
-            return
-        if hint != self._hint_text:
-            self._hint_text = hint
-            self._hint_since = t
-            return
-        if (t - self._hint_since) >= HINT_AFTER - _EPS and (t - self._last_hint_t) >= HINT_EVERY - _EPS:
-            self._last_hint_t = t
-            self._hint_since = t
-            self._feedback("hint", True, hint)
-
-    def process(self, ev: GestureEvent) -> None:
+    def process(self, cmd: Command) -> None:
         with self._lock:
-            g = ev.gesture
-            if g == "hand_enter":
-                if not self._hands_present:
-                    self._hand_since = ev.t
-                self._hands_present.add(ev.hand)
-            elif g == "hand_leave":
-                self._hands_present.discard(ev.hand)
-                if not self._hands_present:
-                    self._hand_since = None
+            k = cmd.kind
 
-            was_armed = self._arming.armed(ev.t)
-            self._arming.on_event(ev)
-            is_armed = self._arming.armed(ev.t)
-            if not was_armed and is_armed and not self._welcomed:
-                self._welcomed = True
-                self._feedback("welcome", True, WELCOME)
-            if not is_armed:
-                self._pending = None
-                self._pointer_pinch = None
-                self._clear_pointing()
-                if self._pointer_down:
-                    self._release_pointer()
-                if g == "pinch_end" and self._drag is not None and self._drag[0] == ev.hand:
-                    self._drag = None
-                    self._last_place = None
-                elif g == "spread_end" and self._resize is not None:
-                    self._resize = None
-                    self._last_place = None
-                return
-
-            if self._pointing is not None:
-                pside = self._pointing[0]
-                if (
-                    g in ("pinch_start", "pinch_end", "double_pinch", "spread_start", "spread_end")
-                    or (g == "hand_leave" and ev.hand == pside)
-                    or (g == "pose" and ev.hand == pside and ev.data.get("pose") != "point")
-                ):
-                    self._clear_pointing()
-
-            mode = self._mode
-
-            # 1. Continuous gestures: Stage D1 drag/resize or pointer mode pinch.
-            if mode in _DRAG_MODES:
-                if g == "pinch_start":
-                    if self._drag is None and self._resize is None:
-                        self._pending = (ev.hand, (ev.x, ev.y), ev.t)
-                    return
-
-                if g == "pinch_end":
-                    if self._drag is not None and self._drag[0] == ev.hand:
-                        _, grip, _ = self._drag
-                        last = self._last_place or grip.start
-                        self._drag = None
-                        self._last_place = None
-                        if not ev.data.get("lost"):
-                            snap = edge_snap(last, grip.bounds)
-                            if snap is not None:
-                                r = self._desktop.run("window_snap", {"window": grip.id, "where": snap})
-                                self._feedback("window_snap", r.ok, r.message)
-                            else:
-                                label = grip.title or f"window {grip.id}"
-                                self._feedback("window_move", True, f"Moved {label}.")
-                    elif self._pending is not None and self._pending[0] == ev.hand:
-                        self._pending = None
-                    return
-
-                if g == "spread_start":
-                    self._pending = None
-                    if self._drag is not None:
-                        grip = self._drag[1]
-                        self._drag = None
-                    else:
-                        try:
-                            grip = self._desktop.grip()
-                        except Exception as exc:
-                            self._feedback("window_resize", False, str(exc))
-                            return
-                    self._resize = grip
-                    self._last_place = grip.start
-                    return
-
-                if g == "spread_end":
-                    if self._resize is not None:
-                        grip = self._resize
-                        self._resize = None
-                        self._last_place = None
-                        label = grip.title or f"window {grip.id}"
-                        self._feedback("window_resize", True, f"Resized {label}.")
-                    return
-
-            elif mode == "pointer":
-                if g == "pinch_start":
-                    if not self._pointer_down:
-                        self._pointer_pinch = (ev.hand, (ev.x, ev.y), ev.t)
-                    return
-
-                if g == "pinch_end":
-                    if self._pointer_down:
-                        self._pointer_pinch = None
-                        self._pointer_down = False
-                        r = self._desktop.run("pointer_up", {"button": "left"})
-                        self._feedback("pointer_up", r.ok, r.message)
-                    elif self._pointer_pinch is not None and self._pointer_pinch[0] == ev.hand:
-                        _, pos0, t0 = self._pointer_pinch
-                        self._pointer_pinch = None
-                        dur = ev.t - t0
-                        moved_dist = math.hypot(ev.x - pos0[0], ev.y - pos0[1])
-                        if not ev.data.get("lost") and dur < _POINTER_HOLD and moved_dist < DRAG_START:
-                            r = self._desktop.run("pointer_click", {"button": "left"})
-                            self._feedback("pointer_click", r.ok, r.message)
-                    return
-
-            if g == "double_pinch":
-                self._pending = None
-                self._pointer_pinch = None
-                if self._drag is not None and self._drag[0] == ev.hand and self._last_place is None:
-                    self._drag = None
-
-            # 2. Discrete gestures via the pure resolver.
-            if self._drag is not None or self._resize is not None or ev.confidence < ACTION_MIN_CONF:
-                return
-
-            kind = self._kind() if (mode == "universal" and g in ("swipe_left", "swipe_right")) else "other"
-            res = resolve(g, ev.data.get("pose", ""), mode, kind)
-
-            if res.kind == "mode":
-                self.next_mode()
-                return
-
-            if res.kind == "intent":
-                if res.intent == "point" and mode != "ai":
-                    self._pointing = (ev.hand, ev.t)
-                    self._point_poll_t = -math.inf
-                    self._point_cand = None
-                    self._point_selected = None
-                    self._point_target = ""
-                    self._point_told_empty = False
-                    # The monitor the active window is on: mapping the frame onto both screens put
-                    # the frame's centre on the screen boundary, so windows were hard to reach.
-                    self._point_bounds = self._screen_bounds("active")
-                    return
-                info = self._active_app()
-                app, title = (info[1], info[2]) if info is not None else ("", "")
-                self._emit(events.AIR_INTENT, {
-                    "intent": res.intent,
-                    "mode": mode,
-                    "gesture": g,
-                    "app": app,
-                    "title": title,
-                })
-                self._feedback("intent", True, f"Intent {res.intent}.")
-                return
-
-            if res.kind == "action":
-                if res.action == "toggle_maximize":
-                    try:
-                        action = "window_restore" if self._desktop.is_maximized() else "window_maximize"
-                    except Exception as exc:
-                        self._feedback("window_maximize", False, str(exc))
-                        return
-                    r = self._desktop.run(action)
-                    self._feedback(action, r.ok, r.message)
+            if k == "engage":
+                self._cursor = self._read_pointer()
+                self._last_move_t = cmd.t
+                self._bounds_cache = None
+                self._screen_bounds()
+                if not self._welcomed:
+                    self._welcomed = True
+                    self._feedback("welcome", True, WELCOME)
                 else:
-                    r = self._desktop.run(res.action, dict(res.args))
-                    self._feedback(res.action, r.ok, r.message)
+                    self._feedback("engage", True, "Air on.")
                 return
 
-            if res.kind == "ignore" and res.reason:
-                self._feedback("ignore", False, res.reason)
-
-    def tick(self, t: float) -> None:
-        with self._lock:
-            if self._arming.consume_disarm(t):
-                self._drag = None
-                self._resize = None
-                self._pending = None
-                self._last_place = None
-                self._pointer_pinch = None
-                self._pointer = None
-                self._pointer_last = None
-                self._clear_pointing()
-                if self._pointer_down:
-                    self._release_pointer()
-                self._feedback("disarm", True, "Air control paused.")
+            if k == "disengage":
+                self._clear_active()
+                self._cursor = None
+                self._feedback("disengage", True, "Air off.")
                 return
 
-            snap = self._air.snapshot()
-            self._tick_pointing(t, snap)
-            self._tick_hint(t, snap)
+            if k == "hint":
+                self._feedback("hint", True, cmd.text)
+                return
 
-            if self._mode == "pointer":
-                if not self._arming.armed(t) or self._drag is not None or self._resize is not None:
+            if k == "cursor":
+                if self._cursor is None or (cmd.t - self._last_move_t) > _POINTER_RESYNC_S:
+                    self._cursor = self._read_pointer()
+                cx = self._cursor[0] + cmd.dx
+                cy = self._cursor[1] + cmd.dy
+                b = self._screen_bounds()
+                if b is not None and b.width > 0 and b.height > 0:
+                    cx = max(float(b.x), min(float(b.x + b.width - 1), cx))
+                    cy = max(float(b.y), min(float(b.y + b.height - 1), cy))
+                self._cursor = (cx, cy)
+                self._last_move_t = cmd.t
+                try:
+                    self._desktop.pointer_to(round(cx), round(cy))
+                except Exception:
+                    log.warning("Air pointer_to failed", exc_info=True)
+                return
+
+            if k == "ring_open":
+                cx, cy = self._ensure_cursor()
+                target = self._window_at(round(cx), round(cy))
+                self._ring_target = target
+                kind = self._kind_for(target)
+                labels = ring_labels(self._mode, kind)
+                self._ring_labels = labels
+                self._feedback("ring", True, " / ".join(lbl for lbl in labels if lbl))
+                return
+
+            if k == "ring_hover":
+                return
+
+            if k == "ring_cancel":
+                self._ring_labels = None
+                self._ring_target = None
+                return
+
+            if k == "ring_select":
+                target = self._ring_target
+                self._ring_labels = None
+                self._ring_target = None
+                self._run_ring_action(cmd.direction, target)
+                return
+
+            if k == "grab_start":
+                self._ring_labels = None
+                self._ring_target = None
+                cx, cy = self._ensure_cursor()
+                target = self._window_at(round(cx), round(cy))
+                if target is None:
+                    self._feedback("window_move", False, "No window under the cursor.")
                     return
-                if (
-                    self._pointer_pinch is not None
-                    and not self._pointer_down
-                    and (t - self._pointer_pinch[2]) >= _POINTER_HOLD - _EPS
-                ):
-                    self._pointer_down = True
-                    r = self._desktop.run("pointer_down", {"button": "left"})
-                    self._feedback("pointer_down", r.ok, r.message)
-                if snap.hands:
-                    h = snap.hands[0]
-                    b = self._pointer_bounds
-                    if b is None:
-                        try:
-                            b = self._desktop.screen_bounds()
-                            self._pointer_bounds = b
-                        except Exception:
-                            b = None
-                    if b is not None and b.width > 0 and b.height > 0:
-                        tx, ty = hand_to_screen(h.x, h.y, b)
-                        if self._pointer is None:
-                            px, py = float(tx), float(ty)
-                        else:
-                            px = self._pointer[0] + POINTER_SMOOTH * (tx - self._pointer[0])
-                            py = self._pointer[1] + POINTER_SMOOTH * (ty - self._pointer[1])
-                        self._pointer = (px, py)
-                        rx, ry = round(px), round(py)
-                        if (
-                            self._pointer_last is None
-                            or math.hypot(rx - self._pointer_last[0], ry - self._pointer_last[1])
-                            >= _POINTER_MIN_PX
-                        ):
-                            try:
-                                self._desktop.pointer_to(rx, ry)
-                            except Exception:
-                                log.warning("Air pointer_to failed", exc_info=True)
-                            else:
-                                self._pointer_last = (rx, ry)
+                wid, app, title = target
+                self._desktop.run("window_focus", {"window": wid})
+                try:
+                    grip = self._desktop.grip(wid)
+                except Exception as exc:
+                    self._feedback("window_move", False, str(exc))
+                    return
+                self._grab = grip
+                self._grab_dx = 0.0
+                self._grab_dy = 0.0
+                self._last_place = None
+                self._grab_target = title or app
                 return
 
-            if self._pending is not None and self._drag is None:
-                side, hand0, _ = self._pending
-                h = next((hv for hv in snap.hands if hv.side == side), None)
-                if h is None or not h.pinching:
-                    self._pending = None
-                elif math.hypot(h.x - hand0[0], h.y - hand0[1]) >= DRAG_START:
-                    self._pending = None
+            if k == "grab_move":
+                if self._grab is None:
+                    return
+                self._grab_dx += cmd.dx
+                self._grab_dy += cmd.dy
+                rect = self._grab.start.translate(round(self._grab_dx), round(self._grab_dy))
+                ref = self._last_place if self._last_place is not None else self._grab.start
+                if moved(rect, ref):
                     try:
-                        grip = self._desktop.grip()
-                    except ActionError as exc:
-                        self._feedback("window_move", False, str(exc))
-                        return
+                        self._desktop.place(self._grab, rect)
                     except Exception as exc:
-                        log.warning("Air grip failed: %s", exc)
+                        self._grab = None
+                        self._grab_dx = 0.0
+                        self._grab_dy = 0.0
+                        self._last_place = None
+                        self._grab_target = ""
                         self._feedback("window_move", False, str(exc))
                         return
-                    # Measure from where the hand is now, not where the pinch began: the hand has
-                    # already travelled DRAG_START, and that would make the window jump ~180 px.
-                    self._drag = (side, grip, (h.x, h.y))
-                    self._last_place = None
+                    self._last_place = rect
+                return
 
-            if self._drag is not None:
-                side, grip, hand0 = self._drag
-                h = next((hv for hv in snap.hands if hv.side == side), None)
-                if h is not None and h.pinching:
-                    rect = drag_rect(grip.start, hand0, (h.x, h.y), grip.bounds)
-                    if self._last_place is None or moved(rect, self._last_place):
-                        try:
-                            self._desktop.place(grip, rect)
-                        except Exception as exc:
-                            self._drag = None
-                            self._last_place = None
-                            self._feedback("window_move", False, str(exc))
-                            return
-                        self._last_place = rect
+            if k == "grab_end":
+                if self._grab is None:
+                    return
+                grip = self._grab
+                last = self._last_place or grip.start
+                self._grab = None
+                self._grab_dx = 0.0
+                self._grab_dy = 0.0
+                self._last_place = None
+                self._grab_target = ""
+                snap = edge_snap(last, grip.bounds)
+                if snap is not None:
+                    r = self._desktop.run("window_snap", {"window": grip.id, "where": snap})
+                    self._feedback("window_snap", r.ok, r.message)
+                else:
+                    label = grip.title or f"window {grip.id}"
+                    self._feedback("window_move", True, f"Moved {label}.")
+                return
 
-            if self._resize is not None:
-                scale = snap.spread_scale
-                if scale is not None:
-                    rect = spread_rect(self._resize.start, scale)
-                    if self._last_place is None or moved(rect, self._last_place):
-                        try:
-                            self._desktop.place(self._resize, rect)
-                        except Exception as exc:
-                            self._resize = None
-                            self._last_place = None
-                            self._feedback("window_resize", False, str(exc))
-                            return
-                        self._last_place = rect
+            if k == "scroll":
+                if cmd.steps == 0:
+                    return
+                direction = "up" if cmd.steps > 0 else "down"
+                r = self._desktop.run("pointer_scroll", {"direction": direction, "amount": abs(cmd.steps)})
+                self._feedback("pointer_scroll", r.ok, r.message)
+                return
+
+            if k == "intent":
+                cx, cy = self._ensure_cursor()
+                hit = self._window_at(round(cx), round(cy))
+                app, title = (hit[1], hit[2]) if hit is not None else ("", "")
+                self._emit(events.AIR_INTENT, {
+                    "intent": cmd.text,
+                    "mode": self._mode,
+                    "gesture": "thumbs",
+                    "app": app,
+                    "title": title,
+                })
+                self._feedback("intent", True, f"Intent {cmd.text}.")
+
+    def _run_ring_action(self, direction: str, target: tuple[int, str, str] | None) -> None:
+        kind = self._kind_for(target)
+        action, args = ring_action(direction, self._mode, kind)
+
+        if action == "ignore":
+            self._feedback("ignore", False, f"{direction} does nothing in {self._mode} mode.")
+            return
+
+        if action == "intent":
+            intent = str(args.get("intent", "talk"))
+            app, title = (target[1], target[2]) if target is not None else ("", "")
+            self._emit(events.AIR_INTENT, {
+                "intent": intent,
+                "mode": self._mode,
+                "gesture": f"ring_{direction}",
+                "app": app,
+                "title": title,
+            })
+            self._feedback("intent", True, f"Intent {intent}.")
+            return
+
+        if action == "click":
+            r = self._desktop.run("pointer_click", {"button": "left"})
+            self._feedback("pointer_click", r.ok, r.message)
+            return
+
+        if action == "toggle_maximize":
+            if target is None:
+                self._feedback("window_maximize", False, "No window under the cursor.")
+                return
+            wid = target[0]
+            self._desktop.run("window_focus", {"window": wid})
+            try:
+                act = "window_restore" if self._desktop.is_maximized(wid) else "window_maximize"
+            except Exception as exc:
+                self._feedback("window_maximize", False, str(exc))
+                return
+            r = self._desktop.run(act, {"window": wid})
+            self._feedback(act, r.ok, r.message)
+            return
+
+        if action in ("window_snap", "window_minimize"):
+            if target is None:
+                self._feedback(action, False, "No window under the cursor.")
+                return
+            wid = target[0]
+            self._desktop.run("window_focus", {"window": wid})
+            r = self._desktop.run(action, {**args, "window": wid})
+            self._feedback(action, r.ok, r.message)
+            return
+
+        if action == "press_keys":
+            if target is not None:
+                self._desktop.run("window_focus", {"window": target[0]})
+            r = self._desktop.run("press_keys", dict(args))
+            self._feedback("press_keys", r.ok, r.message)
+            return
+
+        r = self._desktop.run(action, dict(args))
+        self._feedback(action, r.ok, r.message)

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from .application import AirController, AirService, Camera, Landmarker
-from .domain import GESTURES, MODES, AirState, Arming, GestureEvent, HandView, Resolution, pick_camera, resolve
+from .domain import GESTURES, MODES, AirState, GestureEvent, HandView, pick_camera, ring_action, ring_labels
+from .engine import Command, InteractionEngine
 from .infrastructure.cameras import list_cameras
 from .infrastructure.landmarker import air_available, download_model, model_path, model_ready
 
@@ -11,13 +12,14 @@ __all__ = [
     "AirService",
     "AirController",
     "AirState",
-    "Arming",
+    "Command",
     "HandView",
     "GestureEvent",
     "GESTURES",
+    "InteractionEngine",
     "MODES",
-    "Resolution",
-    "resolve",
+    "ring_action",
+    "ring_labels",
     "Camera",
     "Landmarker",
     "list_cameras",

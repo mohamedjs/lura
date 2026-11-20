@@ -898,22 +898,35 @@ def _tool_badges(cr, size, pal: Palette, tools, t, origin):
         cr.show_text(label)
 
 
+_RING_ANGLES: tuple[tuple[str, int, float], ...] = (
+    ("right", 1, 0.0),
+    ("down", 3, math.pi / 2.0),
+    ("left", 0, math.pi),
+    ("up", 2, -math.pi / 2.0),
+)
+
+
 def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
-    """Small bottom-left radar HUD showing tracked hands, dwell, action pulse and mode."""
+    """Small bottom-left radar HUD showing zone, ring menu, grab progress, action pulse and mode."""
     import cairo
 
     u = size / OVERLAY_SIZE
     cx, cy = size * 0.14, size * 0.80
     R = size * 0.085
+    bright = air.engaged
 
-    # 1. Disc fill and outer ring.
+    # 1. Disc fill and outer ring (dashed when hand is too far).
     cr.new_sub_path()
     cr.arc(cx, cy, R, 0.0, 2.0 * math.pi)
-    cr.set_source_rgba(*pal.wire, 0.18 if air.armed else 0.10)
+    cr.set_source_rgba(*pal.wire, 0.18 if bright else 0.10)
     cr.fill_preserve()
     cr.set_line_width(1.2 * u)
-    cr.set_source_rgba(*pal.glow, 0.90 if air.armed else 0.35)
+    cr.set_source_rgba(*pal.glow, 0.90 if bright else 0.35)
+    if air.zone == "far":
+        cr.set_dash([3.0 * u, 3.0 * u])
     cr.stroke()
+    if air.zone == "far":
+        cr.set_dash([])
 
     # 2. Crosshair through the centre.
     cr.set_line_width(0.8 * u)
@@ -924,7 +937,34 @@ def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
     cr.line_to(cx, cy + R)
     cr.stroke()
 
-    # 3. Scan sweep for 0.8 s after a hand appears.
+    # 3. Command ring wedge and four directional labels at 0/90/180/270 deg.
+    if air.ring is not None:
+        for direction, idx, ang in _RING_ANGLES:
+            hovered = direction == air.ring_hover
+            if hovered:
+                cr.move_to(cx, cy)
+                cr.arc(cx, cy, R, ang - math.pi / 4.0, ang + math.pi / 4.0)
+                cr.close_path()
+                cr.set_source_rgba(*pal.accent, 0.35)
+                cr.fill()
+            text = air.ring[idx]
+            if not text:
+                continue
+            cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+            cr.set_font_size(max(7.0, 9.0 * u))
+            ext = cr.text_extents(text)
+            tx = cx + math.cos(ang) * (R + 10.0 * u) - ext.width / 2.0 - ext.x_bearing
+            ty = cy + math.sin(ang) * (R + 10.0 * u) - ext.height / 2.0 - ext.y_bearing
+            tx = max(2.0 * u, min(size - ext.width - 2.0 * u, tx))
+            ty = max(ext.height + 2.0 * u, min(size - 2.0 * u, ty))
+            cr.move_to(tx, ty)
+            if hovered:
+                cr.set_source_rgba(*pal.accent, 0.98)
+            else:
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.85)
+            cr.show_text(text)
+
+    # 4. Scan sweep for 0.8 s after a hand appears.
     if 0.0 <= air.hand_age < 0.8:
         frac = air.hand_age / 0.8
         ang = 2.0 * math.pi * frac
@@ -934,7 +974,7 @@ def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
         cr.line_to(cx + math.cos(ang) * R, cy + math.sin(ang) * R)
         cr.stroke()
 
-    # 4. Tracked hands inside the disc.
+    # 5. Tracked hands inside the disc.
     for hx, hy, pinch in air.hands:
         dx = (hx - 0.5) * 1.8 * R
         dy = (hy - 0.5) * 1.8 * R
@@ -953,14 +993,15 @@ def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
             cr.arc(px, py, 5.0 * u, 0.0, 2.0 * math.pi)
             cr.stroke()
 
-    # 5. Dwell arc while pointing at a window.
-    if air.dwell > 0.0:
+    # 6. Grab hold progress arc (reuses the dwell arc).
+    arc_prog = air.grab_progress if air.grab_progress > 0.0 else air.dwell
+    if arc_prog > 0.0:
         cr.set_line_width(2.4 * u)
         cr.set_source_rgba(*pal.accent, 0.95)
-        cr.arc(cx, cy, R + 4.0 * u, -math.pi / 2.0, -math.pi / 2.0 + 2.0 * math.pi * min(1.0, air.dwell))
+        cr.arc(cx, cy, R + 4.0 * u, -math.pi / 2.0, -math.pi / 2.0 + 2.0 * math.pi * min(1.0, arc_prog))
         cr.stroke()
 
-    # 6. Action confirmation pulse ring.
+    # 7. Action confirmation pulse ring.
     if air.pulse_ok is not None and 0.0 <= air.pulse_age < 0.6:
         frac = air.pulse_age / 0.6
         rgb = pal.glow if air.pulse_ok else (1.0, 0.62, 0.20)
@@ -969,16 +1010,17 @@ def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
         cr.arc(cx, cy, R * (1.0 + frac * 0.8), 0.0, 2.0 * math.pi)
         cr.stroke()
 
-    # 7. Mode label under the disc (plain ASCII; cairo toy font).
-    label = f"AIR - {air.mode.upper()}"
-    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
-    cr.set_font_size(max(8.0, 9.0 * u))
-    ext = cr.text_extents(label)
-    lx = max(2.0 * u, cx - ext.width / 2.0 - ext.x_bearing)
-    ly = cy + R + 12.0 * u - ext.height / 2.0 - ext.y_bearing
-    cr.move_to(lx, ly)
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.85 if air.armed else 0.45)
-    cr.show_text(label)
+    # 8. Mode label under the disc (plain ASCII; cairo toy font; omitted while ring labels occupy bottom).
+    if air.ring is None:
+        label = f"AIR - {air.mode.upper()}"
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(max(8.0, 9.0 * u))
+        ext = cr.text_extents(label)
+        lx = max(2.0 * u, cx - ext.width / 2.0 - ext.x_bearing)
+        ly = cy + R + 12.0 * u - ext.height / 2.0 - ext.y_bearing
+        cr.move_to(lx, ly)
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.85 if bright else 0.45)
+        cr.show_text(label)
 
 
 _STYLES = {"face": _face_style, "orb": _orb_style, "ring": _ring_style, "bust": _bust_style}

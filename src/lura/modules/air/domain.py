@@ -51,22 +51,11 @@ SHORT_PINCH = 0.30       # s a pinch may last to count as the first of a double 
 MIN_SCORE = 0.60         # hands with a lower handedness score are ignored
 SPREAD_MIN_DIST = 0.05   # both-hand pinch distance must exceed this to start a spread
 TRACK_JUMP = 0.18        # max palm distance to keep a track when MediaPipe flips left/right
-POINT_DWELL = 0.4        # s a point pose must stay on one window before focusing it
 
-# Control thresholds (Stage D1).
-ARM_IDLE = 8.0                      # s armed after the last hand or gesture
-FIST_HOLD = 0.5                     # s a fist pose must stay uncancelled before disarming
-ACTION_MIN_CONF = 0.75              # discrete gestures below this confidence are ignored
-DRAG_START = 0.03                   # normalized hand travel while pinching before a window is grabbed
-DRAG_GAIN = 1.6                     # screen pixels moved per pixel of hand travel (hand travel × bounds size × gain)
+# Control geometry & HUD constants.
 SNAP_PX = 40                        # releasing a window within this many px of a screen edge snaps it
 PLACE_MIN_PX = 4                    # skip a place() that moves less than this
-CONTROL_HZ = 30                     # how often an active drag/resize is updated
-SPREAD_MIN, SPREAD_MAX = 0.5, 2.5   # resize scale clamp
-MIN_W, MIN_H = 320, 240             # smallest size a spread can make a window
-
-POINTER_MARGIN = 0.15   # the central 70 % of the frame maps to the whole screen
-POINTER_SMOOTH = 0.35   # exponential smoothing of the pointer target per tick (0..1, higher = snappier)
+CONTROL_HZ = 30                     # controller poll timeout rate
 
 HINT_EDGE = 0.10        # a hand within this of the left/right frame edge, or below 1 - this, is "at the edge"
 HINT_AFTER = 1.5        # s at the edge before the hint
@@ -742,19 +731,7 @@ def pick_camera(cams: list[CameraInfo], wanted: str = "") -> CameraInfo | None:
     return min(usable, key=lambda c: (0 if c.driver == "uvcvideo" else 1, c.index))
 
 
-# ── control geometry & arming ───────────────────────────────────────────────
-
-def drag_rect(
-    start: Rect,
-    hand0: tuple[float, float],
-    hand: tuple[float, float],
-    bounds: Rect,
-) -> Rect:
-    """Translate ``start`` by scaled hand travel in screen pixels."""
-    dx = round((hand[0] - hand0[0]) * bounds.width * DRAG_GAIN)
-    dy = round((hand[1] - hand0[1]) * bounds.height * DRAG_GAIN)
-    return start.translate(dx, dy)
-
+# ── control geometry & command ring ─────────────────────────────────────────
 
 def edge_snap(rect: Rect, bounds: Rect) -> str | None:
     """Return 'left' or 'right' when ``rect`` touches within SNAP_PX of a screen edge."""
@@ -763,15 +740,6 @@ def edge_snap(rect: Rect, bounds: Rect) -> str | None:
     if rect.x + rect.width >= bounds.x + bounds.width - SNAP_PX:
         return "right"
     return None
-
-
-def spread_rect(start: Rect, scale: float) -> Rect:
-    """Scale ``start`` around its centre, clamped to [SPREAD_MIN, SPREAD_MAX] and MIN_W/MIN_H."""
-    s = max(SPREAD_MIN, min(SPREAD_MAX, scale))
-    w = max(MIN_W, round(start.width * s))
-    h = max(MIN_H, round(start.height * s))
-    cx, cy = start.center
-    return Rect(cx - w // 2, cy - h // 2, w, h)
 
 
 def moved(a: Rect, b: Rect) -> bool:
@@ -784,71 +752,8 @@ def moved(a: Rect, b: Rect) -> bool:
     )
 
 
-class Arming:
-    """Pure arming gate: open palm arms for ARM_IDLE s; events extend; fist disarms after FIST_HOLD."""
-
-    def __init__(self) -> None:
-        self._until: float = -math.inf
-        self._pending_disarm: tuple[str, float] | None = None
-        self._disarmed_notice: bool = False
-
-    def _apply_pending(self, t: float) -> None:
-        if self._pending_disarm is not None and t >= self._pending_disarm[1] - _EPS:
-            self._pending_disarm = None
-            if t < self._until:
-                self._disarmed_notice = True
-            self._until = -math.inf
-
-    def on_event(self, ev: GestureEvent) -> None:
-        self._apply_pending(ev.t)
-        if ev.gesture == "pose":
-            pose = ev.data.get("pose")
-            if pose == "fist":
-                if ev.t < self._until and self._pending_disarm is None:
-                    self._pending_disarm = (ev.hand, ev.t + FIST_HOLD)
-                return
-            if self._pending_disarm is not None and self._pending_disarm[0] == ev.hand:
-                self._pending_disarm = None
-            if pose == "open_palm":
-                self._until = max(self._until, ev.t + ARM_IDLE)
-                return
-        elif ev.gesture == "pinch_start":
-            if self._pending_disarm is not None and self._pending_disarm[0] == ev.hand:
-                self._pending_disarm = None
-        if ev.t < self._until:
-            self._until = max(self._until, ev.t + ARM_IDLE)
-
-    def armed(self, t: float) -> bool:
-        self._apply_pending(t)
-        return t < self._until
-
-    def consume_disarm(self, t: float) -> bool:
-        """Apply any due disarm at ``t`` and return True once when a fist disarm takes effect."""
-        self._apply_pending(t)
-        if self._disarmed_notice:
-            self._disarmed_notice = False
-            return True
-        return False
-
-    def disarm(self) -> None:
-        self._until = -math.inf
-        self._pending_disarm = None
-        self._disarmed_notice = False
-
-
-# ── modes, app kinds & resolver (Stage E) ───────────────────────────────────
-
-@dataclass(frozen=True)
-class Resolution:
-    kind: str                  # "action" | "intent" | "ignore" | "mode"
-    action: str = ""           # computer action name (kind "action")
-    args: dict = field(default_factory=dict)
-    intent: str = ""           # kind "intent": "point" | "confirm" | "deny" | "talk"
-    reason: str = ""           # kind "ignore": a short sentence
-
-
 def app_kind(app: str, title: str, overrides: dict[str, str] | None = None) -> str:
-    """Classify an active window's WM_CLASS + title into one of ``KINDS``."""
+    """Classify a window's WM_CLASS + title into one of ``KINDS``."""
     low = (app or "").lower()
     if overrides:
         for needle, kind in overrides.items():
@@ -863,112 +768,99 @@ def app_kind(app: str, title: str, overrides: dict[str, str] | None = None) -> s
     return "other"
 
 
-_GLOBAL_POSES: dict[str, Resolution] = {
-    "victory": Resolution("mode"),
-    "thumbs_up": Resolution("intent", intent="confirm"),
-    "thumbs_down": Resolution("intent", intent="deny"),
-    "point": Resolution("intent", intent="point"),
+_RING_DIRS: tuple[str, str, str, str] = ("left", "right", "up", "down")
+_UNIVERSAL_ALIASES = frozenset({"pointer", "files", "developer"})
+
+_UNIVERSAL_RING_LR: dict[str, tuple[tuple[str, dict, str], tuple[str, dict, str]]] = {
+    "browser": (
+        ("press_keys", {"keys": "ctrl+shift+Tab"}, "TAB<"),
+        ("press_keys", {"keys": "ctrl+Tab"}, "TAB>"),
+    ),
+    "media": (
+        ("media", {"command": "previous"}, "PREV"),
+        ("media", {"command": "next"}, "NEXT"),
+    ),
+    "presentation": (
+        ("press_keys", {"keys": "Left"}, "SLIDE<"),
+        ("press_keys", {"keys": "Right"}, "SLIDE>"),
+    ),
+    "files": (
+        ("press_keys", {"keys": "alt+Left"}, "BACK"),
+        ("press_keys", {"keys": "alt+Right"}, "FWD"),
+    ),
+    "editor": (
+        ("press_keys", {"keys": "ctrl+Page_Up"}, "TAB<"),
+        ("press_keys", {"keys": "ctrl+Page_Down"}, "TAB>"),
+    ),
+    "terminal": (
+        ("press_keys", {"keys": "ctrl+Page_Up"}, "TAB<"),
+        ("press_keys", {"keys": "ctrl+Page_Down"}, "TAB>"),
+    ),
+    "other": (
+        ("workspace_switch", {"target": "prev"}, "DESK<"),
+        ("workspace_switch", {"target": "next"}, "DESK>"),
+    ),
 }
 
-_SILENT_GESTURES = frozenset({
-    "hand_enter",
-    "hand_leave",
-    "pinch_start",
-    "pinch_end",
-    "spread_start",
-    "spread_end",
-})
-
-_UNIVERSAL_SWIPES: dict[str, tuple[tuple[str, dict], tuple[str, dict]]] = {
-    "browser": (("press_keys", {"keys": "ctrl+shift+Tab"}), ("press_keys", {"keys": "ctrl+Tab"})),
-    "media": (("media", {"command": "previous"}), ("media", {"command": "next"})),
-    "presentation": (("press_keys", {"keys": "Left"}), ("press_keys", {"keys": "Right"})),
-    "files": (("press_keys", {"keys": "alt+Left"}), ("press_keys", {"keys": "alt+Right"})),
-    "editor": (("press_keys", {"keys": "ctrl+Page_Up"}), ("press_keys", {"keys": "ctrl+Page_Down"})),
-    "terminal": (("press_keys", {"keys": "ctrl+Page_Up"}), ("press_keys", {"keys": "ctrl+Page_Down"})),
-    "other": (("workspace_switch", {"target": "prev"}), ("workspace_switch", {"target": "next"})),
-}
-
-_MODE_TABLE: dict[str, dict[str, tuple[str, dict]]] = {
-    "universal": {
-        "swipe_up": ("workspace_overview", {}),
-        "swipe_down": ("show_desktop", {}),
-        "double_pinch": ("toggle_maximize", {}),
-    },
-    "window": {
-        "swipe_left": ("window_snap", {"where": "left"}),
-        "swipe_right": ("window_snap", {"where": "right"}),
-        "swipe_up": ("window_maximize", {}),
-        "swipe_down": ("window_minimize", {}),
-        "double_pinch": ("toggle_maximize", {}),
-    },
-    "workspace": {
-        "swipe_left": ("workspace_switch", {"target": "prev"}),
-        "swipe_right": ("workspace_switch", {"target": "next"}),
-        "swipe_up": ("workspace_overview", {}),
-        "swipe_down": ("show_desktop", {}),
-    },
-    "pointer": {
-        "swipe_up": ("pointer_scroll", {"direction": "up", "amount": 5}),
-        "swipe_down": ("pointer_scroll", {"direction": "down", "amount": 5}),
-        "double_pinch": ("pointer_click", {"button": "left", "count": 2}),
-    },
-    "files": {
-        "swipe_left": ("press_keys", {"keys": "alt+Left"}),
-        "swipe_right": ("press_keys", {"keys": "alt+Right"}),
-        "swipe_up": ("press_keys", {"keys": "alt+Up"}),
-        "double_pinch": ("press_keys", {"keys": "Return"}),
-    },
-    "media": {
-        "swipe_left": ("media", {"command": "previous"}),
-        "swipe_right": ("media", {"command": "next"}),
-        "swipe_up": ("volume_change", {"delta": 10}),
-        "swipe_down": ("volume_change", {"delta": -10}),
-        "double_pinch": ("media", {"command": "play_pause"}),
-    },
-    "developer": {
-        "swipe_left": ("press_keys", {"keys": "ctrl+Page_Up"}),
-        "swipe_right": ("press_keys", {"keys": "ctrl+Page_Down"}),
-        "swipe_up": ("workspace_switch", {"target": "prev"}),
-        "swipe_down": ("workspace_switch", {"target": "next"}),
-        "double_pinch": ("toggle_maximize", {}),
-    },
-    "presentation": {
-        "swipe_left": ("press_keys", {"keys": "Left"}),
-        "swipe_right": ("press_keys", {"keys": "Right"}),
-    },
+_MODE_RING: dict[str, tuple[tuple[str, dict, str], ...]] = {
+    "workspace": (
+        ("workspace_switch", {"target": "prev"}, "DESK<"),
+        ("workspace_switch", {"target": "next"}, "DESK>"),
+        ("workspace_overview", {}, "OVERVIEW"),
+        ("show_desktop", {}, "DESKTOP"),
+    ),
+    "window": (
+        ("window_snap", {"where": "left"}, "SNAP<"),
+        ("window_snap", {"where": "right"}, "SNAP>"),
+        ("toggle_maximize", {}, "MAX"),
+        ("window_minimize", {}, "MIN"),
+    ),
+    "media": (
+        ("media", {"command": "previous"}, "PREV"),
+        ("media", {"command": "next"}, "NEXT"),
+        ("volume_change", {"delta": 10}, "VOL+"),
+        ("volume_change", {"delta": -10}, "VOL-"),
+    ),
+    "presentation": (
+        ("press_keys", {"keys": "Left"}, "SLIDE<"),
+        ("press_keys", {"keys": "Right"}, "SLIDE>"),
+        ("ignore", {}, ""),
+        ("ignore", {}, ""),
+    ),
+    "ai": (
+        ("intent", {"intent": "talk"}, "TALK"),
+        ("intent", {"intent": "talk"}, "TALK"),
+        ("intent", {"intent": "talk"}, "TALK"),
+        ("intent", {"intent": "talk"}, "TALK"),
+    ),
 }
 
 
-def resolve(gesture: str, pose: str, mode: str, kind: str) -> Resolution:
-    """Resolve a discrete gesture event into an action, intent, mode cycle, or ignore."""
-    if gesture == "pose":
-        hit = _GLOBAL_POSES.get(pose)
-        return hit if hit is not None else Resolution("ignore")
-    if gesture in _SILENT_GESTURES:
-        return Resolution("ignore")
-    if mode == "ai":
-        return Resolution("intent", intent="talk", args={"gesture": gesture})
-    if mode == "universal" and gesture in ("swipe_left", "swipe_right"):
-        left_act, right_act = _UNIVERSAL_SWIPES.get(kind, _UNIVERSAL_SWIPES["other"])
-        action, args = left_act if gesture == "swipe_left" else right_act
-        return Resolution("action", action, dict(args))
-    entry = _MODE_TABLE.get(mode, {}).get(gesture)
-    if entry is not None:
-        action, args = entry
-        return Resolution("action", action, dict(args))
-    return Resolution("ignore", reason=f"{gesture} does nothing in {mode} mode.")
-
-
-def hand_to_screen(x: float, y: float, bounds: Rect) -> tuple[int, int]:
-    """Map normalized hand coordinates (central frame minus POINTER_MARGIN) into screen pixels."""
-    span = 1.0 - 2.0 * POINTER_MARGIN
-    u = max(0.0, min(1.0, (x - POINTER_MARGIN) / span))
-    v = max(0.0, min(1.0, (y - POINTER_MARGIN) / span))
+def _ring_entries(mode: str, kind: str) -> tuple[tuple[str, dict, str], ...]:
+    norm = "universal" if mode in _UNIVERSAL_ALIASES else mode
+    if norm in _MODE_RING:
+        return _MODE_RING[norm]
+    left, right = _UNIVERSAL_RING_LR.get(kind, _UNIVERSAL_RING_LR["other"])
     return (
-        bounds.x + round(u * max(0, bounds.width - 1)),
-        bounds.y + round(v * max(0, bounds.height - 1)),
+        left,
+        right,
+        ("toggle_maximize", {}, "MAX"),
+        ("click", {}, "CLICK"),
     )
+
+
+def ring_action(direction: str, mode: str, kind: str) -> tuple[str, dict]:
+    """Return ``(action, args)`` for a command-ring direction in the given mode and app kind."""
+    if direction not in _RING_DIRS:
+        return ("ignore", {})
+    action, args, _ = _ring_entries(mode, kind)[_RING_DIRS.index(direction)]
+    return (action, dict(args))
+
+
+def ring_labels(mode: str, kind: str) -> tuple[str, str, str, str]:
+    """Return short ASCII ``(left, right, up, down)`` ring labels for the HUD."""
+    entries = _ring_entries(mode, kind)
+    return (entries[0][2], entries[1][2], entries[2][2], entries[3][2])
 
 
 def framing_hint(views: tuple[HandView, ...]) -> str | None:

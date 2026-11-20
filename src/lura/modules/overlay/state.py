@@ -18,9 +18,14 @@ log = logging.getLogger(__name__)
 class AirView:
     on: bool = False                    # camera running
     armed: bool = False
+    engaged: bool = False
+    zone: str = "none"                  # "ok" | "far" | "none"
     mode: str = "universal"
     hands: tuple[tuple[float, float, bool], ...] = ()   # (x, y, pinching), user's view 0..1
     dwell: float = 0.0                  # 0..1 pointing selection progress, 0 = none
+    ring: tuple[str, str, str, str] | None = None       # (left, right, up, down) labels when ring open
+    ring_hover: str = ""                # "left" | "right" | "up" | "down" | ""
+    grab_progress: float = 0.0          # 0..1 hold-in-centre progress towards grab
     hand_age: float = 99.0              # s since a hand appeared (drives the scan sweep)
     pulse_ok: bool | None = None        # result of the last Air action, None = none yet
     pulse_age: float = 99.0             # s since that action
