@@ -230,44 +230,109 @@ def check_tap_click_and_hold_drag() -> None:
     assert not cmds, cmds
 
 
-def check_swipe_workspace() -> None:
-    eng = InteractionEngine()
+def _sweep(eng: InteractionEngine, t0: float, pose: str, x0: float, step: float, n: int = 12) -> list[Command]:
     out: list[Command] = []
-    t = 0.0
-    for i in range(12):            # 0.4 s, 0.3 of the frame to the right
-        t = i / 30.0
-        out.extend(eng.update(t, (make_hand("open_palm", cx=0.35 + 0.025 * i, size=0.26),)))
-    swipes = [c for c in out if c.kind == "swipe"]
-    assert [c.direction for c in swipes] == ["right"], out
-    # Bringing the hand back (opposite) right after is ignored.
-    out = []
-    for i in range(12):
-        out.extend(eng.update(t + 0.05 + i / 30.0, (make_hand("open_palm", cx=0.63 - 0.025 * i, size=0.26),)))
-    assert not [c for c in out if c.kind == "swipe"], out
-    # After SWIPE_RETURN the other direction works.
-    t += SWIPE_RETURN + SWIPE_COOLDOWN
-    out = []
-    for i in range(12):
-        out.extend(eng.update(t + i / 30.0, (make_hand("open_palm", cx=0.65 - 0.025 * i, size=0.26),)))
+    for i in range(n):
+        out.extend(eng.update(t0 + i / 30.0, (make_hand(pose, cx=x0 + step * i, size=0.26),)))
+    return out
+
+
+def check_swipe_workspace() -> None:
+    from lura.modules.air.engine import blade_ratio
+    assert blade_ratio(make_hand("blade", size=0.26)) < 0.38 < blade_ratio(make_hand("open_palm", size=0.26))
+    # The hand's edge swept right (0.3 of the frame in 0.4 s): the workspaces follow the hand, so the
+    # previous one comes in -> the controller's "left" (prev).
+    eng = InteractionEngine()
+    out = _sweep(eng, 0.0, "blade", 0.35, 0.025)
     assert [c.direction for c in out if c.kind == "swipe"] == ["left"], out
+    t = 11 / 30.0
+    # Bringing the hand back right after is ignored.
+    out = _sweep(eng, t + 0.05, "blade", 0.63, -0.025)
+    assert not [c for c in out if c.kind == "swipe"], out
+    # After SWIPE_RETURN the other direction works: sweep left -> next ("right").
+    t += SWIPE_RETURN + SWIPE_COOLDOWN
+    _sweep(eng, t - 0.4, "blade", 0.65, 0.0)                    # hand still for a moment
+    out = _sweep(eng, t, "blade", 0.65, -0.025)
+    assert [c.direction for c in out if c.kind == "swipe"] == ["right"], out
+    # Back-and-forth waving inside SWIPE_RETURN gives one switch, not one per wave.
+    eng = InteractionEngine()
+    out, t = [], 0.0
+    for k in range(6):
+        out += _sweep(eng, t, "blade", 0.35 if k % 2 == 0 else 0.63, 0.025 if k % 2 == 0 else -0.025)
+        t += 0.45
+    assert len([c for c in out if c.kind == "swipe"]) == 1, [c for c in out if c.kind == "swipe"]
+    # Two deliberate sweeps with a short pause between them -> two switches.
+    eng = InteractionEngine()
+    out = _sweep(eng, 0.0, "blade", 0.35, 0.025)                 # sweep right
+    out += _sweep(eng, 0.45, "blade", 0.625, -0.025)             # bring the hand back (ignored)
+    out += _sweep(eng, 0.85, "blade", 0.35, 0.0)                 # still for 0.4 s
+    out += _sweep(eng, 1.30, "blade", 0.35, 0.025)               # sweep right again
+    assert [c.direction for c in out if c.kind == "swipe"] == ["left", "left"], out
     # A slow drift is not a swipe.
     eng = InteractionEngine()
-    out = []
-    for i in range(60):
-        out.extend(eng.update(i / 30.0, (make_hand("open_palm", cx=0.3 + 0.004 * i, size=0.26),)))
+    out = _sweep(eng, 0.0, "blade", 0.3, 0.004, n=60)
     assert not [c for c in out if c.kind == "swipe"], out
-    # Back of the hand / half-closed hand moving works too (fist frames, not only open palm).
+    # A flat palm, a fist or the pointing finger moving sideways: nothing.
+    for pose in ("open_palm", "fist", "point"):
+        eng = InteractionEngine()
+        out = _sweep(eng, 0.0, pose, 0.35, 0.025)
+        assert not [c for c in out if c.kind == "swipe"], (pose, out)
+
+
+def check_flick_scroll() -> None:
+    from lura.modules.air.engine import FLICK_FREEZE, FLICK_RETURN
     eng = InteractionEngine()
+    t = _point(eng, cx=0.5, cy=0.6)
+    # Quick flick up (0.15 of the frame in ~0.13 s): one scroll, page follows the finger -> wheel down.
+    out: list[Command] = []
+    for i in range(1, 5):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
+    scrolls = [c for c in out if c.kind == "scroll"]
+    assert len(scrolls) == 1 and scrolls[0].steps <= -3, out
+    net_y = sum(c.dy for c in out if c.kind == "cursor")
+    assert abs(net_y) <= 12, (net_y, out)                 # the flick's cursor movement was undone
+    # The finger coming back down (fast, inside FLICK_RETURN): no cursor, no opposite scroll.
     out = []
-    for i in range(12):
-        out.extend(eng.update(i / 30.0, (make_hand("fist", cx=0.65 - 0.025 * i, size=0.26),)))
-    assert [c.direction for c in out if c.kind == "swipe"] == ["left"], out
-    # Moving the pointing finger is the mouse, never a swipe.
+    for i in range(1, 5):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.45 + 0.0375 * i, size=0.28),))
+    assert not [c for c in out if c.kind in ("scroll", "cursor")], out
+    # A pinch right after a flick does not click.
+    out = []
+    for i in range(6):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6, size=0.28, pinch_gap=0.02),))
+    assert not [c for c in out if c.kind in ("click", "press")], out
+    # After the freeze, a second flick up scrolls again.
+    t += max(FLICK_FREEZE, FLICK_RETURN)
+    for _ in range(4):
+        t += 1 / 30.0
+        eng.update(t, (make_hand("point", cx=0.5, cy=0.6, size=0.28),))
+    out = []
+    for i in range(1, 5):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
+    assert [c.steps < 0 for c in out if c.kind == "scroll"] == [True], out
+    # A flick down -> wheel up (after FLICK_RETURN).
+    t += FLICK_RETURN + 0.1
+    for _ in range(4):
+        t += 1 / 30.0
+        eng.update(t, (make_hand("point", cx=0.5, cy=0.45, size=0.28),))
+    out = []
+    for i in range(1, 5):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.45 + 0.0375 * i, size=0.28),))
+    assert [c.steps > 0 for c in out if c.kind == "scroll"] == [True], out
+    # Slow vertical movement is the mouse, not a scroll.
     eng = InteractionEngine()
+    t = _point(eng, cx=0.5, cy=0.7)
     out = []
-    for i in range(12):
-        out.extend(eng.update(i / 30.0, (make_hand("point", cx=0.35 + 0.025 * i, size=0.26),)))
-    assert not [c for c in out if c.kind == "swipe"], out
+    for i in range(1, 31):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.7 - 0.006 * i, size=0.28),))
+    assert not [c for c in out if c.kind == "scroll"], out
+    assert sum(c.dy for c in out if c.kind == "cursor") < -150, out
 
 
 def check_scroll_thumbs_disengage_hint() -> None:

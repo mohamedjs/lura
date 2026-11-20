@@ -60,8 +60,8 @@ CONTROL_HZ = 30                     # controller poll timeout rate
 HINT_EDGE = 0.10        # a hand within this of the left/right frame edge, or below 1 - this, is "at the edge"
 HINT_AFTER = 1.5        # s at the edge before the hint
 HINT_EVERY = 10.0       # s between two hints
-WELCOME = ("Air on: point one finger to move the mouse, pinch to click, pinch and hold to drag, "
-           "two fingers to scroll, move your hand left or right to switch workspace.")
+WELCOME = ("Air on: point one finger to move the mouse, flick it up or down to scroll, pinch to click, "
+           "pinch and hold to drag, sweep the edge of your hand to slide the workspaces.")
 
 MODES: tuple[str, ...] = (
     "universal", "window", "workspace", "pointer", "files", "media", "developer",

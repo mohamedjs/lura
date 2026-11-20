@@ -61,12 +61,15 @@ def make_hand(
     pinch_gap: float | None = None,
 ) -> Hand:
     """Build a synthetic 21-landmark hand matching a named pose at (cx, cy) and palm size."""
+    # "blade": the open hand turned edge-on to the camera (knuckles stacked, fingers straight).
+    xs = 0.12 if pose == "blade" else 1.0
+    pose = "open_palm" if pose == "blade" else pose
     pts: list[Point] = [Point(cx, cy)] * 21
     pts[WRIST] = Point(cx, cy + 0.5 * size)
-    pts[INDEX_MCP] = Point(cx - 0.30 * size, cy - 0.45 * size)
+    pts[INDEX_MCP] = Point(cx - 0.30 * xs * size, cy - 0.45 * size)
     pts[MIDDLE_MCP] = Point(cx, cy - 0.50 * size)
-    pts[RING_MCP] = Point(cx + 0.28 * size, cy - 0.45 * size)
-    pts[PINKY_MCP] = Point(cx + 0.52 * size, cy - 0.35 * size)
+    pts[RING_MCP] = Point(cx + 0.28 * xs * size, cy - 0.45 * size)
+    pts[PINKY_MCP] = Point(cx + 0.52 * xs * size, cy - 0.35 * size)
 
     # Thumb base joints.
     pts[1] = Point(cx - 0.35 * size, cy + 0.25 * size)
@@ -90,7 +93,7 @@ def make_hand(
         ("pinky", 0.52, PINKY_PIP, 19, PINKY_TIP),
     )
     for name, dx, pip_i, dip_i, tip_i in finger_specs:
-        fx = cx + dx * size
+        fx = cx + dx * xs * size
         if name in ext_set:
             pts[pip_i] = Point(fx, cy - 0.85 * size)
             pts[dip_i] = Point(fx, cy - 1.25 * size)
