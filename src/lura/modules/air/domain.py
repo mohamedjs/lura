@@ -68,6 +68,11 @@ MIN_W, MIN_H = 320, 240             # smallest size a spread can make a window
 POINTER_MARGIN = 0.15   # the central 70 % of the frame maps to the whole screen
 POINTER_SMOOTH = 0.35   # exponential smoothing of the pointer target per tick (0..1, higher = snappier)
 
+HINT_EDGE = 0.10        # a hand within this of the left/right frame edge, or below 1 - this, is "at the edge"
+HINT_AFTER = 1.5        # s at the edge before the hint
+HINT_EVERY = 10.0       # s between two hints
+WELCOME = "Air on: pinch to grab, swipe to switch, V for modes, fist to stop."
+
 MODES: tuple[str, ...] = (
     "universal", "window", "workspace", "pointer", "files", "media", "developer",
     "presentation", "ai",
@@ -964,3 +969,12 @@ def hand_to_screen(x: float, y: float, bounds: Rect) -> tuple[int, int]:
         bounds.x + round(u * max(0, bounds.width - 1)),
         bounds.y + round(v * max(0, bounds.height - 1)),
     )
+
+
+def framing_hint(views: tuple[HandView, ...]) -> str | None:
+    """Return a framing hint when a tracked hand sits near the bottom or side edge."""
+    if any(h.y > 1.0 - HINT_EDGE for h in views):
+        return "Raise your hand a little."
+    if any(h.x < HINT_EDGE or h.x > 1.0 - HINT_EDGE for h in views):
+        return "Move your hand towards the middle."
+    return None

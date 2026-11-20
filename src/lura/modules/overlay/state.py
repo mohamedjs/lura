@@ -2,11 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import enum
+import logging
 import threading
 import time
+from typing import Callable
 
 from .looks import Look
+
+log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AirView:
+    on: bool = False                    # camera running
+    armed: bool = False
+    mode: str = "universal"
+    hands: tuple[tuple[float, float, bool], ...] = ()   # (x, y, pinching), user's view 0..1
+    dwell: float = 0.0                  # 0..1 pointing selection progress, 0 = none
+    hand_age: float = 99.0              # s since a hand appeared (drives the scan sweep)
+    pulse_ok: bool | None = None        # result of the last Air action, None = none yet
+    pulse_age: float = 99.0             # s since that action
+    message: str = ""                   # last Air message (action result / hint / welcome)
+    message_age: float = 99.0
 
 
 class State(enum.Enum):
@@ -32,6 +51,7 @@ class OverlayState:
         self._amp = 0.0
         self._amp_ts = 0.0
         self._tools: dict[str, float] = {}
+        self._air_err_logged = False
         self._lock = threading.Lock()
 
     @property
@@ -100,6 +120,20 @@ class OverlayState:
     subtitles_enabled: bool = True
     #: Style, colours and size, switched live from the dashboard or the tray.
     look: Look = Look()
+    #: Air HUD source callback, wired by app.py.
+    air_source: Callable[[], AirView | None] | None = None
+
+    def air_view(self) -> AirView | None:
+        src = self.air_source
+        if src is None:
+            return None
+        try:
+            return src()
+        except Exception:
+            if not self._air_err_logged:
+                self._air_err_logged = True
+                log.debug("air_source failed", exc_info=True)
+            return None
 
 
 class StateBlender:

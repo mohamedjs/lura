@@ -20,7 +20,7 @@ import numpy as np
 
 from .face_mp import TRIANGLES, VERTICES
 from .looks import THEMES, Look, Palette
-from .state import StateBlender
+from .state import AirView, StateBlender
 
 # ── Dimensions & Placement ──────────────────────────────────────────────────
 
@@ -210,7 +210,8 @@ def _projector(cx: float, cy: float, fs: float, cam: float = 3.4):
 
 
 def render_surface(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, amp: float = 0.0,
-                   look: Look | None = None, tools: list[tuple[str, float]] | None = None):
+                   look: Look | None = None, tools: list[tuple[str, float]] | None = None,
+                   air: AirView | None = None):
     """Draw one frame in the chosen style. ``amp`` (0..1 voice loudness) drives the mouth / pulse;
     ``tools`` are (connector, seconds since used) shown as badges."""
     import cairo
@@ -229,6 +230,8 @@ def render_surface(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, am
         _STYLES.get(look.style, _face_style)(cr, t, blender, size, amp, look.palette)
     if tools:
         _tool_badges(cr, size, look.palette, tools, t, _ORIGIN.get(look.style, (0.5, 0.5)))
+    if air is not None and air.on:
+        _air_hud(cr, size, look.palette, air, t)
     return surface
 
 
@@ -893,6 +896,89 @@ def _tool_badges(cr, size, pal: Palette, tools, t, origin):
         cr.move_to(bx - ext.width / 2 - ext.x_bearing, by - ext.height / 2 - ext.y_bearing)
         cr.set_source_rgba(1, 1, 1, alpha)
         cr.show_text(label)
+
+
+def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
+    """Small bottom-left radar HUD showing tracked hands, dwell, action pulse and mode."""
+    import cairo
+
+    u = size / OVERLAY_SIZE
+    cx, cy = size * 0.14, size * 0.80
+    R = size * 0.085
+
+    # 1. Disc fill and outer ring.
+    cr.new_sub_path()
+    cr.arc(cx, cy, R, 0.0, 2.0 * math.pi)
+    cr.set_source_rgba(*pal.wire, 0.18 if air.armed else 0.10)
+    cr.fill_preserve()
+    cr.set_line_width(1.2 * u)
+    cr.set_source_rgba(*pal.glow, 0.90 if air.armed else 0.35)
+    cr.stroke()
+
+    # 2. Crosshair through the centre.
+    cr.set_line_width(0.8 * u)
+    cr.set_source_rgba(*pal.glow, 0.15)
+    cr.move_to(cx - R, cy)
+    cr.line_to(cx + R, cy)
+    cr.move_to(cx, cy - R)
+    cr.line_to(cx, cy + R)
+    cr.stroke()
+
+    # 3. Scan sweep for 0.8 s after a hand appears.
+    if 0.0 <= air.hand_age < 0.8:
+        frac = air.hand_age / 0.8
+        ang = 2.0 * math.pi * frac
+        cr.set_line_width(1.5 * u)
+        cr.set_source_rgba(*pal.glow, 0.8 * (1.0 - frac))
+        cr.move_to(cx, cy)
+        cr.line_to(cx + math.cos(ang) * R, cy + math.sin(ang) * R)
+        cr.stroke()
+
+    # 4. Tracked hands inside the disc.
+    for hx, hy, pinch in air.hands:
+        dx = (hx - 0.5) * 1.8 * R
+        dy = (hy - 0.5) * 1.8 * R
+        d = math.hypot(dx, dy)
+        if d > R:
+            k = R / d
+            dx *= k
+            dy *= k
+        px, py = cx + dx, cy + dy
+        cr.arc(px, py, 2.6 * u, 0.0, 2.0 * math.pi)
+        cr.set_source_rgba(*(pal.glow if pinch else pal.accent), 0.95)
+        cr.fill()
+        if pinch:
+            cr.set_line_width(1.2 * u)
+            cr.set_source_rgba(*pal.glow, 0.95)
+            cr.arc(px, py, 5.0 * u, 0.0, 2.0 * math.pi)
+            cr.stroke()
+
+    # 5. Dwell arc while pointing at a window.
+    if air.dwell > 0.0:
+        cr.set_line_width(2.4 * u)
+        cr.set_source_rgba(*pal.accent, 0.95)
+        cr.arc(cx, cy, R + 4.0 * u, -math.pi / 2.0, -math.pi / 2.0 + 2.0 * math.pi * min(1.0, air.dwell))
+        cr.stroke()
+
+    # 6. Action confirmation pulse ring.
+    if air.pulse_ok is not None and 0.0 <= air.pulse_age < 0.6:
+        frac = air.pulse_age / 0.6
+        rgb = pal.glow if air.pulse_ok else (1.0, 0.62, 0.20)
+        cr.set_line_width(1.6 * u)
+        cr.set_source_rgba(*rgb, 0.9 * (1.0 - frac))
+        cr.arc(cx, cy, R * (1.0 + frac * 0.8), 0.0, 2.0 * math.pi)
+        cr.stroke()
+
+    # 7. Mode label under the disc (plain ASCII; cairo toy font).
+    label = f"AIR - {air.mode.upper()}"
+    cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+    cr.set_font_size(max(8.0, 9.0 * u))
+    ext = cr.text_extents(label)
+    lx = max(2.0 * u, cx - ext.width / 2.0 - ext.x_bearing)
+    ly = cy + R + 12.0 * u - ext.height / 2.0 - ext.y_bearing
+    cr.move_to(lx, ly)
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.85 if air.armed else 0.45)
+    cr.show_text(label)
 
 
 _STYLES = {"face": _face_style, "orb": _orb_style, "ring": _ring_style, "bust": _bust_style}

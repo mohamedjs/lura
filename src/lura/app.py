@@ -61,7 +61,7 @@ def _container(presence=None):
 
 def cmd_run(args) -> int:
     from .modules.dashboard import DashboardApi, DashboardServer, running_url
-    from .modules.overlay import LOOK_SETTINGS, Overlay, settings_look
+    from .modules.overlay import AirView, LOOK_SETTINGS, Overlay, settings_look
     from .shared.i18n import t
 
     if url := running_url():
@@ -129,6 +129,40 @@ def cmd_run(args) -> int:
 
     c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
     c.bus.subscribe(events.TOOL_USED, lambda p: overlay.state.set_tool(p["connector"]))
+
+    last_air = [{"ok": None, "message": "", "t": -1e9}]
+
+    def on_air_action(payload):
+        last_air[0] = {
+            "ok": payload.get("ok"),
+            "message": str(payload.get("message", "")),
+            "t": time.monotonic(),
+        }
+
+    c.bus.subscribe(events.AIR_ACTION, on_air_action)
+
+    def air_view():
+        snap = c.air.snapshot()
+        if snap.camera != "on":
+            return None
+        st = c.air_control.state()
+        now = time.monotonic()
+        hs = st.get("hand_since")
+        last = last_air[0]
+        return AirView(
+            on=True,
+            armed=st["armed"],
+            mode=st["mode"],
+            hands=tuple((h.x, h.y, h.pinching) for h in snap.hands),
+            dwell=st.get("dwell", 0.0),
+            hand_age=(now - hs) if hs is not None else 99.0,
+            pulse_ok=last["ok"],
+            pulse_age=now - last["t"],
+            message=last["message"],
+            message_age=now - last["t"],
+        )
+
+    overlay.state.air_source = air_view
 
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)

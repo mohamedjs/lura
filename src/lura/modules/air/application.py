@@ -18,9 +18,12 @@ from .domain import (
     ACTION_MIN_CONF,
     CONTROL_HZ,
     DRAG_START,
+    HINT_AFTER,
+    HINT_EVERY,
     MODES,
     POINT_DWELL,
     POINTER_SMOOTH,
+    WELCOME,
     AirState,
     Arming,
     GestureEvent,
@@ -32,6 +35,7 @@ from .domain import (
     app_kind,
     drag_rect,
     edge_snap,
+    framing_hint,
     hand_to_screen,
     moved,
     pick_camera,
@@ -451,8 +455,15 @@ class AirController:
         self._point_poll_t: float = -math.inf
         self._point_cand: tuple[int, float] | None = None
         self._point_selected: int | None = None
+        self._point_target: str = ""
         self._point_bounds: Rect | None = None
         self._point_told_empty = False
+        self._hands_present: set[str] = set()
+        self._hand_since: float | None = None
+        self._hint_text: str | None = None
+        self._hint_since: float = 0.0
+        self._last_hint_t: float = -math.inf
+        self._welcomed: bool = False
 
     @property
     def mode(self) -> str:
@@ -464,6 +475,7 @@ class AirController:
         self._point_poll_t = -math.inf
         self._point_cand = None
         self._point_selected = None
+        self._point_target = ""
         self._point_bounds = None
         self._point_told_empty = False
 
@@ -549,6 +561,9 @@ class AirController:
             self._pointer = None
             self._pointer_last = None
             self._clear_pointing()
+            self._hands_present.clear()
+            self._hand_since = None
+            self._hint_text = None
             if self._pointer_down:
                 self._release_pointer()
         while True:
@@ -595,12 +610,18 @@ class AirController:
     def state(self) -> dict:
         t = self._clock()
         with self._lock:
+            dwell = 0.0
+            if self._point_cand is not None and self._point_cand[0] != self._point_selected:
+                dwell = max(0.0, min(1.0, (t - self._point_cand[1]) / POINT_DWELL))
             return {
                 "mode": self._mode,
                 "armed": self._arming.armed(t),
                 "dragging": self._drag is not None,
                 "resizing": self._resize is not None,
                 "last_action": self._last_action,
+                "target": self._point_target,
+                "dwell": dwell,
+                "hand_since": self._hand_since,
             }
 
     def _emit(self, name: str, payload: dict) -> None:
@@ -697,6 +718,7 @@ class AirController:
             r = self._desktop.run("window_focus", {"window": wid})
             label = title or app or f"window {wid}"
             if r.ok:
+                self._point_target = title or app
                 self._feedback("target", True, f"Target: {label}.")
                 self._emit(events.AIR_INTENT, {
                     "intent": "point",
@@ -708,11 +730,39 @@ class AirController:
             else:
                 self._feedback("target", False, r.message)
 
+    def _tick_hint(self, t: float, snap: AirState) -> None:
+        hint = framing_hint(snap.hands)
+        if hint is None:
+            self._hint_text = None
+            return
+        if hint != self._hint_text:
+            self._hint_text = hint
+            self._hint_since = t
+            return
+        if (t - self._hint_since) >= HINT_AFTER - _EPS and (t - self._last_hint_t) >= HINT_EVERY - _EPS:
+            self._last_hint_t = t
+            self._hint_since = t
+            self._feedback("hint", True, hint)
+
     def process(self, ev: GestureEvent) -> None:
         with self._lock:
-            self._arming.on_event(ev)
             g = ev.gesture
-            if not self._arming.armed(ev.t):
+            if g == "hand_enter":
+                if not self._hands_present:
+                    self._hand_since = ev.t
+                self._hands_present.add(ev.hand)
+            elif g == "hand_leave":
+                self._hands_present.discard(ev.hand)
+                if not self._hands_present:
+                    self._hand_since = None
+
+            was_armed = self._arming.armed(ev.t)
+            self._arming.on_event(ev)
+            is_armed = self._arming.armed(ev.t)
+            if not was_armed and is_armed and not self._welcomed:
+                self._welcomed = True
+                self._feedback("welcome", True, WELCOME)
+            if not is_armed:
                 self._pending = None
                 self._pointer_pinch = None
                 self._clear_pointing()
@@ -831,6 +881,7 @@ class AirController:
                     self._point_poll_t = -math.inf
                     self._point_cand = None
                     self._point_selected = None
+                    self._point_target = ""
                     self._point_told_empty = False
                     # The monitor the active window is on: mapping the frame onto both screens put
                     # the frame's centre on the screen boundary, so windows were hard to reach.
@@ -883,6 +934,7 @@ class AirController:
 
             snap = self._air.snapshot()
             self._tick_pointing(t, snap)
+            self._tick_hint(t, snap)
 
             if self._mode == "pointer":
                 if not self._arming.armed(t) or self._drag is not None or self._resize is not None:

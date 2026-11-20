@@ -327,6 +327,8 @@ def check_fist_during_drag() -> None:
     ctrl.tick(1.05)
     assert ctrl.state()["dragging"] is True
     places_before = len(desk.places)
+    assert [p["action"] for _, p in pub] == ["welcome"]
+    pub.clear()
 
     # Fist followed within 0.3 s by a pinch_start -> stays armed, drag continues.
     now[0] = 1.1
