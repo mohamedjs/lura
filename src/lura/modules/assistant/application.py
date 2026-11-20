@@ -36,13 +36,20 @@ class PipelineConversation:
     def __init__(self, settings: Settings, brain: BrainService, voice: VoiceService,
                  tools: ToolService, presence: Presence, stopped: threading.Event,
                  memory: MemoryService | None = None, extra_prompt: str = "",
-                 preload: list | None = None):
+                 preload: list | None = None, air_point=lambda: None):
         self.s = settings
         self._model = brain.model(settings)
         self._voice = voice
         self._tools = tools
         self._presence = presence
         self._stopped = stopped
+        self._air_point = air_point
+        self._inject_lock = threading.Lock()
+        self._inject_text: str = ""
+        self._inject_source: str = ""
+        self._inject_t: float = 0.0
+        self._inject_evt = threading.Event()
+        self._listening = False
         self._session = ToolSession()
         if preload:
             # Tools this conversation needs from the start (the daily briefing's
@@ -87,6 +94,51 @@ class PipelineConversation:
         """Stop the reply now and listen (a tap on the face)."""
         if self._player is not None:
             self._player.interrupt()
+
+    def inject(self, text: str, source: str = "") -> None:
+        """Queue a gesture answer (\"Yes.\"/\"No.\") as the user's next turn."""
+        if not text:
+            return
+        with self._inject_lock:
+            self._inject_text = text
+            self._inject_source = source
+            self._inject_t = time.monotonic()
+            self._inject_evt.set()
+
+    def _take_injection(self) -> tuple[str, str] | None:
+        with self._inject_lock:
+            if not self._inject_evt.is_set():
+                return None
+            text, source, when = self._inject_text, self._inject_source, self._inject_t
+            self._inject_text, self._inject_source, self._inject_t = "", "", 0.0
+            self._inject_evt.clear()
+        age = time.monotonic() - when
+        if age > domain.ANSWER_GRACE:
+            log.debug("Dropping stale gesture injection (%.1fs old).", age)
+            return None
+        return text, source
+
+    def spoken_language(self) -> str | None:
+        """"ar" or "en" from the user's last words in this conversation, None before any.
+        settings.language is only the default; she answers in the language the user speaks, so
+        a thumbs answer must be in that language too, or an English "Yes." switches her."""
+        for m in reversed(self._history):
+            if m.role != "user" or m.tool_call_id:
+                continue
+            words = "\n".join(line for line in m.text.splitlines()
+                              if not line.startswith("[The user is pointing")).strip()
+            if words:
+                return "ar" if any("؀" <= ch <= "ۿ" for ch in words) else "en"
+        return None
+
+    def _consume_air_note(self) -> str:
+        p = self._air_point()
+        if not p:
+            return ""
+        note = domain.air_note(*p)
+        if note:
+            log.info("Air note attached: %s", p[0])
+        return note
 
     def _cut_short(self, player, message: Message | None, row: int | None = None) -> Message | None:
         """The user took the floor: history, memory and subtitle keep only what
@@ -209,7 +261,7 @@ class PipelineConversation:
             self._keep("discard", row)
         self._presence.set_caption("you", "")
 
-    def _caption_heard(self, wav: bytes, message: Message, row: int | None) -> None:
+    def _caption_heard(self, wav: bytes, message: Message, row: int | None, note: str = "") -> None:
         """The brain hears the audio itself, so there is no text of what was
         said. For the subtitle and the history, transcribe it alongside — in
         parallel, so the answer is not held up by it. Once it arrives, later
@@ -220,7 +272,7 @@ class PipelineConversation:
                 if (heard := self._caption_transcriber.transcribe(wav)) and row not in self._discarded:
                     if self.s.subtitles:
                         self._presence.set_caption("you", heard)
-                    message.text = heard
+                    message.text = f"{note}\n{heard}" if note else heard
                     self._keep("update", row, heard)
             except Exception as exc:
                 log.debug("Subtitle transcription failed: %s", exc)
@@ -279,15 +331,48 @@ class PipelineConversation:
             if ignored >= domain.MAX_IGNORED_TURNS:
                 log.info("Only noise for %d turns — closing.", ignored)
                 return
-            self._presence.set_state("listening")
-            live = LiveCaption(self._captioner, self._voice.to_wav, self._presence) \
-                if self.s.subtitles and self.s.live_captions else None
-            carry, self._carry, self._cut = self._carry, None, False
+            self._listening = True
+            injected = self._take_injection()
+            pcm = b""
+            live = None
             try:
-                pcm = self._voice.record(self.s, self._stopped.is_set, live, carry)
+                if injected is None:
+                    self._presence.set_state("listening")
+                    live = LiveCaption(self._captioner, self._voice.to_wav, self._presence) \
+                        if self.s.subtitles and self.s.live_captions else None
+                    carry, self._carry, self._cut = self._carry, None, False
+                    should_stop = lambda: self._stopped.is_set() or self._inject_evt.is_set()
+                    try:
+                        pcm = self._voice.record(self.s, should_stop, live, carry)
+                    finally:
+                        if live is not None:
+                            live.close()
+                    if not self._stopped.is_set() and self._inject_evt.is_set():
+                        injected = self._take_injection()
+                else:
+                    if self._carry is not None:
+                        self._carry.close()
+                        self._carry = None
+                    self._cut = False
             finally:
-                if live is not None:
-                    live.close()
+                self._listening = False
+            if self._stopped.is_set():
+                return
+            if injected is not None:
+                heard, source = injected
+                prefix = "👍 " if source == "confirm" else "👎 " if source == "deny" else ""
+                self._presence.set_caption("lura", "")
+                self._presence.set_caption("you", f"{prefix}{heard}")
+                self._history.append(Message("user", heard))
+                row = self._keep("add", self._conv, "user", heard)
+                self._quiet = False
+                self._answer()
+                if self._quiet:
+                    ignored += 1
+                    self._forget_turn(row)
+                else:
+                    ignored = 0
+                continue
             if not pcm:
                 self._presence.set_caption("you", "")   # a live partial must not linger
                 log.info("Nothing said — closing.")
@@ -297,11 +382,12 @@ class PipelineConversation:
             self._presence.set_caption("you", "…")
             row = None
             if self._hears:
-                message = Message("user", audio_wav=wav)
+                note = self._consume_air_note()
+                message = Message("user", text=note, audio_wav=wav)
                 self._history.append(message)
                 row = self._keep("add", self._conv, "user", "")
                 if self.s.subtitles or self._memory is not None:
-                    self._caption_heard(wav, message, row)
+                    self._caption_heard(wav, message, row, note)
             else:
                 self._presence.set_state("thinking")
                 try:
@@ -322,8 +408,9 @@ class PipelineConversation:
                     ignored += 1
                     self._presence.set_caption("you", "")
                     continue
+                note = self._consume_air_note()
                 self._presence.set_caption("you", heard)
-                self._history.append(Message("user", heard))
+                self._history.append(Message("user", f"{note}\n{heard}" if note else heard))
                 row = self._keep("add", self._conv, "user", heard)
             self._quiet = False
             self._answer()
@@ -354,12 +441,47 @@ class Assistant:
         #: rebuilt now instead of after the next conversation.
         self._reload = threading.Event()
         self._conversation: PipelineConversation | None = None
+        self._air_lock = threading.Lock()
+        self._air_point: tuple[str, str, float] | None = None
         self.status = "starting"
         bus.subscribe(events.SETTINGS_CHANGED, self._on_settings)
         bus.subscribe(events.TALK_REQUESTED, lambda _: self._talk.set())
         bus.subscribe(events.STOP_REQUESTED, lambda _: self.interrupt())
         bus.subscribe(events.INTERRUPT_REQUESTED,
                       lambda _: (conv := self._conversation) is not None and conv.interrupt())
+        bus.subscribe(events.AIR_INTENT, self._on_air_intent)
+
+    def _on_air_intent(self, payload: dict) -> None:
+        intent = payload.get("intent", "")
+        if self._settings.current.mode == "realtime":
+            log.debug("Ignoring Air intent %r in realtime mode.", intent)
+            return
+        if intent == "point":
+            with self._air_lock:
+                self._air_point = (str(payload.get("app", "")), str(payload.get("title", "")),
+                                   time.monotonic())
+        elif intent in ("confirm", "deny"):
+            conv = self._conversation
+            if isinstance(conv, PipelineConversation):
+                word = domain.answer_word(intent, conv.spoken_language() or self._settings.current.language)
+                if word:
+                    conv.inject(word, source=intent)
+            else:
+                log.info("No question to answer with a gesture.")
+        elif intent == "talk":
+            if self.status == "ready":
+                self._talk.set()
+
+    def _take_air_point(self) -> tuple[str, str] | None:
+        with self._air_lock:
+            point = self._air_point
+            self._air_point = None
+        if point is None:
+            return None
+        app, title, when = point
+        if time.monotonic() - when >= domain.AIR_NOTE_SECONDS:
+            return None
+        return app, title
 
     def _set_status(self, status: str) -> None:
         self.status = status
@@ -391,7 +513,8 @@ class Assistant:
                 else:
                     self._conversation = PipelineConversation(settings, self._brain, self._voice, self._tools,
                                                               self.presence, self._stopped, self._memory,
-                                                              self._extra_prompt(), preload)
+                                                              self._extra_prompt(), preload,
+                                                              air_point=lambda: self._take_air_point())
                     self._conversation.run(initial_prompt, then_listen)
             finally:
                 self._conversation = None
