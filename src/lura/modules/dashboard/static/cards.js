@@ -250,6 +250,7 @@ function renderCards() {
   lastStatus = S.status;
   renderAudio();
   renderLook();
+  renderAir();
   renderMemory();
   renderSkills();
 }
@@ -294,4 +295,72 @@ function renderLook() {
   show();
   size.oninput = show;
   size.onchange = () => save({ overlay_scale: Number(size.value) });
+}
+
+// ── Lura Air: hand gestures through the webcam (on/off live, no restart)
+let airStatus = null;
+let airTimer = null;
+let lastPerms = "";
+function renderAir() {
+  bindCheck("#air-enabled", "air_enabled");
+  const box = $("#air-status");
+  const on = !!S.settings.air_enabled;
+  if (!on || !airStatus) { box.hidden = true; }
+  else {
+    const a = airStatus;
+    const key = a.downloading ? "air.st.downloading"
+      : a.camera === "on" ? "air.st.on"
+      : a.camera === "error" ? "air.st.error"
+      : a.camera === "lost" ? "air.st.lost"
+      : "air.st.starting";
+    box.textContent = t(key) + (a.camera === "error" || a.camera === "lost" ? ` — ${a.detail}` : "");
+    box.hidden = false;
+  }
+  renderAirPerms(on ? airStatus : null);
+  // Ask for the camera's state only while Air is on.
+  if (on && !airTimer) { loadAir(); airTimer = setInterval(loadAir, 2000); }
+  if (!on && airTimer) { clearInterval(airTimer); airTimer = null; airStatus = null; }
+}
+function renderAirPerms(a) {
+  const box = $("#air-perms");
+  if (!a || !a.permissions || !Object.keys(a.permissions).length) {
+    box.hidden = true;
+    lastPerms = "";
+    return;
+  }
+  const p = a.permissions;
+  const sig = `${uiLang()}|${p.camera}|${p.accessibility}`;
+  if (sig !== lastPerms) {
+    lastPerms = sig;
+    const camOk = p.camera === "authorized";
+    const camState = camOk ? t("air.perm.ok")
+      : p.camera === "not_determined" ? t("air.perm.ask")
+      : t("air.perm.needed");
+    const axOk = p.accessibility === true;
+    const axState = axOk ? t("air.perm.ok") : t("air.perm.needed");
+    const row = (pane, label, state, ok) => {
+      const kids = [el("span", { textContent: label }), el("b", { textContent: state })];
+      if (!ok) {
+        const btn = el("button", { type: "button", className: "btn small", textContent: t("air.perm.open") });
+        btn.dataset.pane = pane;
+        btn.onclick = async () => {
+          try {
+            airStatus = await api("POST", "/api/air/permission", { pane });
+            renderAir();
+          } catch (e) { fail(e); }
+        };
+        kids.push(btn);
+      }
+      return el("div", { className: "air-perm" }, ...kids);
+    };
+    box.replaceChildren(
+      row("camera", t("air.perm.camera"), camState, camOk),
+      row("accessibility", t("air.perm.accessibility"), axState, axOk),
+    );
+  }
+  box.hidden = false;
+}
+async function loadAir() {
+  try { airStatus = await api("GET", "/api/air"); } catch (_) { airStatus = null; }
+  if (S) renderAir();
 }

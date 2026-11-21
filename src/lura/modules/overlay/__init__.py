@@ -12,11 +12,11 @@ import threading
 
 from ...shared.platform import FROZEN, IS_LINUX
 from .looks import STYLES, THEMES, Look, look_from
-from .state import OverlayState, State, StateBlender
+from .state import AirView, OverlayState, State, StateBlender
 
 log = logging.getLogger(__name__)
 
-__all__ = ["Overlay", "OverlayState", "State", "StateBlender", "Look", "look_from", "STYLES", "THEMES",
+__all__ = ["Overlay", "OverlayState", "AirView", "State", "StateBlender", "Look", "look_from", "STYLES", "THEMES",
            "LOOK_SETTINGS", "settings_look"]
 
 #: The settings that make up the look, all applied live.

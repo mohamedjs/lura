@@ -65,6 +65,19 @@ def selfcheck() -> None:
     assert you == "hi" and lura.startswith("…") and len(lura) <= 192, lura
     st.subtitles_enabled = False
     assert caption_lines(st) is None, "the switch hides them"
+    import numpy as np
+    from .state import AirView
+    air_sample = AirView(
+        on=True, armed=True, mode="window",
+        hands=((0.3, 0.4, False), (0.7, 0.6, True)),
+        dwell=0.5, hand_age=0.3, pulse_ok=False, pulse_age=0.2,
+    )
+    for style in STYLES:
+        surf = render_surface(1.0, b, size=OVERLAY_SIZE, look=look_from(style), air=air_sample)
+        surf.flush()
+        buf = np.frombuffer(surf.get_data(), np.uint8).reshape(OVERLAY_SIZE, surf.get_stride())[:, : OVERLAY_SIZE * 4]
+        box = buf.reshape(OVERLAY_SIZE, OVERLAY_SIZE, 4)[int(OVERLAY_SIZE * 0.62):OVERLAY_SIZE, : int(OVERLAY_SIZE * 0.32), 3]
+        assert box.any(), f"{style}: Air HUD empty"
     print("overlay self-check OK")
 
 

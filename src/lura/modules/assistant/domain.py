@@ -21,6 +21,35 @@ NO_REPLY = "[[quiet]]"
 MAX_IGNORED_TURNS = 2
 #: Room left in the context for the reply itself.
 REPLY_RESERVE = 8000
+#: How long a pointed-at window stays attached to the user's next spoken turn.
+AIR_NOTE_SECONDS = 15.0
+#: How early a thumbs answer may arrive while Lura is still finishing her question.
+ANSWER_GRACE = 4.0
+
+_AIR_NOTE_PREFIX = "[The user is pointing at a window: "
+
+
+def air_note(app: str, title: str) -> str:
+    """Short context note telling the brain which window the user pointed at."""
+    app, title = app.strip(), title.strip()
+    if not app and not title:
+        return ""
+    if title and app:
+        target = f'"{title[:80]}" ({app})'
+    elif title:
+        target = f'"{title[:80]}"'
+    else:
+        target = app
+    return f'{_AIR_NOTE_PREFIX}{target}. "This"/"here" means that window.]'
+
+
+def answer_word(intent: str, language: str) -> str:
+    """A thumbs up or down turned into the spoken word it stands for."""
+    if intent == "confirm":
+        return "نعم" if language == "ar" else "Yes."
+    if intent == "deny":
+        return "لا" if language == "ar" else "No."
+    return ""
 
 _LANGUAGE_NAMES = {"ar": "Egyptian Arabic (عامية مصرية, in Arabic script)", "en": "English"}
 
@@ -147,6 +176,11 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
             "once more with other words (the service's name, another verb), then fall back to "
             "run_command or open_url, or say that service is not connected."
             + (f"\n{services}" if services else ""))
+    parts.append(
+        f"{name} Air: the user may also use hand gestures. A note like [The user is pointing at a "
+        f"window: …] in their message tells you what \"this\" or \"here\" means; for a browser "
+        f"window you can read the page with the browser tools. A turn that is only \"Yes.\"/\"No.\" "
+        f"may come from a thumbs up or down.")
     custom = persona.strip()
     if custom and custom != LEGACY_PERSONA:
         parts.append("The user's own instructions for you:\n" + _safe_format(custom, name=name))
@@ -222,9 +256,11 @@ def fit_history(history: list[Message], budget: int) -> list[Message]:
     view = []
     for i, m in enumerate(history):
         if m.audio_wav and i != last_audio and m.text:
-            m = Message("user", m.text)
+            if not m.text.startswith(_AIR_NOTE_PREFIX) or "\n" in m.text:
+                m = Message("user", m.text)
         elif m.audio_wav and i == last_audio and m.text:
-            m = Message("user", audio_wav=m.audio_wav)
+            note = m.text.split("\n", 1)[0] if m.text.startswith(_AIR_NOTE_PREFIX) else ""
+            m = Message("user", note, audio_wav=m.audio_wav)
         view.append(m)
     starts = [i for i, m in enumerate(view) if m.role == "user" and not m.tool_call_id]
     if not starts:

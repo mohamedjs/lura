@@ -189,6 +189,13 @@ class Settings:
     overlay_colors: dict[str, str] = field(default_factory=dict)
     #: Size of the hologram, 0.6–2.0 × the default 260 px.
     overlay_scale: float = 1.0
+    #: Lura Air: control windows and workspaces with hand gestures seen by the webcam.
+    air_enabled: bool = False
+    #: Which camera Lura Air uses: part of its name or its number; empty = the built-in webcam.
+    air_camera: str = ""
+    #: Lura Air: your own app kinds, WM_CLASS part → browser, media, presentation, files, editor,
+    #: terminal or other, e.g. {"obsidian": "editor"}. Checked before the built-in list.
+    air_app_kinds: dict[str, str] = field(default_factory=dict)
     dashboard_port: int = 47321
     onboarded: bool = False
 

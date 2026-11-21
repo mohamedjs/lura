@@ -14,6 +14,8 @@ CAPTION_WIDTH = 340
 CAPTION_HEIGHT = 150
 #: After this long without a new word, an idle face's subtitles fade away.
 LINGER_SECONDS = 8.0
+#: How long a short Air action/hint caption stays under an idle face.
+AIR_MESSAGE_SECONDS = 3.0
 
 
 def caption_width(size: int) -> int:
@@ -43,8 +45,10 @@ def caption_lines(state: OverlayState) -> tuple[str, str] | None:
     if not state.subtitles_enabled:
         return None
     you, lura, age = state.captions()
-    if not (you or lura):
-        return None
-    if state.state in (State.IDLE,) and age > LINGER_SECONDS:
-        return None
-    return _tail(you, 110), _tail(lura, 190)
+    if (you or lura) and not (state.state in (State.IDLE,) and age > LINGER_SECONDS):
+        return _tail(you, 110), _tail(lura, 190)
+    if state.state in (State.IDLE, State.LISTENING):
+        view = state.air_view()
+        if view is not None and view.message and view.message_age < AIR_MESSAGE_SECONDS:
+            return "", _tail(view.message, 120)
+    return None

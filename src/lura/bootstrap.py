@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from .modules.air import AirController, AirService
 from .modules.assistant import Assistant
 from .modules.brain import BrainService
+from .modules.computer import ComputerService, default_backend
 from .modules.connectors import ConnectorService
 from .modules.memory import MemoryService
 from .modules.settings import SettingsService
@@ -38,6 +40,9 @@ class Container:
     skills: SkillsService
     updates: UpdateService
     assistant: Assistant
+    computer: ComputerService
+    air: AirService
+    air_control: AirController
 
 
 def build(presence: Presence | None = None) -> Container:
@@ -52,12 +57,26 @@ def build(presence: Presence | None = None) -> Container:
                            lambda prompt: brain.complete(settings.current, prompt),
                            lambda: settings.current.user_name)
     skills = SkillsService()
+    computer = ComputerService(
+        default_backend(),
+        launcher=lambda name: tools.dispatch("open_application", {"app_name": name})[0],
+    )
+    air = AirService(lambda name, payload: bus.publish(name, **payload),
+                     camera=settings.current.air_camera)
+    air_control = AirController(
+        air,
+        computer,
+        lambda name, payload: bus.publish(name, **payload),
+        app_kinds=lambda: settings.current.air_app_kinds,
+    )
     from . import __version__
     updates = UpdateService(__version__, lambda: settings.current.check_updates,
                             lambda how: bus.publish(events.RESTART_REQUESTED if how == "restart"
                                                     else events.EXIT_REQUESTED))
     tools.add_provider(memory)
     tools.add_provider(skills)
+    tools.add_provider(computer)
+    tools.add_provider(air_control)
     assistant = Assistant(settings, brain, voice, tools, bus, presence, memory=memory,
                           extra_prompt=skills.prompt_block)
 
@@ -66,4 +85,5 @@ def build(presence: Presence | None = None) -> Container:
             desktop.apply_autostart(settings.current.start_at_login)
 
     bus.subscribe(events.SETTINGS_CHANGED, on_settings)
-    return Container(bus, settings, connectors, tools, brain, voice, memory, skills, updates, assistant)
+    return Container(bus, settings, connectors, tools, brain, voice, memory, skills, updates, assistant,
+                     computer, air, air_control)

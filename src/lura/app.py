@@ -61,8 +61,9 @@ def _container(presence=None):
 
 def cmd_run(args) -> int:
     from .modules.dashboard import DashboardApi, DashboardServer, running_url
-    from .modules.overlay import LOOK_SETTINGS, Overlay, settings_look
+    from .modules.overlay import AirView, LOOK_SETTINGS, Overlay, settings_look
     from .shared.i18n import t
+    from .shared.platform import IS_MAC
 
     if url := running_url():
         log.info("Lura is already running; opening its dashboard.")
@@ -73,9 +74,36 @@ def cmd_run(args) -> int:
     c = _container()
     s = c.settings.current
     stop = threading.Event()
+    air_dl = {"active": False, "error": ""}
+
+    def _mac_permissions() -> dict:
+        if not IS_MAC:
+            return {}
+        try:
+            from .modules.air import camera_authorization
+            from .modules.computer import accessibility_trusted
+            return {"camera": camera_authorization(), "accessibility": accessibility_trusted(False)}
+        except Exception:
+            return {}
+
+    def air_status() -> dict:
+        snap = c.air.snapshot()
+        detail = air_dl["error"] or snap.detail
+        camera = "error" if air_dl["error"] else snap.camera
+        return {"camera": camera, "detail": detail, "downloading": air_dl["active"],
+                "enabled": c.settings.current.air_enabled, "permissions": _mac_permissions()}
+
+    def air_permission(pane: str) -> dict:
+        from .shared.macos_privacy import open_settings
+        if pane == "accessibility":
+            c.computer.request_permissions()
+        open_settings(pane)
+        return air_status()
+
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: c.assistant.status, c.memory, c.skills,
-                                          c.updates), s.dashboard_port)
+                                          c.updates, air=air_status, air_permission=air_permission),
+                             s.dashboard_port)
     try:
         server.start()
     except OSError as exc:
@@ -106,16 +134,105 @@ def cmd_run(args) -> int:
     overlay.state.subtitles_enabled = s.subtitles
     overlay.state.look = settings_look(s)
 
+    air_lock = threading.Lock()
+
+    def start_air():
+        with air_lock:
+            if not c.settings.current.air_enabled:
+                return
+            c.air.set_camera(c.settings.current.air_camera)
+            c.air.start()
+            snap = c.air.snapshot()
+            if snap.camera == "error":
+                log.warning("Lura Air unavailable: %s", snap.detail)
+            if IS_MAC:
+                from .modules.computer import accessibility_trusted
+                if not accessibility_trusted(False):
+                    c.computer.request_permissions()
+            c.air_control.start()
+
+    def download_then_start():
+        from .modules.air import download_model
+        try:
+            log.info("Lura Air: downloading the hand model…")
+            download_model()
+            air_dl["error"] = ""
+        except Exception as exc:
+            log.warning("Lura Air: hand model download failed: %s", exc)
+            air_dl["error"] = f"Could not download the hand model: {exc}"
+        finally:
+            air_dl["active"] = False
+        if not air_dl["error"]:
+            start_air()
+
+    def apply_air():
+        with air_lock:
+            c.air_control.stop()
+            c.air.stop()
+        air_dl["error"] = ""
+        if not c.settings.current.air_enabled:
+            return
+        # Switched on from the dashboard on a machine without the hand model yet: fetch it
+        # (7.8 MB, checked against its SHA-256) instead of asking for `lura air setup`.
+        try:
+            from .modules.air import air_available, model_ready
+            needs_model = not model_ready() and air_available().startswith("Run")
+        except Exception:
+            needs_model = False
+        if needs_model:
+            if not air_dl["active"]:
+                air_dl["active"] = True
+                threading.Thread(target=download_then_start, daemon=True, name="air-model").start()
+            return
+        start_air()
+
     def on_settings(payload):
-        # Applied live, no restart: the subtitles switch and the look.
+        # Applied live, no restart: the subtitles switch, the look and Lura Air.
         changed = payload.get("changed", ())
         if "subtitles" in changed:
             overlay.state.subtitles_enabled = c.settings.current.subtitles
         if any(k in changed for k in LOOK_SETTINGS):
             overlay.state.look = settings_look(c.settings.current)
+        if "air_enabled" in changed or "air_camera" in changed:
+            apply_air()
 
     c.bus.subscribe(events.SETTINGS_CHANGED, on_settings)
     c.bus.subscribe(events.TOOL_USED, lambda p: overlay.state.set_tool(p["connector"]))
+
+    last_air = [{"ok": None, "message": "", "t": -1e9}]
+
+    def on_air_action(payload):
+        last_air[0] = {
+            "ok": payload.get("ok"),
+            "message": str(payload.get("message", "")),
+            "t": time.monotonic(),
+        }
+
+    c.bus.subscribe(events.AIR_ACTION, on_air_action)
+
+    def air_view():
+        snap = c.air.snapshot()
+        if snap.camera != "on":
+            return None
+        st = c.air_control.state()
+        now = time.monotonic()
+        last = last_air[0]
+        return AirView(
+            on=True,
+            engaged=st["engaged"],
+            zone=st["zone"],
+            mode=st["mode"],
+            hands=tuple((h.x, h.y, h.pinching) for h in snap.hands),
+            ring=st["ring_labels"],
+            ring_hover=st["ring_hover"],
+            grab_progress=st["grab_progress"],
+            pulse_ok=last["ok"],
+            pulse_age=now - last["t"],
+            message=last["message"],
+            message_age=now - last["t"],
+        )
+
+    overlay.state.air_source = air_view
 
     def on_signal(signum, _frame):
         log.info("Signal %s — shutting down.", signum)
@@ -144,6 +261,7 @@ def cmd_run(args) -> int:
     threading.Thread(target=c.updates.watch, args=(stop,), daemon=True, name="updates").start()
     threading.Thread(target=c.voice.ensure_offline_voice, daemon=True, name="offline-voice").start()
     c.connectors.start_all()
+    threading.Thread(target=c.connectors.ensure_runtime, daemon=True, name="node-runtime").start()
 
     # First run, or nothing works yet: the dashboard is where that gets fixed.
     if not s.onboarded or not c.settings.capabilities().can_talk:
@@ -171,6 +289,7 @@ def cmd_run(args) -> int:
             failed.set()
             stop.set()
 
+    apply_air()
     worker = threading.Thread(target=assistant_loop, daemon=True, name="assistant")
     worker.start()
     try:
@@ -182,6 +301,8 @@ def cmd_run(args) -> int:
         stop.set()
         c.assistant.interrupt()
         worker.join(timeout=5)
+        c.air_control.stop()
+        c.air.stop()
         c.connectors.stop_all()
         server.stop()
     if restart.is_set():
@@ -391,6 +512,10 @@ def cmd_mcp(args) -> int:
         elif args.action == "path":
             print(c.connectors.config_path)
             return 0
+        elif args.action == "runtime":
+            ok, msg = c.connectors.runtime_check()
+            print(msg)
+            return 0 if ok else 1
     except (ValueError, KeyError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -420,6 +545,232 @@ def cmd_autostart(args) -> int:
 def cmd_selftest(args) -> int:
     from .selftest import run
     return run(_container())
+
+
+def cmd_desktop(args) -> int:
+    from .modules.computer import ComputerService, default_backend
+    from .modules.tools import ToolService
+
+    params: dict[str, str] = {}
+    for tok in args.params:
+        if "=" not in tok:
+            print(f"bad argument: {tok} (use key=value)")
+            return 2
+        key, value = tok.split("=", 1)
+        params[key] = value
+    tools = ToolService()
+    svc = ComputerService(
+        default_backend(),
+        launcher=lambda name: tools.dispatch("open_application", {"app_name": name})[0],
+    )
+    result = svc.run(args.action, params, confirmed=args.yes)
+    print(result.message)
+    if args.action == "capabilities" and result.data:
+        print(result.data.get("actions", ""))
+    elif result.data:
+        print(json.dumps(result.data, indent=2, ensure_ascii=False))
+    print(f"({result.ms} ms)")
+    return 0 if result.ok else 1
+
+
+def cmd_air(args) -> int:
+    from .modules.air import (
+        AirService,
+        air_available,
+        download_model,
+        list_cameras,
+        model_path,
+        model_ready,
+        pick_camera,
+    )
+
+    if args.action == "cameras":
+        cams = list_cameras()
+        if not cams:
+            print("No cameras found.")
+            return 0
+        picked = pick_camera(cams, args.camera)
+        for cam in cams:
+            suffix = ""
+            if not cam.usable:
+                suffix = "  (not a camera)"
+            elif picked is not None and cam.index == picked.index:
+                suffix = "  ← used"
+            print(f"/dev/video{cam.index}  {cam.name}  [{cam.driver}]{suffix}")
+        return 0
+
+    if args.action == "setup":
+        if model_ready():
+            print(f"Hand model already installed: {model_path()}")
+            return 0
+
+        def _progress(done: int, total: int) -> None:
+            pct = int(done * 100 / total) if total > 0 else 0
+            print(f"\r… {pct}%", end="", flush=True)
+
+        try:
+            path = download_model(_progress)
+        except RuntimeError as exc:
+            print(f"\n{exc}", file=sys.stderr)
+            return 1
+        print(f"\r{path}        ")
+        return 0
+
+    if reason := air_available():
+        print(reason)
+        return 1
+
+    svc = AirService(None, camera=args.camera)
+
+    def _print_gesture(ev) -> None:
+        now = time.time()
+        ms = int((now - int(now)) * 1000)
+        stamp = f"{time.strftime('%H:%M:%S', time.localtime(now))}.{ms:03d}"
+        extra = json.dumps(ev.data, ensure_ascii=False) if ev.data else ""
+        line = (
+            f"{stamp}  {ev.gesture:13} {ev.hand:5} {ev.confidence:.2f}  "
+            f"{ev.x:.3f},{ev.y:.3f}"
+        )
+        print(f"{line}  {extra}" if extra else line, flush=True)
+
+    if args.action == "watch":
+        svc.subscribe(_print_gesture)
+        svc.start()
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        next_status = time.monotonic() + 2.0
+        try:
+            while True:
+                now = time.monotonic()
+                if deadline is not None and now >= deadline:
+                    break
+                if now >= next_status:
+                    snap = svc.snapshot()
+                    hands = ", ".join(
+                        f"{h.side}:{h.pose}{'*' if h.pinching else ''}" for h in snap.hands
+                    ) or "none"
+                    print(
+                        f"status: camera={snap.camera} ({snap.detail})  hands={hands}  "
+                        f"fps={snap.fps:.1f}",
+                        flush=True,
+                    )
+                    next_status = now + 2.0
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            svc.stop()
+        return 0
+
+    if args.action == "control":
+        from .modules.air import AirController
+        from .modules.computer import ComputerService, default_backend
+        from .shared import events
+
+        def on_event(name: str, payload: dict) -> None:
+            stamp = time.strftime("%H:%M:%S")
+            if name == events.AIR_MODE:
+                print(f"{stamp}  mode               ->    {payload.get('mode', '')}", flush=True)
+            elif name == events.AIR_INTENT:
+                app = payload.get("app", "")
+                title = payload.get("title", "")
+                ctx = f" ({app}: {title})" if app or title else ""
+                print(
+                    f"{stamp}  intent             {payload.get('intent', ''):5} "
+                    f"{payload.get('gesture', '')} [{payload.get('mode', '')}]{ctx}",
+                    flush=True,
+                )
+            else:
+                ok = "ok" if payload.get("ok") else "FAIL"
+                print(
+                    f"{stamp}  {payload.get('action', ''):18} {ok:4}  {payload.get('message', '')}",
+                    flush=True,
+                )
+
+        ctrl = AirController(svc, ComputerService(default_backend()), on_event)
+        svc.subscribe(_print_gesture)
+        svc.start()
+        ctrl.start()
+        ctrl.set_mode(args.mode)
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            ctrl.stop()
+            svc.stop()
+        return 0
+
+    if args.action == "record":
+        import gzip
+        from pathlib import Path
+        from .modules.air import InteractionEngine
+
+        if not args.out:
+            print("Usage: lura air record [--seconds N] OUT.jsonl", file=sys.stderr)
+            return 2
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        print(f"Recording hand landmarks only (no camera images are saved) -> {out_path}", flush=True)
+        frames = [0]
+        t0: list[float | None] = [None]
+        handle = (
+            gzip.open(out_path, "wt", encoding="utf-8")
+            if out_path.suffix == ".gz"
+            else out_path.open("w", encoding="utf-8")
+        )
+
+        class _RecorderEngine(InteractionEngine):
+            def update(self, t, hands):
+                if t0[0] is None:
+                    t0[0] = t
+                row = {
+                    "t": round(t - t0[0], 4),
+                    "label": "record",
+                    "hands": [
+                        {
+                            "side": h.side,
+                            "score": round(h.score, 4),
+                            "pts": [[round(p.x, 4), round(p.y, 4), round(p.z, 4)] for p in h.points],
+                        }
+                        for h in hands
+                    ],
+                }
+                handle.write(json.dumps(row) + "\n")
+                frames[0] += 1
+                return []
+
+        rec_svc = AirService(None, camera=args.camera, engine_factory=_RecorderEngine)
+        rec_svc.start()
+        deadline = time.monotonic() + args.seconds if args.seconds > 0 else None
+        try:
+            while True:
+                if deadline is not None and time.monotonic() >= deadline:
+                    break
+                time.sleep(0.1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            rec_svc.stop()
+            handle.close()
+        print(f"Saved {frames[0]} landmark frames (no images) to {out_path}.")
+        return 0
+
+    duration = args.seconds if args.seconds > 0 else 15.0
+    svc.start()
+    deadline = time.monotonic() + duration
+    try:
+        while time.monotonic() < deadline:
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        svc.stop()
+    print(json.dumps(svc.stats(), indent=2))
+    return 0
 
 
 def _utf8_console() -> None:
@@ -461,13 +812,25 @@ def main(argv=None) -> int:
     subs.add_parser("selftest", help="check audio, keys, models and voice end to end")
     subs.add_parser("say", help="talk now, skipping the wake word")
     subs.add_parser("briefing", help="speak the system briefing now")
-    mcp = subs.add_parser("mcp", help="connectors: list, add-url, import, remove, on, off, path")
+    mcp = subs.add_parser("mcp", help="connectors: list, add-url, import, remove, on, off, path, runtime")
     mcp.add_argument("action", nargs="?", default="list",
-                     choices=["list", "add-url", "import", "remove", "on", "off", "path"])
+                     choices=["list", "add-url", "import", "remove", "on", "off", "path", "runtime"])
     mcp.add_argument("name", nargs="?", help="connector name (or the mcp.json path for import)")
     mcp.add_argument("target", nargs="?", help="URL for add-url")
     auto = subs.add_parser("autostart", help="start Lura at login: on or off")
     auto.add_argument("state", choices=["on", "off"])
+    desk = subs.add_parser("desktop", help="desktop actions: list, run one (key=value args)")
+    desk.add_argument("action", nargs="?", default="capabilities")
+    desk.add_argument("params", nargs="*")
+    desk.add_argument("--yes", action="store_true")
+    from .modules.air import MODES as AIR_MODES
+    air = subs.add_parser("air", help="Lura Air: cameras, setup, watch, control, bench, record")
+    air.add_argument("action", nargs="?", default="watch",
+                     choices=["cameras", "setup", "watch", "control", "bench", "record"])
+    air.add_argument("out", nargs="?", help="output .jsonl or .jsonl.gz path for record")
+    air.add_argument("--camera", default="")
+    air.add_argument("--seconds", type=float, default=0.0)
+    air.add_argument("--mode", choices=AIR_MODES, default="universal")
 
     args = parser.parse_args(argv)
     if args.command == "mcp" and args.action == "import":
@@ -478,7 +841,8 @@ def main(argv=None) -> int:
     handlers = {
         "run": cmd_run, "dashboard": cmd_dashboard, "window": cmd_window, "login": cmd_login, "logout": cmd_logout,
         "config": cmd_config, "models": cmd_models, "selftest": cmd_selftest, "say": cmd_say,
-        "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart,
+        "briefing": cmd_briefing, "mcp": cmd_mcp, "autostart": cmd_autostart, "desktop": cmd_desktop,
+        "air": cmd_air,
     }
     return handlers[args.command](args)
 

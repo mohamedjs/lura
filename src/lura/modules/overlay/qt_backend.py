@@ -309,7 +309,7 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
         look = shared.look
         size = round(OVERLAY_SIZE * look.scale)
         surface = render_surface(clock["phase"], blender, size=size, amp=shared.amplitude, look=look,
-                                 tools=shared.tools())
+                                 tools=shared.tools(), air=shared.air_view())
         surface.flush()
         clock["surface"] = surface   # the QImage borrows its memory; keep it alive
         image = QtGui.QImage(surface.get_data(), size, size, surface.get_stride(),

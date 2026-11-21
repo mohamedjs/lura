@@ -163,9 +163,13 @@ class ConnectorService:
             if c.transport == HTTP:
                 client = HttpClient(c.url, c.token, c.headers)
             else:
-                if not shutil.which(c.command) and not shutil.which(c.command + ".cmd"):
-                    hint = " Install Node.js (it provides npx)." if c.command in ("npx", "node") else ""
-                    raise RuntimeError(f"{c.command!r} is not installed.{hint}")
+                from .infrastructure import node
+                if not (node.is_node_command(c.command) and node.ready()) \
+                        and not shutil.which(c.command) and not shutil.which(c.command + ".cmd"):
+                    if node.is_node_command(c.command):
+                        raise RuntimeError("Lura is installing her own Node.js for this connector; "
+                                           "it starts by itself when that is done.")
+                    raise RuntimeError(f"{c.command!r} is not installed.")
                 args = c.args
                 if CHROME_ENDPOINT in args:
                     from .infrastructure import chrome
@@ -199,6 +203,53 @@ class ConnectorService:
     def stop_all(self) -> None:
         for name in list(self._running):
             self._stop(name)
+
+    def ensure_runtime(self) -> bool:
+        from .infrastructure import node
+
+        ok = node.ensure()
+        if ok:
+            with self._lock:
+                to_start = [
+                    c.name for c in self._connectors
+                    if c.enabled and c.transport != HTTP and node.is_node_command(c.command)
+                    and ((run := self._running.get(c.name)) is None or run.status == "error")
+                ]
+            for name in to_start:
+                self.start_one(name)
+        return ok
+
+    def runtime_status(self) -> dict:
+        from .infrastructure import node
+
+        return node.status()
+
+    def runtime_check(self) -> tuple[bool, str]:
+        import os
+        import subprocess
+        from .infrastructure import node
+
+        try:
+            if not node.ensure(progress=log.info):
+                st = node.status()
+                return False, st["error"] or "Could not install Node.js."
+            argv = node.resolve("npx", ["--version"])
+            if not argv:
+                return False, "Node.js is not ready."
+            proc = subprocess.run(
+                argv,
+                env=node.env(dict(os.environ)),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if proc.returncode == 0:
+                st = node.status()
+                return True, f"Node.js {st['version']} in {st['path']}, npx {proc.stdout.strip()}"
+            err = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()
+            return False, err
+        except Exception as exc:
+            return False, str(exc)
 
     def _reindex(self) -> None:
         self._index = {tool_name(name, t["name"]): (name, t["name"])

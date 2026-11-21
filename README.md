@@ -76,9 +76,20 @@ not verify “Lura” is free of malware**. Click **Done** (not *Move to Trash*)
   bar (top right), not in the Dock. The settings window: double-click the face,
   the menu-bar icon → Open dashboard, or `/Applications/Lura.app/Contents/MacOS/lura dashboard`.
 
-Install **Node.js** too ([nodejs.org](https://nodejs.org)). It provides `npx`,
-which runs the built-in Chrome, web and files connectors. Everything else works
-without it.
+Lura downloads her own **Node.js** runtime into the data folder (`<data>/node`) on
+first start, so the built-in Chrome, web and files connectors (and any `npx`
+connector you add) work without installing Node.js yourself.
+
+### Lura Air on macOS
+
+Turning on **Lura Air** (hand control) on a Mac asks for two privacy permissions:
+**Camera** and **Accessibility** (to move the mouse and windows). The dashboard's
+**Hands** tab shows both and has buttons that open the right System Settings page.
+Switching Spaces moves one Space at a time with `Control+←` / `Control+→` (make sure
+Mission Control's Space shortcuts are enabled in Keyboard Shortcuts); screen
+brightness and media keys are not supported on macOS yet. Because Lura is signed ad
+hoc, macOS may ask for Accessibility again after an update — remove Lura from the
+Accessibility list and add it back.
 
 On first start Lura opens the dashboard in your browser. Add a key and you are done.
 
@@ -123,7 +134,7 @@ lura selftest           check microphone, speaker, keys, models and voice
 lura login --provider gemini|openai|anthropic|openrouter
 lura config [name] [value]
 lura models [provider] [search]
-lura mcp [list|add-url|import|remove|on|off|path]
+lura mcp [list|add-url|import|remove|on|off|path|runtime]
 lura autostart on|off
 ```
 
@@ -132,7 +143,7 @@ lura autostart on|off
 | | Linux | macOS | Windows |
 |---|---|---|---|
 | Settings, keys, connectors | `~/.config/lura/` | `~/Library/Application Support/Lura/` | `%APPDATA%\Lura\` |
-| Wake model, log | `~/.local/share/lura/` | `…/Lura/data/` | `%LOCALAPPDATA%\Lura\` |
+| Wake model, `node/`, log | `~/.local/share/lura/` | `…/Lura/data/` | `%LOCALAPPDATA%\Lura\` |
 
 **ElevenLabs voice.** Paste an ElevenLabs key under Keys and Lura hears with Scribe v2
 and speaks with your account's voices (female or male, a separate choice for each) through

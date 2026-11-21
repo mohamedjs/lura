@@ -273,7 +273,7 @@ def _frames(shared: OverlayState, windows: dict) -> None:
         look = shared.look
         size = round(OVERLAY_SIZE * look.scale)
         surface = render_surface(phase[0], blender, size=size, amp=shared.amplitude, look=look,
-                                 tools=shared.tools())
+                                 tools=shared.tools(), air=shared.air_view())
         pix = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(surface_rgba(surface)),
                                               GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
         frame[0] += 1

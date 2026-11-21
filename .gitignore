@@ -48,3 +48,6 @@ node_modules/
 # Scratch output
 _to_delete/
 _site/
+
+# Local Air gesture recordings
+tests/fixtures/air/

@@ -44,6 +44,7 @@
       <button data-tab="voice" role="tab"><span class="ico" aria-hidden="true">♪</span><span data-i18n="tab.voice"></span></button>
       <button data-tab="audio" role="tab"><span class="ico" aria-hidden="true">🎙</span><span data-i18n="tab.audio"></span></button>
       <button data-tab="look" role="tab"><span class="ico" aria-hidden="true">◐</span><span data-i18n="tab.look"></span></button>
+      <button data-tab="air" role="tab"><span class="ico" aria-hidden="true">✋</span><span data-i18n="tab.air"></span></button>
       <button data-tab="you" role="tab"><span class="ico" aria-hidden="true">☺</span><span data-i18n="tab.you"></span></button>
       <button data-tab="memory" role="tab"><span class="ico" aria-hidden="true">❖</span><span data-i18n="tab.memory"></span></button>
       <button data-tab="skills" role="tab"><span class="ico" aria-hidden="true">✎</span><span data-i18n="tab.skills"></span></button>
@@ -201,6 +202,29 @@
           <div class="custom-colors" id="look-colors" hidden></div>
           <label class="field"><span><span data-i18n="look.size"></span> <b id="look-size-value"></b></span>
             <input id="look-size" type="range" min="0.6" max="2" step="0.1"></label>
+        </div>
+      </section>
+
+      <!-- Lura Air: hand gestures through the webcam -->
+      <section class="panel" data-tab="air">
+        <div class="card" id="air-card">
+          <h3 data-i18n="air.title"></h3>
+          <p class="hint" data-i18n="air.hint"></p>
+          <label class="switch"><input type="checkbox" id="air-enabled"><span></span><b data-i18n="air.enable"></b></label>
+          <p class="pill" id="air-status" hidden></p>
+          <div id="air-perms" hidden></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="air.gestures"></h3>
+          <ul class="air-list">
+            <li data-i18n="air.g.point"></li>
+            <li data-i18n="air.g.click"></li>
+            <li data-i18n="air.g.drag"></li>
+            <li data-i18n="air.g.scroll"></li>
+            <li data-i18n="air.g.swipe"></li>
+            <li data-i18n="air.g.thumbs"></li>
+          </ul>
+          <p class="hint" data-i18n="air.privacy"></p>
         </div>
       </section>
 
