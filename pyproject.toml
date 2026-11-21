@@ -22,8 +22,9 @@ overlay = ["pycairo>=1.25", "PySide6>=6.7"]
 # The dashboard as a native window (WebView2 on Windows, WKWebView on macOS).
 window = ["pywebview>=5.0"]
 # Lura Air: local webcam hand tracking and gestures.
-air = ["mediapipe>=1.2.3", "opencv-python-headless>=4.10"]
-all = ["anthropic>=2.3", "google-genai>=1.0.0", "pycairo>=1.25", "PySide6>=6.7", "pywebview>=5.0", "mediapipe>=1.2.3", "opencv-python-headless>=4.10"]
+# Intel Macs: mediapipe stopped shipping x86_64 macOS wheels after 0.10.21 (same Tasks API).
+air = ["mediapipe>=1.2.3; sys_platform != 'darwin' or platform_machine != 'x86_64'", "mediapipe>=0.10.21,<0.11; sys_platform == 'darwin' and platform_machine == 'x86_64'", "opencv-python-headless>=4.10"]
+all = ["anthropic>=2.3", "google-genai>=1.0.0", "pycairo>=1.25", "PySide6>=6.7", "pywebview>=5.0", "mediapipe>=1.2.3; sys_platform != 'darwin' or platform_machine != 'x86_64'", "mediapipe>=0.10.21,<0.11; sys_platform == 'darwin' and platform_machine == 'x86_64'", "opencv-python-headless>=4.10"]
 
 [project.scripts]
 lura = "lura.app:main"
