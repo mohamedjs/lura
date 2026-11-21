@@ -678,3 +678,9 @@ not add Python dependencies. **Do not commit, push or tag.**
 ## 12. Decisions
 
 (appended as questions come in)
+- D1 (kind): `windows_from_cg()` sets `kind="NORMAL"` (domain `_TARGET_KINDS` is upper-case). domain.py untouched.
+- D2 (desktop): `windows_from_cg()` sets `desktop=1`, matching `desktops() == (1, 3)`.
+- D3 (order): `windows_from_cg()` stays front-to-back (index 0 = frontmost, used by
+  `active_window()` and the tests); `MacBackend.windows()` returns the list **reversed**
+  (bottom-to-top, like X11's stacking list) — `window()` and `active_window()` keep using the
+  front-to-back list.
