@@ -1,0 +1,6 @@
+Fonts and icons used by the landing page:
+- Tajawal (Arabic), SIL Open Font License 1.1
+- Inter, SIL Open Font License 1.1
+- Remix Icon (remixicon.woff2, subset in icons.css), Apache License 2.0
+- Marhey (Arabic handwriting), SIL Open Font License 1.1
+- Caveat (Latin handwriting), SIL Open Font License 1.1

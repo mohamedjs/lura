@@ -1,11 +1,19 @@
-// Lura landing page: language, theme, OS detection, live download links, the face.
+// Lura landing page: language, theme, OS detection, live download links, video tabs.
 "use strict";
 
 const REPO = "mohamedjs/lura";
 const T = {
   en: {
     "nav.download": "Download", "nav.features": "Features", "nav.open": "Open source", "nav.faq": "FAQ",
-    "hero.title": "Talk to your computer.",
+    "nav.watch": "Watch", "nav.looks": "Looks",
+    "hero.badge": "Voice assistant · Arabic & English", "hero.watch": "Watch her work",
+    "hero.you": "YOU", "hero.q": "Lura, sort my Downloads folder.", "hero.a": "Done. Four folders: images, videos, PDFs and notes.",
+    "strip.lang": "Egyptian Arabic & English", "strip.brain": "Gemini, Claude, GPT or any OpenRouter model", "strip.wake": "Offline wake word", "strip.mit": "Free & open source (MIT)",
+    "watch.kick": "See it", "watch.title": "Not a mock-up. A real session.", "watch.live": "Real session", "watch.reel": "Instagram reel",
+    "how.kick": "How it works", "feat.kick": "Features", "looks.kick": "Looks", "shots.kick": "Screenshots", "dl.kick": "Download", "open.kick": "Open source", "faq.kick": "FAQ",
+    "looks.bust": "Hologram bust", "looks.face": "Wireframe face", "looks.orb": "Orb", "looks.ring": "Sound ring",
+    "final.title": "Say “Lura”.", "final.sub": "Free on Windows, macOS and Linux. One key, and she's ready to talk.",
+    "hero.title": "Talk to your <em class=\"hl\">computer</em>.",
     "hero.lead": "Say “Lura” and just talk, in Arabic or English. She answers out loud, opens your apps and pages, drives Chrome, finds your files and gets things done.",
     "hero.download": "Download for {os}", "hero.other": "Other platforms", "hero.say": "say “Lura”",
     "hero.version": "Version {v} · free", "hero.mobile": "Lura runs on your computer — open this page there.",
@@ -39,11 +47,15 @@ const T = {
     "how.3.t": "She answers and acts", "how.3.d": "A natural voice answers while she opens apps, plays videos, searches the web or checks your system.",
     "feat.title": "Everything in one voice",
     "feat.brain.t": "Any brain", "feat.brain.d": "Google Gemini, OpenAI, Claude or OpenRouter — pick the model you trust in the dashboard.",
-    "feat.voice.t": "One natural voice", "feat.voice.d": "Gemini 3.8 voice with 30 voices, female or male. She starts speaking while the answer is still being written.",
+    "feat.voice.t": "A natural voice", "feat.voice.d": "Gemini, ElevenLabs or any OpenRouter speech model, female or male. She starts speaking while the answer is still being written, and falls back to an offline voice when the internet or credit runs out.",
     "feat.lang.t": "Arabic & English", "feat.lang.d": "Speaks Egyptian Arabic and English natively, and the whole app switches language, right to left.",
     "feat.chrome.t": "Drives your browser", "feat.chrome.d": "Opens tabs, pages and videos in Chrome, reads live news and pages, finds files on your computer.",
     "feat.mcp.t": "Connect anything", "feat.mcp.d": "Add any MCP server by URL and token, or paste its mcp.json — GitHub, Notion, databases and more.",
     "feat.safe.t": "Safe by design", "feat.safe.d": "Deleting or overwriting files is blocked in code, not just asked nicely. Your keys never leave your computer.",
+    "feat.cut.t": "Interrupt her any time", "feat.cut.d": "Talk over her or tap her face and she stops mid-sentence and listens. She only remembers the part you actually heard.",
+    "feat.mem.t": "She remembers you", "feat.mem.d": "One endless conversation with a running summary, plus things you ask her to remember. Stored only on your computer.",
+    "feat.look.t": "Make her yours", "feat.look.d": "A floating hologram on every screen: bust, face, orb or ring, in five colour themes or your own colours.",
+    "live.title": "A real session", "live.sub": "Recorded live on a laptop: she sorts a folder, asks Gemini, reads Notion and sums up GitHub. Only the waiting is cut. The session is spoken in Arabic; this cut has an English narrator and captions.",
     "shots.title": "See it running", "shots.sub": "Real screenshots of the released app — the face floats over your apps on every screen.",
     "shots.win": "Windows: the face over your apps, with the dashboard", "shots.dash": "The dashboard: keys, brain, voice and language",
     "shots.mac": "macOS: the face and the menu-bar icon",
@@ -60,7 +72,15 @@ const T = {
   },
   ar: {
     "nav.download": "التحميل", "nav.features": "المميزات", "nav.open": "مفتوحة المصدر", "nav.faq": "أسئلة",
-    "hero.title": "كلّم جهازك.",
+    "nav.watch": "شوفها", "nav.looks": "الأشكال",
+    "hero.badge": "مساعدة صوتية · عربي وإنجليزي", "hero.watch": "شوفها وهي شغالة",
+    "hero.you": "إنت", "hero.q": "لورا، رتّبي فولدر التحميلات.", "hero.a": "تمام، عملت ٤ فولدرات: صور وفيديوهات وPDF وملاحظات.",
+    "strip.lang": "مصري وإنجليزي", "strip.brain": "Gemini أو Claude أو GPT أو أي موديل من OpenRouter", "strip.wake": "كلمة تشغيل من غير نت", "strip.mit": "مجانية ومفتوحة المصدر (MIT)",
+    "watch.kick": "شوفها", "watch.title": "مش تصميم. دي جلسة حقيقية.", "watch.live": "جلسة حقيقية", "watch.reel": "ريل إنستجرام",
+    "how.kick": "إزاي", "feat.kick": "المميزات", "looks.kick": "الأشكال", "shots.kick": "صور", "dl.kick": "التحميل", "open.kick": "مفتوحة المصدر", "faq.kick": "أسئلة",
+    "looks.bust": "تمثال هولوجرام", "looks.face": "وش شبكي", "looks.orb": "كورة", "looks.ring": "حلقة صوت",
+    "final.title": "قول «لورا».", "final.sub": "مجانية على ويندوز وماك ولينكس. مفتاح واحد، وهي جاهزة تتكلم.",
+    "hero.title": "كلّم <em class=\"hl\">جهازك</em>.",
     "hero.lead": "قول «لورا» واتكلم عادي، عربي أو إنجليزي. بترد عليك بصوتها، وتفتحلك برامجك وصفحاتك، وتتحكم في كروم، وتلاقيلك ملفاتك، وتخلّص الحاجة.",
     "hero.download": "حمّل لـ {os}", "hero.other": "أنظمة تانية", "hero.say": "قول «لورا»",
     "hero.version": "إصدار {v} · مجاني", "hero.mobile": "لورا بتشتغل على الكمبيوتر — افتح الصفحة دي من عليه.",
@@ -94,11 +114,15 @@ const T = {
     "how.3.t": "بترد وبتنفّذ", "how.3.d": "صوت طبيعي بيرد عليك وهي بتفتح البرامج، وتشغّل الفيديوهات، وتدوّر على النت، أو تطمّنك على الجهاز.",
     "feat.title": "كل حاجة بصوت واحد",
     "feat.brain.t": "أي عقل", "feat.brain.d": "Google Gemini أو OpenAI أو Claude أو OpenRouter — اختار الموديل اللي تثق فيه من لوحة التحكم.",
-    "feat.voice.t": "صوت طبيعي واحد", "feat.voice.d": "صوت Gemini 3.8 بـ 30 صوت، ست أو راجل. بتبدأ تتكلم والرد لسه بيتكتب.",
+    "feat.voice.t": "صوت طبيعي", "feat.voice.d": "Gemini أو ElevenLabs أو أي موديل صوت من OpenRouter، ست أو راجل. بتبدأ تتكلم والرد لسه بيتكتب، ولو النت أو الرصيد خلص بتكمّل بصوت أوفلاين.",
     "feat.lang.t": "عربي وإنجليزي", "feat.lang.d": "بتتكلم مصري وإنجليزي، والتطبيق كله بيقلب عربي من اليمين للشمال.",
     "feat.chrome.t": "بتسوق المتصفح", "feat.chrome.d": "بتفتح تابات وصفحات وفيديوهات في كروم، وتقرا الأخبار والصفحات لايف، وتلاقي الملفات على جهازك.",
     "feat.mcp.t": "وصّلها بأي حاجة", "feat.mcp.d": "ضيف أي سيرفر MCP بلينك وتوكن، أو الصق mcp.json — GitHub وNotion وقواعد بيانات وغيرهم.",
     "feat.safe.t": "آمنة من الأساس", "feat.safe.d": "مسح الملفات أو الكتابة فوقها ممنوع في الكود نفسه، مش بالرجاء. ومفاتيحك مابتسيبش جهازك.",
+    "feat.cut.t": "قاطعها في أي وقت", "feat.cut.d": "اتكلم وهي بتتكلم أو دوس على وشها، تسكت في نص الجملة وتسمعك. وبتفتكر بس الجزء اللي إنت سمعته.",
+    "feat.mem.t": "بتفتكرك", "feat.mem.d": "محادثة واحدة مستمرة بملخص بيتحدّث، وكمان الحاجات اللي تقولها تفتكرها. كله متخزن على جهازك بس.",
+    "feat.look.t": "شكلها على مزاجك", "feat.look.d": "هولوجرام عايم على كل شاشة: تمثال أو وش أو كورة أو حلقة، بخمس ثيمات ألوان أو ألوانك إنت.",
+    "live.title": "جلسة حقيقية", "live.sub": "متسجلة لايف على لابتوب: بترتّب فولدر، وتسأل Gemini، وتقرا Notion، وتلخّص GitHub. اتشال بس وقت الانتظار. بالمصري وعليها ترجمة.",
     "shots.title": "شوفها شغالة", "shots.sub": "صور حقيقية من النسخة المنشورة — الوش بيطفو فوق برامجك على كل الشاشات.",
     "shots.win": "ويندوز: الوش فوق برامجك ومعاه لوحة التحكم", "shots.dash": "لوحة التحكم: المفاتيح والعقل والصوت واللغة",
     "shots.mac": "ماك: الوش وأيقونة شريط القوائم",
@@ -204,51 +228,37 @@ function applyLang() {
   document.documentElement.lang = lang;
   document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   $$("[data-i18n]").forEach((el) => { if (!el.dataset.asset) el.textContent = t(el.dataset.i18n); });
+  $$("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
   $$("#lang button").forEach((b) => b.classList.toggle("on", b.dataset.value === lang));
-  document.title = `Lura — ${t("hero.title").replace(/\.$/, "")}`;
-  // The intro video and its poster exist in both languages.
-  const video = $("#intro"), src = `assets/intro-${lang}.mp4`;
-  if (!video.currentSrc.endsWith(src)) {
-    video.poster = `assets/intro-${lang}.jpg`;
-    video.querySelector("source").src = src;
-    video.load();
-  }
+  document.title = `Lura — ${t("hero.title").replace(/<[^>]+>/g, "").replace(/\.$/, "")}`;
   $("#shot-dash").src = `assets/shots/dashboard-${lang === "ar" ? "ar-dark" : "en-light"}.png`;
+  liveVideo();
   renderDownloads();
+  if (window.nbScan) { nbScan(); nbRefit(); }   // marks.js: new highlighter spans, strokes re-fitted to the new text
+}
+
+// The real-session video has an Arabic cut (Egyptian Arabic, captions) and an English cut (English narrator).
+const LIVE = {
+  ar: { src: "https://mohamedjs.github.io/mohamedjs/projects/lura/lura-demo.mp4", poster: "assets/live-poster.jpg" },
+  en: { src: "https://mohamedjs.github.io/mohamedjs/projects/lura/lura-en.mp4", poster: "assets/live-poster-en.jpg" },
+};
+function liveVideo() {
+  const v = $("#live-video"), want = LIVE[lang] || LIVE.en, source = v && v.querySelector("source");
+  if (!source || source.getAttribute("src") === want.src) return;
+  v.pause();
+  v.poster = want.poster;
+  source.setAttribute("src", want.src);
+  v.load();   // preload="none": this only swaps what plays, nothing is downloaded until play
 }
 
 function applyTheme() {
   const theme = store.get("lura-theme") || "auto";
   if (theme === "auto") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = theme;
+  const icon = $("#theme i");
+  if (icon) icon.className = theme === "light" ? "ri-sun-line" : theme === "dark" ? "ri-moon-line" : "ri-contrast-line";
 }
 
-function dark() {
-  const theme = document.documentElement.dataset.theme;
-  return theme ? theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
-}
-
-// ── the face, live in the hero (face.js is the same head as the app's) ──
-function startFace() {
-  const canvas = $("#face");
-  if (!canvas || typeof window.drawFace !== "function") return;
-  const ctx = canvas.getContext("2d");
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const t0 = performance.now();
-  function frame(now) {
-    const t = still ? 2 : (now - t0) / 1000;
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    const ink = dark()
-      ? { line: [150, 145, 255], hot: [120, 230, 245], eye: [60, 210, 235], blend: "lighter", boost: 1.1 }
-      : { line: [96, 88, 220], hot: [12, 150, 172], eye: [12, 150, 172], blend: "source-over", boost: 1.8 };
-    // A soft talking rhythm every few seconds, so it looks alive.
-    const talk = Math.max(0, Math.sin(t * 0.7)) > 0.85 ? 0.3 + 0.4 * Math.abs(Math.sin(t * 12)) : 0;
-    window.drawFace(ctx, w / 2, h * 0.46, w * 0.27, { t, mouth: talk, alpha: 1, glow: 0.3, ...ink });
-    if (!still) requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   applyTheme();
@@ -264,7 +274,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     const code = b.parentElement.querySelector("code").textContent;
     try { await navigator.clipboard.writeText(code); b.textContent = t("dl.copied"); setTimeout(() => (b.textContent = t("dl.copy")), 1500); } catch {}
   }));
+  $$(".tabs button").forEach((b) => (b.onclick = () => {
+    $$(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    for (const id of ["live-video", "reel"]) {
+      const v = $("#" + id), on = (b.dataset.tab === "live") === (id === "live-video");
+      v.hidden = !on; if (!on) v.pause();
+    }
+    $(".screen").classList.toggle("vertical", b.dataset.tab === "reel");
+  }));
   release = await loadRelease();
   renderDownloads();
 });
-window.addEventListener("load", startFace);
+

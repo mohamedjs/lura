@@ -1,0 +1,15 @@
+[
+  {"id": "i1", "sec": "intro", "text": "Meet Lura, a *voice assistant* that lives on your computer. Say her name and just talk, in *Arabic* or *English*."},
+  {"id": "i2", "sec": "intro", "text": "She opens *apps* and websites, finds your *files*, changes *settings*, checks your *system's health*, works with *GitHub*, and *remembers* what you like."},
+  {"id": "f1", "sec": "folder", "text": "Here's a real session, spoken in Arabic. First: sort a *messy folder*, one type per folder."},
+  {"id": "f2", "sec": "folder", "text": "She makes *four folders*: images, PDFs, text files and videos."},
+  {"id": "g1", "sec": "gemini", "text": "Next, she opens *Gemini* in Chrome and asks for the best *name* for a voice assistant."},
+  {"id": "g2", "sec": "gemini", "text": "Then she sums up the answer: *short*, with a *clear* first sound, like Lura or Nova. And it approves of the name *Lura* itself."},
+  {"id": "n1", "sec": "notion", "text": "Ask what you worked on last in *Notion*, and she finds it: *Lura Intro Video 2.4*, Live Session."},
+  {"id": "n2", "sec": "notion", "text": "Marked *done*, last edited at *5:24* in the morning. Then she offers to *open* it."},
+  {"id": "h1", "sec": "github", "text": "Finally: what's new on my *GitHub*? She reads the latest activity and sums it up."},
+  {"id": "h2", "sec": "github", "text": "Big work on *Helm* on November 13th: a *75-second* product video on its landing page.", "cap": "Big work on *7alm* on November 13th: a *75-second* product video on its landing page."},
+  {"id": "h3", "sec": "github", "text": "The day before, version 2: a *NestJS* backend instead of Supabase, a *Meta inbox* for Facebook, Instagram and WhatsApp, and a *Docker* production stack."},
+  {"id": "h4", "sec": "github", "text": "And on Lura, the *2.3* pull request: *streaming* speech, and you can *interrupt* her."},
+  {"id": "o1", "sec": "outro", "text": "Lura is free and *open source*, built with AI. Idea, architecture and release by *Mohamed Mahmoud*."}
+]

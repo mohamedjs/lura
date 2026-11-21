@@ -1,59 +1,153 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="en" dir="ltr" class="no-js">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lura — talk to your computer</title>
 <meta name="description" content="Lura is a voice-first desktop assistant for Windows, macOS and Linux. Say “Lura”, talk in Arabic or English, and she answers out loud and gets things done.">
 <meta property="og:title" content="Lura — talk to your computer">
-<meta property="og:description" content="A voice-first desktop assistant. Arabic & English. Any AI brain, one natural voice.">
-<meta property="og:image" content="assets/intro-en.jpg">
+<meta property="og:description" content="A voice-first desktop assistant. Arabic & English. Any AI brain, a natural voice, a hologram on your screen.">
+<meta property="og:image" content="assets/live-poster.jpg">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="theme-color" content="#f4f5f9">
-<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#F3EEE4">
+<link rel="icon" href="img/favicon-64.png" type="image/png" sizes="64x64">
+<link rel="icon" href="img/icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="stylesheet" href="fonts/icons.css">
+<link rel="stylesheet" href="notebook.css">
 <link rel="stylesheet" href="site.css">
+<script src="marks.js" defer></script>
 <script src="site.js" defer></script>
 </head>
 <body>
-<div class="paper">
 
 <nav class="nav">
-  <a class="brand" href="#top"><img src="assets/favicon.svg" alt="" class="logo"><span>Lura</span></a>
-  <div class="links">
-    <a href="#download" data-i18n="nav.download"></a>
-    <a href="#features" data-i18n="nav.features"></a>
-    <a href="#open" data-i18n="nav.open"></a>
-    <a href="#faq" data-i18n="nav.faq"></a>
-  </div>
-  <div class="nav-actions">
-    <div class="seg small" id="lang" role="group" aria-label="Language"><button data-value="en">EN</button><button data-value="ar">ع</button></div>
-    <button class="icon-btn" id="theme" aria-label="Theme">◐</button>
+  <div class="wrap nav-in">
+    <a class="brand" href="#top"><img src="img/icon-192.png" alt="" class="logo"><span>Lura</span></a>
+    <div class="links">
+      <a href="#watch" data-i18n="nav.watch"></a>
+      <a href="#features" data-i18n="nav.features"></a>
+      <a href="#looks" data-i18n="nav.looks"></a>
+      <a href="#open" data-i18n="nav.open"></a>
+      <a href="#faq" data-i18n="nav.faq"></a>
+    </div>
+    <div class="nav-actions">
+      <div class="seg" id="lang" role="group" aria-label="Language"><button data-value="en">EN</button><button data-value="ar">ع</button></div>
+      <button class="icon-btn" id="theme" aria-label="Theme"><i class="ri-moon-line"></i></button>
+      <a class="btn primary sm" href="#download" data-i18n="nav.download"></a>
+    </div>
   </div>
 </nav>
 
-<header class="hero" id="top">
-  <div class="hero-copy">
-    <h1 data-i18n="hero.title"></h1>
-    <p class="lead" data-i18n="hero.lead"></p>
-    <div class="row">
-      <a class="btn primary big" id="hero-download" href="#download"><span class="os-icon" id="hero-icon"></span><span id="hero-download-text"></span></a>
-      <a class="btn ghost" href="#download" data-i18n="hero.other"></a>
+<!-- HERO: cream paper; Lura's real hologram render on a dark plate, taped to the page -->
+<header class="hero-top" id="top">
+  <div class="wrap hero">
+    <div class="hero-copy">
+      <span class="pill"><span class="dot"></span><span data-i18n="hero.badge"></span></span>
+      <h1 data-i18n-html="hero.title"></h1>
+      <p class="lead" data-i18n="hero.lead"></p>
+      <div class="row">
+        <a class="btn primary big" id="hero-download" href="#download"><span class="os-icon" id="hero-icon"></span><span id="hero-download-text"></span></a>
+        <a class="btn big" href="#watch"><i class="ri-play-fill"></i><span data-i18n="hero.watch"></span></a>
+      </div>
+      <p class="say"><span class="arrow" data-mark="arrow-d" data-mark-delay="900"></span><span class="hand" data-i18n="hero.say"></span></p>
+      <p class="hint" id="hero-version"></p>
     </div>
-    <p class="hint" id="hero-version"></p>
+    <div class="hero-art">
+      <figure class="paper-frame holo-card">
+        <i class="tape tl"></i><i class="tape tr"></i>
+        <div class="plate holo-plate"><img class="holo" src="img/holo-hero.webp" width="1000" height="1000" alt="Lura's hologram"></div>
+      </figure>
+      <span class="chip-ic c1"><i class="ri-notion-fill"></i></span>
+      <span class="chip-ic c2"><i class="ri-github-fill"></i></span>
+      <span class="chip-ic c3"><i class="ri-chrome-line"></i></span>
+      <span class="chip-ic c4"><i class="ri-folder-3-fill"></i></span>
+      <div class="bubble you card"><b data-i18n="hero.you"></b><span data-i18n="hero.q"></span></div>
+      <div class="bubble her sticky r"><i class="tape top"></i><b>Lura</b><span data-i18n="hero.a"></span></div>
+    </div>
   </div>
-  <div class="hero-face card"><canvas id="face" width="520" height="520" aria-hidden="true"></canvas>
-    <div class="say"><span class="dot"></span><span data-i18n="hero.say"></span></div>
+  <div class="wrap strip">
+    <span><i class="ri-translate-2"></i><span data-i18n="strip.lang"></span></span>
+    <span><i class="ri-brain-line"></i><span data-i18n="strip.brain"></span></span>
+    <span><i class="ri-voiceprint-line"></i><span data-i18n="strip.wake"></span></span>
+    <span><i class="ri-code-s-slash-line"></i><span data-i18n="strip.mit"></span></span>
+    <span><i class="ri-computer-line"></i>Windows · macOS · Linux</span>
   </div>
 </header>
 
-<section class="card video-card">
-  <video id="intro" controls playsinline preload="metadata" poster="assets/intro-en.jpg">
-    <source src="assets/intro-en.mp4" type="video/mp4">
-  </video>
+<main class="wrap">
+
+<section class="section" id="watch">
+  <span class="kick" data-i18n="watch.kick"></span>
+  <h2 data-i18n="watch.title"></h2>
+  <p class="sub" data-i18n="live.sub"></p>
+  <div class="tabs" role="tablist">
+    <button class="on" data-tab="live" data-i18n="watch.live"></button>
+    <button data-tab="reel" data-i18n="watch.reel"></button>
+  </div>
+  <div class="screen paper-frame"><i class="tape tl"></i><i class="tape tr"></i>
+    <video id="live-video" controls playsinline preload="none" poster="assets/live-poster-en.jpg">
+      <source src="https://mohamedjs.github.io/mohamedjs/projects/lura/lura-en.mp4" type="video/mp4">
+    </video>
+    <video id="reel" controls playsinline preload="none" poster="assets/reel-poster.jpg" hidden>
+      <source src="https://mohamedjs.github.io/mohamedjs/projects/lura/lura-reel.mp4" type="video/mp4">
+    </video>
+  </div>
 </section>
 
-<section id="download" class="section">
+<section class="section" id="how">
+  <span class="kick" data-i18n="how.kick"></span>
+  <h2 data-i18n="how.title"></h2>
+  <div class="flow">
+    <div class="step"><span class="ic ico"><i class="ri-voiceprint-line"></i></span><span class="num" data-mark="circle">01</span><h3 data-i18n="how.1.t"></h3><p data-i18n="how.1.d"></p></div>
+    <div class="step"><span class="ic ico"><i class="ri-user-voice-line"></i></span><span class="num" data-mark="circle-r" data-mark-delay="250">02</span><h3 data-i18n="how.2.t"></h3><p data-i18n="how.2.d"></p></div>
+    <div class="step"><span class="ic ico"><i class="ri-flashlight-line"></i></span><span class="num" data-mark="circle" data-mark-delay="500">03</span><h3 data-i18n="how.3.t"></h3><p data-i18n="how.3.d"></p></div>
+  </div>
+</section>
+
+<section class="section" id="features">
+  <span class="kick" data-i18n="feat.kick"></span>
+  <h2 data-i18n="feat.title"></h2>
+  <div class="bento">
+    <div class="feat big"><i class="ri-brain-line"></i><h3 data-i18n="feat.brain.t"></h3><p data-i18n="feat.brain.d"></p>
+      <div class="chips"><span>Gemini</span><span>Claude</span><span>OpenAI</span><span>OpenRouter</span></div></div>
+    <div class="feat big"><i class="ri-mic-line"></i><h3 data-i18n="feat.voice.t"></h3><p data-i18n="feat.voice.d"></p>
+      <div class="wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+    <div class="feat"><i class="ri-translate-2"></i><h3 data-i18n="feat.lang.t"></h3><p data-i18n="feat.lang.d"></p></div>
+    <div class="feat"><i class="ri-hand"></i><h3 data-i18n="feat.cut.t"></h3><p data-i18n="feat.cut.d"></p></div>
+    <div class="feat"><i class="ri-chrome-line"></i><h3 data-i18n="feat.chrome.t"></h3><p data-i18n="feat.chrome.d"></p></div>
+    <div class="feat"><i class="ri-plug-line"></i><h3 data-i18n="feat.mcp.t"></h3><p data-i18n="feat.mcp.d"></p></div>
+    <div class="feat half"><i class="ri-history-line"></i><h3 data-i18n="feat.mem.t"></h3><p data-i18n="feat.mem.d"></p></div>
+    <div class="feat half"><i class="ri-shield-check-line"></i><h3 data-i18n="feat.safe.t"></h3><p data-i18n="feat.safe.d"></p></div>
+  </div>
+</section>
+
+<section class="section" id="looks">
+  <span class="kick" data-i18n="looks.kick"></span>
+  <h2 data-i18n="feat.look.t"></h2>
+  <p class="sub" data-i18n="feat.look.d"></p>
+  <div class="looks">
+    <figure><img loading="lazy" src="img/look-bust.webp" alt=""><figcaption data-i18n="looks.bust"></figcaption></figure>
+    <figure><img loading="lazy" src="img/look-face.webp" alt=""><figcaption data-i18n="looks.face"></figcaption></figure>
+    <figure><img loading="lazy" src="img/look-orb.webp" alt=""><figcaption data-i18n="looks.orb"></figcaption></figure>
+    <figure><img loading="lazy" src="img/look-ring.webp" alt=""><figcaption data-i18n="looks.ring"></figcaption></figure>
+  </div>
+</section>
+
+<section class="section" id="shots">
+  <span class="kick" data-i18n="shots.kick"></span>
+  <h2 data-i18n="shots.title"></h2>
+  <p class="sub" data-i18n="shots.sub"></p>
+  <div class="gallery">
+    <figure class="shot wide"><img loading="lazy" src="assets/shots/windows-desktop-dashboard.png" alt=""><figcaption data-i18n="shots.win"></figcaption></figure>
+    <figure class="shot"><img loading="lazy" id="shot-dash" src="assets/shots/dashboard-en-light.png" alt=""><figcaption data-i18n="shots.dash"></figcaption></figure>
+    <figure class="shot"><img loading="lazy" src="assets/shots/macos-desktop-face.png" alt=""><figcaption data-i18n="shots.mac"></figcaption></figure>
+  </div>
+</section>
+
+<section class="section" id="download">
+  <span class="kick" data-i18n="dl.kick"></span>
   <h2 data-i18n="dl.title"></h2>
   <p class="sub" data-i18n="dl.sub"></p>
   <div class="grid3" id="platforms">
@@ -84,7 +178,7 @@
 </section>
 
 <section class="section" id="mac-first">
-  <h2 data-i18n="mac.title"></h2>
+  <h2 class="h2sm" data-i18n="mac.title"></h2>
   <p class="sub" data-i18n="mac.sub"></p>
   <div class="macfirst">
     <figure class="card macshot">
@@ -119,46 +213,16 @@
   </div>
 </section>
 
-<section class="section" id="how">
-  <h2 data-i18n="how.title"></h2>
-  <div class="steps">
-    <div class="card step"><span class="num">1</span><h3 data-i18n="how.1.t"></h3><p data-i18n="how.1.d"></p></div>
-    <div class="card step"><span class="num">2</span><h3 data-i18n="how.2.t"></h3><p data-i18n="how.2.d"></p></div>
-    <div class="card step"><span class="num">3</span><h3 data-i18n="how.3.t"></h3><p data-i18n="how.3.d"></p></div>
-  </div>
-</section>
-
-<section class="section" id="features">
-  <h2 data-i18n="feat.title"></h2>
-  <div class="grid3">
-    <div class="card feat"><span class="emoji">🧠</span><h3 data-i18n="feat.brain.t"></h3><p data-i18n="feat.brain.d"></p></div>
-    <div class="card feat"><span class="emoji">🎙️</span><h3 data-i18n="feat.voice.t"></h3><p data-i18n="feat.voice.d"></p></div>
-    <div class="card feat"><span class="emoji">🌍</span><h3 data-i18n="feat.lang.t"></h3><p data-i18n="feat.lang.d"></p></div>
-    <div class="card feat"><span class="emoji">🧭</span><h3 data-i18n="feat.chrome.t"></h3><p data-i18n="feat.chrome.d"></p></div>
-    <div class="card feat"><span class="emoji">🔌</span><h3 data-i18n="feat.mcp.t"></h3><p data-i18n="feat.mcp.d"></p></div>
-    <div class="card feat"><span class="emoji">🛡️</span><h3 data-i18n="feat.safe.t"></h3><p data-i18n="feat.safe.d"></p></div>
-  </div>
-</section>
-
-<section class="section" id="shots">
-  <h2 data-i18n="shots.title"></h2>
-  <p class="sub" data-i18n="shots.sub"></p>
-  <div class="gallery">
-    <figure class="card shot wide"><img loading="lazy" src="assets/shots/windows-desktop-dashboard.png" alt=""><figcaption data-i18n="shots.win"></figcaption></figure>
-    <figure class="card shot"><img loading="lazy" id="shot-dash" src="assets/shots/dashboard-en-light.png" alt=""><figcaption data-i18n="shots.dash"></figcaption></figure>
-    <figure class="card shot"><img loading="lazy" src="assets/shots/macos-desktop-face.png" alt=""><figcaption data-i18n="shots.mac"></figcaption></figure>
-  </div>
-</section>
-
 <section class="section" id="open">
-  <div class="card open">
+  <div class="open card"><i class="tape tl"></i><i class="tape tr"></i>
     <div>
+      <span class="kick l" data-i18n="open.kick"></span>
       <h2 data-i18n="open.title"></h2>
       <p class="lead" data-i18n="open.lead"></p>
       <ul class="ticks"><li data-i18n="open.f1"></li><li data-i18n="open.f2"></li><li data-i18n="open.f3"></li></ul>
     </div>
     <div class="open-actions">
-      <a class="btn primary" href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener" data-i18n="open.cta"></a>
+      <a class="btn primary big" href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener"><i class="ri-github-fill"></i><span data-i18n="open.cta"></span></a>
       <a class="btn" href="https://github.com/mohamedjs/lura/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener" data-i18n="open.contrib"></a>
       <p class="hint" data-i18n="open.keys"></p>
     </div>
@@ -166,6 +230,7 @@
 </section>
 
 <section class="section" id="faq">
+  <span class="kick" data-i18n="faq.kick"></span>
   <h2 data-i18n="faq.title"></h2>
   <div class="faq">
     <details class="card"><summary data-i18n="faq.1.q"></summary><p data-i18n="faq.1.a"></p></details>
@@ -176,12 +241,20 @@
   </div>
 </section>
 
+<section class="final">
+  <div class="final-plate paper-frame"><i class="tape top"></i><div class="plate"><img src="img/holo-hero.webp" alt="" class="final-holo" loading="lazy"></div></div>
+  <h2><span data-mark="underline"><span data-i18n="final.title"></span></span></h2>
+  <p class="lead" data-i18n="final.sub"></p>
+  <a class="btn primary big" href="#download"><i class="ri-download-2-line"></i><span data-i18n="nav.download"></span></a>
+</section>
+
+</main>
+
 <footer class="foot">
-  <img src="assets/favicon.svg" alt="" class="logo small">
-  <p><span data-i18n="foot.made"></span> · <a href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener">GitHub</a> · <span id="foot-version"></span></p>
+  <div class="wrap">
+    <img src="img/icon-192.png" alt="" class="logo small">
+    <p><span data-i18n="foot.made"></span> · <a href="https://github.com/mohamedjs/lura" target="_blank" rel="noopener">GitHub</a> · <span id="foot-version"></span></p>
+  </div>
 </footer>
-</div>
-<script src="assets/face_mesh.js" defer></script>
-<script src="assets/face.js" defer></script>
 </body>
 </html>
