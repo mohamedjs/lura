@@ -88,6 +88,7 @@ if sys.platform == "darwin":
             "CFBundleShortVersionString": re.search(r'__version__ = "([^"]+)"', (LURA / "__init__.py").read_text()).group(1),
             # The one permission a voice assistant cannot work without.
             "NSMicrophoneUsageDescription": "Lura listens for her wake word and to what you say to her.",
+            "NSCameraUsageDescription": "Lura Air watches your hand through the camera to move the mouse and follow your gestures. Frames stay on this Mac.",
             "NSAppleEventsUsageDescription": "Lura opens and controls apps when you ask her to.",
             # A menu-bar app: the face and the tray icon, no Dock icon.
             "LSUIElement": True,

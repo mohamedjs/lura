@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
-from ....shared.platform import IS_LINUX
+from ....shared.platform import IS_LINUX, IS_MAC
 from ..domain import CameraInfo
+from .macos_camera import authorization as camera_authorization
 
 log = logging.getLogger(__name__)
 
@@ -107,13 +109,30 @@ class OpenCVCamera:
         import cv2
 
         cv2.setNumThreads(1)
-        backend = cv2.CAP_V4L2 if IS_LINUX else cv2.CAP_ANY
+        status = ""
+        if IS_MAC:
+            status = camera_authorization()
+            if status in ("denied", "restricted"):
+                raise RuntimeError("Camera access is off for Lura. Turn it on in System Settings → "
+                                   "Privacy & Security → Camera, then switch Lura Air off and on.")
+        backend = cv2.CAP_V4L2 if IS_LINUX else (cv2.CAP_AVFOUNDATION if IS_MAC else cv2.CAP_ANY)
         cap = cv2.VideoCapture(self._info.index, backend)
+        if IS_MAC and (not cap or not cap.isOpened()) and status == "not_determined":
+            # OpenCV asks macOS for the camera and fails this first open; wait for the user's answer.
+            if cap is not None:
+                cap.release()
+            for _ in range(120):                 # up to 60 s
+                time.sleep(0.5)
+                if camera_authorization() != "not_determined":
+                    break
+            if camera_authorization() == "authorized":
+                cap = cv2.VideoCapture(self._info.index, backend)
         if not cap or not cap.isOpened():
             if cap is not None:
                 cap.release()
             raise RuntimeError(f"Cannot open camera {self._info.name}.")
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        if not IS_MAC:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
         cap.set(cv2.CAP_PROP_FPS, self._fps)

@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 def default_backend() -> Backend:
     """Pick the desktop backend for this session; never raises."""
     if IS_MAC:
-        return UnsupportedBackend("macOS is not supported yet")
+        from .macos import MacBackend
+        return MacBackend()
     if IS_WINDOWS:
         return UnsupportedBackend("Windows is not supported yet")
     if not IS_LINUX:

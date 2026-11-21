@@ -7,6 +7,7 @@ from .domain import GESTURES, MODES, AirState, GestureEvent, HandView, pick_came
 from .engine import Command, InteractionEngine
 from .infrastructure.cameras import list_cameras
 from .infrastructure.landmarker import air_available, download_model, model_path, model_ready
+from .infrastructure.macos_camera import authorization as camera_authorization
 
 __all__ = [
     "AirService",
@@ -28,4 +29,5 @@ __all__ = [
     "model_ready",
     "download_model",
     "air_available",
+    "camera_authorization",
 ]

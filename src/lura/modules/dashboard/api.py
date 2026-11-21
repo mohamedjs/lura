@@ -55,6 +55,7 @@ class DashboardApi:
     #: Lura Air's status for the Hands tab: {"camera": "off"|"on"|"error"|"lost"|..., "detail": str,
     #: "downloading": bool}. None for the standalone dashboard.
     air: Callable[[], dict] | None = None
+    air_permission: Callable[[str], dict] | None = None
     _pending: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -75,6 +76,7 @@ class DashboardApi:
         r("POST", "/api/update/install", lambda b, m: self.update_install())
         r("GET", "/api/state", lambda b, m: self.state())
         r("GET", "/api/air", lambda b, m: self.air_status())
+        r("POST", "/api/air/permission", lambda b, m: self.air_permission_open(b))
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
                                               "connectors": self.connectors.list(),
@@ -138,8 +140,16 @@ class DashboardApi:
 
     def air_status(self) -> dict:
         if self.air is None:
-            return {"camera": "off", "detail": "", "downloading": False, "running": False}
+            return {"camera": "off", "detail": "", "downloading": False, "running": False, "permissions": {}}
         return {**self.air(), "running": True}
+
+    def air_permission_open(self, body: dict) -> dict:
+        pane = str((body or {}).get("pane", ""))
+        if pane not in ("camera", "accessibility"):
+            raise ApiError(400, "unknown pane")
+        if self.air_permission is None:
+            return self.air_status()
+        return {**self.air_permission(pane), "running": True}
 
     # ── updates ──
     def update_status(self, check: bool = False) -> dict:

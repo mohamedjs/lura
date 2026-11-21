@@ -127,6 +127,20 @@ jobs:
           elif [ "$RUNNER_OS" = "Windows" ]; then dist/lura/lura.exe --version
           else dist/lura/lura --version; fi
 
+      # Lura installs her own Node.js for the connectors; prove the shipped app can.
+      - name: Node runtime for connectors
+        shell: bash
+        env: { LURA_DATA_DIR: "${{ runner.temp }}/lura-data" }
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then dist/Lura.app/Contents/MacOS/lura mcp runtime
+          elif [ "$RUNNER_OS" = "Windows" ]; then dist/lura/lura.exe mcp runtime
+          else dist/lura/lura mcp runtime; fi
+
+      - name: Desktop control probe (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: dist/Lura.app/Contents/MacOS/lura desktop capabilities
+
       # The bundle must leave the C++ runtime and the GPU stack to the host:
       # Ubuntu 22.04's copies break the window on newer distros (#6).
       - name: No host-coupled libraries in the bundle (Linux)
@@ -222,7 +236,9 @@ jobs:
             - **Windows:** run `Lura-Setup-${{ env.VERSION }}.exe`
             - **Other Linux:** unpack `lura-${{ env.VERSION }}-linux-x86_64.tar.gz` and run `lura/LuraApp`
 
-            The built-in Chrome, web and files connectors need Node.js (npx).
+            Lura installs her own Node.js for the connectors the first time she starts (about 30 MB), so
+            nothing else is needed. On a Mac, Lura Air asks for Camera and Accessibility access; the
+            Hands tab shows both and opens the right System Settings page.
       # A release made with GITHUB_TOKEN triggers no other workflow, except a
       # dispatch: refresh the landing page so its buttons point at this version.
       - name: Refresh the landing page

@@ -1,5 +1,5 @@
 # 010 — Lura on macOS: her own Node.js for connectors, Lura Air on a Mac
-Status: Ready     Builds on: docs/ARCHITECTURE.md, docs/002 (computer backend port), docs/003 (camera), docs/009 (Air engine)
+Status: Implemented (2026-11-21, Gemini 4 Neon high, 2 rounds; reviewed by Claude)     Builds on: docs/ARCHITECTURE.md, docs/002 (computer backend port), docs/003 (camera), docs/009 (Air engine)
 
 ## 1. Goal
 

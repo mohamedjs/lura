@@ -138,6 +138,12 @@ class ComputerService:
                     out[spec.name] = {"available": True, "why": ""}
         return out
 
+    def request_permissions(self) -> dict:
+        fn = getattr(self._backend, "request_permissions", None)
+        res = fn() if fn else {}
+        self._probe = None
+        return res
+
     # ── ToolProvider ────────────────────────────────────────────────────────
 
     def tool_specs(self) -> list[ToolSpec]:
@@ -374,7 +380,8 @@ class ComputerService:
         return ActionResult(
             True,
             "Desktop actions on this computer:",
-            data={"backend": reason or "x11", "actions": catalog_text(avail)},
+            data={"backend": reason or getattr(self._backend, "name", "x11"),
+                  "actions": catalog_text(avail)},
         )
 
     def _do_window_list(self, args: dict) -> ActionResult:

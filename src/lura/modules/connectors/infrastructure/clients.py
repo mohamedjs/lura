@@ -14,6 +14,7 @@ import urllib.request
 from typing import Any
 
 from ....shared.platform import IS_WINDOWS
+from . import node
 
 log = logging.getLogger(__name__)
 
@@ -56,8 +57,13 @@ class StdioClient:
     """
 
     def __init__(self, command: str, args: list[str], env: dict[str, str]):
-        self._argv = [self._resolve(command), *args]
-        self._env = {**os.environ, **env}
+        own = node.resolve(command, args)
+        if own is not None:
+            self._argv = own
+            self._env = node.env({**os.environ, **env})
+        else:
+            self._argv = [self._resolve(command), *args]
+            self._env = {**os.environ, **env}
         self._proc: subprocess.Popen | None = None
         self._pending: dict[int, queue.Queue] = {}
         self._lock = threading.Lock()

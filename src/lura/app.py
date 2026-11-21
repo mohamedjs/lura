@@ -63,6 +63,7 @@ def cmd_run(args) -> int:
     from .modules.dashboard import DashboardApi, DashboardServer, running_url
     from .modules.overlay import AirView, LOOK_SETTINGS, Overlay, settings_look
     from .shared.i18n import t
+    from .shared.platform import IS_MAC
 
     if url := running_url():
         log.info("Lura is already running; opening its dashboard.")
@@ -75,16 +76,34 @@ def cmd_run(args) -> int:
     stop = threading.Event()
     air_dl = {"active": False, "error": ""}
 
+    def _mac_permissions() -> dict:
+        if not IS_MAC:
+            return {}
+        try:
+            from .modules.air import camera_authorization
+            from .modules.computer import accessibility_trusted
+            return {"camera": camera_authorization(), "accessibility": accessibility_trusted(False)}
+        except Exception:
+            return {}
+
     def air_status() -> dict:
         snap = c.air.snapshot()
         detail = air_dl["error"] or snap.detail
         camera = "error" if air_dl["error"] else snap.camera
         return {"camera": camera, "detail": detail, "downloading": air_dl["active"],
-                "enabled": c.settings.current.air_enabled}
+                "enabled": c.settings.current.air_enabled, "permissions": _mac_permissions()}
+
+    def air_permission(pane: str) -> dict:
+        from .shared.macos_privacy import open_settings
+        if pane == "accessibility":
+            c.computer.request_permissions()
+        open_settings(pane)
+        return air_status()
 
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: c.assistant.status, c.memory, c.skills,
-                                          c.updates, air=air_status), s.dashboard_port)
+                                          c.updates, air=air_status, air_permission=air_permission),
+                             s.dashboard_port)
     try:
         server.start()
     except OSError as exc:
@@ -126,6 +145,10 @@ def cmd_run(args) -> int:
             snap = c.air.snapshot()
             if snap.camera == "error":
                 log.warning("Lura Air unavailable: %s", snap.detail)
+            if IS_MAC:
+                from .modules.computer import accessibility_trusted
+                if not accessibility_trusted(False):
+                    c.computer.request_permissions()
             c.air_control.start()
 
     def download_then_start():
@@ -238,6 +261,7 @@ def cmd_run(args) -> int:
     threading.Thread(target=c.updates.watch, args=(stop,), daemon=True, name="updates").start()
     threading.Thread(target=c.voice.ensure_offline_voice, daemon=True, name="offline-voice").start()
     c.connectors.start_all()
+    threading.Thread(target=c.connectors.ensure_runtime, daemon=True, name="node-runtime").start()
 
     # First run, or nothing works yet: the dashboard is where that gets fixed.
     if not s.onboarded or not c.settings.capabilities().can_talk:
@@ -488,6 +512,10 @@ def cmd_mcp(args) -> int:
         elif args.action == "path":
             print(c.connectors.config_path)
             return 0
+        elif args.action == "runtime":
+            ok, msg = c.connectors.runtime_check()
+            print(msg)
+            return 0 if ok else 1
     except (ValueError, KeyError, OSError) as exc:
         print(exc, file=sys.stderr)
         return 1
@@ -784,9 +812,9 @@ def main(argv=None) -> int:
     subs.add_parser("selftest", help="check audio, keys, models and voice end to end")
     subs.add_parser("say", help="talk now, skipping the wake word")
     subs.add_parser("briefing", help="speak the system briefing now")
-    mcp = subs.add_parser("mcp", help="connectors: list, add-url, import, remove, on, off, path")
+    mcp = subs.add_parser("mcp", help="connectors: list, add-url, import, remove, on, off, path, runtime")
     mcp.add_argument("action", nargs="?", default="list",
-                     choices=["list", "add-url", "import", "remove", "on", "off", "path"])
+                     choices=["list", "add-url", "import", "remove", "on", "off", "path", "runtime"])
     mcp.add_argument("name", nargs="?", help="connector name (or the mcp.json path for import)")
     mcp.add_argument("target", nargs="?", help="URL for add-url")
     auto = subs.add_parser("autostart", help="start Lura at login: on or off")

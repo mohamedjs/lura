@@ -268,3 +268,6 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 
 .air-list { margin: .2em 0 .8em; padding-inline-start: 1.2em; line-height: 1.9; }
 #air-status { margin-top: 4px; }
+.air-perm { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.air-perm b { font-weight: 600; }
+.air-perm button { margin-inline-start: auto; }

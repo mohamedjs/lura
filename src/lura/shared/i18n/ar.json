@@ -279,5 +279,11 @@
   "air.st.starting": "بتشغّل الكاميرا…",
   "air.st.downloading": "بتنزّل موديل الإيد (8 MB)…",
   "air.st.error": "مش شغالة",
-  "air.st.lost": "الكاميرا وقفت، بتحاول تاني"
+  "air.st.lost": "الكاميرا وقفت، بتحاول تاني",
+  "air.perm.camera": "الكاميرا",
+  "air.perm.accessibility": "تسهيلات الاستخدام (تحريك الماوس والنوافذ)",
+  "air.perm.ok": "مسموح",
+  "air.perm.needed": "لسه مش مسموح",
+  "air.perm.ask": "macOS هيسألك أول ما الكاميرا تشتغل",
+  "air.perm.open": "افتح الإعدادات"
 }

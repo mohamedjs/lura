@@ -279,5 +279,11 @@
   "air.st.starting": "Starting the camera…",
   "air.st.downloading": "Downloading the hand model (8 MB)…",
   "air.st.error": "Not working",
-  "air.st.lost": "Camera lost, retrying"
+  "air.st.lost": "Camera lost, retrying",
+  "air.perm.camera": "Camera",
+  "air.perm.accessibility": "Accessibility (move the mouse and windows)",
+  "air.perm.ok": "Allowed",
+  "air.perm.needed": "Not allowed yet",
+  "air.perm.ask": "macOS will ask when the camera starts",
+  "air.perm.open": "Open settings"
 }
