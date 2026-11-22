@@ -303,6 +303,7 @@ let airTimer = null;
 let lastPerms = "";
 function renderAir() {
   bindCheck("#air-enabled", "air_enabled");
+  bindCheck("#air-thumb-click", "air_thumb_click");
   const box = $("#air-status");
   const on = !!S.settings.air_enabled;
   if (!on || !airStatus) { box.hidden = true; }

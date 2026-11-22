@@ -104,6 +104,13 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   signs it ad hoc), else `piper-tts` on PATH — never `piper` (apt's is a mouse tool).
   Voices are always downloaded, not shipped (dataset licences). A free OpenRouter speech
   model that hits its daily limit falls back to Gemini 3.8 Flash TTS until `X-RateLimit-Reset`.
+- **2.6 — Air gestures v4 (`air/engine.py`):** cursor follows the index knuckle (INDEX_MCP), not the
+  tip, with pointer acceleration (`accel_gain`: ×0.6 slow … ×1.6 fast); finger-gun click = cocked
+  thumb (`thumb_reach` > 0.65 for 0.2 s) tapped down (< 0.5) with the knuckle still (`THUMB_STILL`),
+  held `THUMB_DRAG_HOLD` 0.35 s = drag; V + thumb tap = `right_click`; the v3 pinch still clicks;
+  flick scroll glides with momentum (`GLIDE_*`, scroll Commands with `text="glide"`, coalesced in the
+  controller queue), a fist stops it. `air_thumb_click` (live) switches the thumb tap off. Thresholds
+  are not measured on camera yet (the session recordings are not on this machine).
 - **2.4.3 (from Mohamed's logs):** `stream_sse` gives up (408) after `timeout` s of keep-alives
   only (a stalled OpenRouter stream hung her 8+ min); MCP `CALL_TIMEOUT` 30 s (a Chrome
   screenshot of a background tab hung); `MAX_TOOL_ROUNDS` 10 (Docs typing ran out at 6);

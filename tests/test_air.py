@@ -59,6 +59,7 @@ def make_hand(
     side: str = "right",
     score: float = 0.95,
     pinch_gap: float | None = None,
+    thumb: str | None = None,
 ) -> Hand:
     """Build a synthetic 21-landmark hand matching a named pose at (cx, cy) and palm size."""
     # "blade": the open hand turned edge-on to the camera (knuckles stacked, fingers straight).
@@ -103,7 +104,13 @@ def make_hand(
             pts[dip_i] = Point(fx, cy - 0.45 * size)
             pts[tip_i] = Point(fx, cy - 0.25 * size)
 
-    if pinch_gap is not None:
+    if thumb == "up":
+        # Finger gun cocked: thumb up and out, away from the index knuckle and tip.
+        pts[THUMB_TIP] = Point(cx - 1.00 * size, cy - 0.70 * size)
+    elif thumb == "down":
+        # Thumb brought down onto the side of the folded middle finger.
+        pts[THUMB_TIP] = Point(cx + 0.10 * size, cy - 0.40 * size)
+    elif pinch_gap is not None:
         idx_tip = pts[INDEX_TIP]
         pts[THUMB_TIP] = Point(idx_tip.x - pinch_gap * size, idx_tip.y)
     elif pose == "pinch":

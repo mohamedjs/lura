@@ -62,7 +62,8 @@ def build(presence: Presence | None = None) -> Container:
         launcher=lambda name: tools.dispatch("open_application", {"app_name": name})[0],
     )
     air = AirService(lambda name, payload: bus.publish(name, **payload),
-                     camera=settings.current.air_camera)
+                     camera=settings.current.air_camera,
+                     thumb_click=settings.current.air_thumb_click)
     air_control = AirController(
         air,
         computer,

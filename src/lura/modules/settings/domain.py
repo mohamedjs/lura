@@ -196,6 +196,9 @@ class Settings:
     #: Lura Air: your own app kinds, WM_CLASS part → browser, media, presentation, files, editor,
     #: terminal or other, e.g. {"obsidian": "editor"}. Checked before the built-in list.
     air_app_kinds: dict[str, str] = field(default_factory=dict)
+    #: Lura Air: click with a finger-gun thumb tap (thumb down onto the middle finger). Off = only
+    #: the thumb-to-index pinch clicks.
+    air_thumb_click: bool = True
     dashboard_port: int = 47321
     onboarded: bool = False
 

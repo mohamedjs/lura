@@ -1,15 +1,20 @@
 """Pure Air interaction engine: hand landmarks and timestamps in, discrete Commands out.
 
-v3 (Mohamed's live test, 20 Nov 2026): a hand mouse, not a gesture language.
+v4 (Nov 2026): a hand mouse, not a gesture language.
 
-- index finger up (others folded) -> the real cursor follows the fingertip (relative, like a mouse;
-  fold the finger to "lift the mouse" and move back).
+- index finger up (others folded) -> the real cursor follows the index knuckle (INDEX_MCP), not the
+  fingertip, so clicking does not shake it (relative, like a mouse; fold the finger to "lift the
+  mouse" and move back). Pointer acceleration: slow hand = small precise moves, fast = far.
 - a quick flick of the pointing finger up or down -> scroll, like flicking a phone: the page follows
-  the finger (up -> the page goes up, you read further down). The cursor movement of the flick is
-  undone and the cursor stays still while the finger comes back. Slow movement stays the mouse.
-- while pointing, touch thumb to index and let go quickly -> left click (twice -> double click).
-  Touch and hold (DRAG_HOLD) -> mouse button down; move -> drag; let go -> button up. Dragging a
-  title bar moves the window, so there is no separate "grab".
+  the finger (up -> the page goes up, you read further down) and keeps gliding, slowing down by
+  itself (a faster flick glides further, flicks in a row add up). A fist stops the glide. The cursor
+  movement of the flick is undone and the cursor stays still while the finger comes back.
+- "finger gun": pointing with the thumb up, bring the thumb down onto the side of the middle finger
+  and up again -> left click (twice -> double click). Keep it down (THUMB_DRAG_HOLD) -> mouse button
+  down; move -> drag / draw; thumb up -> button up. The index finger never moves for a click.
+- the v3 pinch (thumb tip to index tip) still works the same way: quick -> click, hold DRAG_HOLD ->
+  drag. Dragging a title bar moves the window, so there is no separate "grab".
+- V (index + middle up) with the same thumb tap -> right click.
 - two fingers (index + middle, V) moved up/down -> scroll, like a phone: the page follows the hand
   (hand up -> the page moves up, i.e. you read further down). SCROLL_NATURAL = False flips it.
 - the edge of the hand (a "blade": hand turned sideways, fingers straight) swept left/right ->
@@ -34,6 +39,7 @@ from .domain import (
     INDEX_TIP,
     MIDDLE_MCP,
     PINKY_MCP,
+    THUMB_TIP,
     WRIST,
     Hand,
     OneEuro,
@@ -85,10 +91,23 @@ FLICK_MIN_STEPS, FLICK_MAX_STEPS = 3, 15
 FLICK_FREEZE = 0.45       # s the cursor stays still after a flick (the finger coming back)
 FLICK_RETURN = 0.8        # s in which an opposite flick (the finger coming back) is ignored
 FLICK_PINCH_BLOCK = 0.5   # s after a flick in which a pinch does not count (the finger curls)
+GLIDE_PER_STEP = 2.5      # glide speed (wheel steps / s) added per step of a flick
+GLIDE_TAU = 0.35          # s: glide speed decays as exp(-t / GLIDE_TAU) (total glide ~ n x 0.9)
+GLIDE_STOP = 1.0          # wheel steps / s below which the glide ends
+THUMB_ARM_OUT = 0.65      # thumb tip -> index MCP / palm above this = thumb up ("gun" cocked)
+THUMB_ARM = 0.20          # s the thumb must be up while pointing before a tap counts
+THUMB_ARM_GRACE = 0.6     # s after the thumb was up in which bringing it down still counts
+THUMB_IN = 0.50           # thumb tip -> index MCP / palm below this = thumb down (pressed)
+THUMB_UP_OUT = 0.60       # ... above this again = thumb lifted (hysteresis)
+THUMB_DRAG_HOLD = 0.35    # s the thumb stays down before it becomes mouse-down (shorter = click)
+THUMB_STILL = 0.15        # knuckle speed (normalized units / s) above which a thumb tap is ignored:
+                          # a real tap happens with the hand still, a relaxed thumb drifts while moving
 THUMB_HOLD = 0.5
 THUMB_REPEAT = 3.0        # s: the same thumbs answer again within this counts once
 HINT_AFTER, HINT_EVERY = 1.5, 10.0
 CURSOR_GAIN = 1.5         # full-frame-width finger move = 1920 x CURSOR_GAIN screen px
+ACCEL_SLOW, ACCEL_FAST = 0.10, 0.80   # hand speed (normalized units / s) of the two gain ends
+GAIN_SLOW, GAIN_FAST = 0.6, 1.6       # gain multiplier at / below ACCEL_SLOW and at / above ACCEL_FAST
 EURO_MIN_CUTOFF, EURO_BETA = 0.6, 0.01
 
 _EPS = 1e-9
@@ -100,14 +119,14 @@ _FAR_HINT_TEXT = "Move your hand closer to the camera."
 
 @dataclass(frozen=True)
 class Command:
-    kind: str     # "engage" "disengage" "cursor" "click" "press" "release" "swipe" "scroll"
+    kind: str     # "engage" "disengage" "cursor" "click" "right_click" "press" "release" "swipe" "scroll"
                   # "intent" "hint" (the controller still accepts the v2 ring_* / grab_* kinds)
     t: float
     dx: float = 0.0
     dy: float = 0.0     # cursor: screen px (relative)
     direction: str = ""                  # swipe: "left" | "right"
     steps: int = 0                       # scroll: + = up, - = down
-    text: str = ""                       # intent: "confirm"/"deny"; hint: the sentence
+    text: str = ""                       # intent: "confirm"/"deny"; hint: the sentence; scroll: "glide"
     progress: float = 0.0
 
 
@@ -119,6 +138,20 @@ def blade_ratio(hand: Hand) -> float:
     return d(INDEX_MCP, PINKY_MCP) / max(d(WRIST, MIDDLE_MCP), 1e-6)
 
 
+def accel_gain(speed: float) -> float:
+    """Pointer acceleration: the gain multiplier for a hand moving at ``speed`` (normalized units/s)."""
+    if speed <= ACCEL_SLOW:
+        return GAIN_SLOW
+    if speed >= ACCEL_FAST:
+        return GAIN_FAST
+    return GAIN_SLOW + (speed - ACCEL_SLOW) / (ACCEL_FAST - ACCEL_SLOW) * (GAIN_FAST - GAIN_SLOW)
+
+
+def thumb_reach(hand: Hand) -> float:
+    """Thumb tip to index knuckle / palm size: large = thumb up, small = thumb down on the fingers."""
+    return dist(hand.points[THUMB_TIP], hand.points[INDEX_MCP]) / palm_size(hand)
+
+
 def _in_frame(hand: Hand) -> bool:
     return all(EDGE <= p.x <= 1.0 - EDGE and EDGE <= p.y <= 1.0 - EDGE for p in hand.points)
 
@@ -126,7 +159,9 @@ def _in_frame(hand: Hand) -> bool:
 class InteractionEngine:
     """Pure stateful hand-mouse machine: point, pinch click/drag, V scroll, open-hand swipe, thumbs."""
 
-    def __init__(self, screen_px_per_frame: float = 1920.0 * CURSOR_GAIN) -> None:
+    def __init__(self, screen_px_per_frame: float = 1920.0 * CURSOR_GAIN, *, thumb_click: bool = True) -> None:
+        #: Finger-gun clicks (thumb tap) on; off = only the v3 pinch clicks (settings air_thumb_click).
+        self.thumb_click = thumb_click
         self._scale_x = float(screen_px_per_frame)
         self._scale_y = float(screen_px_per_frame) * (9.0 / 16.0)
         self._fx = OneEuro(min_cutoff=EURO_MIN_CUTOFF, beta=EURO_BETA)
@@ -150,11 +185,22 @@ class InteractionEngine:
         self._fy.reset()
         self._last_fx: float | None = None
         self._last_fy: float | None = None
+        self._last_ft: float = 0.0
         self._acc_x = 0.0
         self._acc_y = 0.0
         self._cursor_hist: deque[tuple[float, float, float]] = deque()
 
         self._pinch_start: float = 0.0
+        self._press_src: str = "pinch"     # what started the pinch phase: "pinch" | "thumb"
+        self._thumb_out_since: float | None = None
+        self._thumb_armed_t: float = -math.inf
+        self._thumb_down: bool = False
+        self._thumb_tap_t: float = -math.inf
+        self._still_prev: tuple[float, float, float] | None = None
+        self._still_speed: float = 0.0
+        self._glide_v: float = 0.0         # wheel steps / s, sign = direction
+        self._glide_acc: float = 0.0
+        self._glide_t: float = 0.0
         self._release_since: float | None = None
         self._lost_since: float | None = None
 
@@ -199,6 +245,7 @@ class InteractionEngine:
         self._fy.reset()
         self._last_fx = self._fx(p.x, t)
         self._last_fy = self._fy(p.y, t)
+        self._last_ft = t
         self._acc_x = 0.0
         self._acc_y = 0.0
 
@@ -207,8 +254,11 @@ class InteractionEngine:
         nx = self._fx(p.x, t)
         ny = self._fy(p.y, t)
         if self._last_fx is not None and self._last_fy is not None:
-            self._acc_x += (nx - self._last_fx) * self._scale_x
-            self._acc_y += (ny - self._last_fy) * self._scale_y
+            dt = t - self._last_ft
+            speed = math.hypot(nx - self._last_fx, ny - self._last_fy) / dt if dt > _EPS else 0.0
+            gain = accel_gain(speed)
+            self._acc_x += (nx - self._last_fx) * self._scale_x * gain
+            self._acc_y += (ny - self._last_fy) * self._scale_y * gain
             if abs(self._acc_x) >= 1.0 or abs(self._acc_y) >= 1.0:
                 ex = float(math.trunc(self._acc_x))
                 ey = float(math.trunc(self._acc_y))
@@ -220,6 +270,7 @@ class InteractionEngine:
                 out.append(Command("cursor", t, dx=ex, dy=ey))
         self._last_fx = nx
         self._last_fy = ny
+        self._last_ft = t
 
     def _rewind(self, t: float, out: list[Command]) -> None:
         rx = sum(dx for ct, dx, _ in self._cursor_hist if (t - ct) <= REWIND + _EPS)
@@ -238,6 +289,65 @@ class InteractionEngine:
         self._progress = 0.0
         self._last_fx = None
         self._last_fy = None
+
+    def _stop_glide(self) -> None:
+        self._glide_v = 0.0
+        self._glide_acc = 0.0
+
+    def _update_glide(self, t: float, pose: str, out: list[Command]) -> None:
+        """Phone-like momentum after a flick: keep scrolling, slowing down; a fist stops it."""
+        if self._glide_v == 0.0:
+            return
+        if pose == "fist" or self._phase in ("pinch", "drag", "scroll"):
+            self._stop_glide()
+            return
+        dt = max(0.0, t - self._glide_t)
+        self._glide_t = t
+        self._glide_acc += self._glide_v * dt
+        self._glide_v *= math.exp(-dt / GLIDE_TAU)
+        n = math.trunc(self._glide_acc)
+        if n:
+            self._glide_acc -= n
+            out.append(Command("scroll", t, steps=n, text="glide"))
+        if abs(self._glide_v) < GLIDE_STOP:
+            self._stop_glide()
+
+    def _update_thumb_tap(self, t: float, hand: Hand | None, pose: str, ratio: float) -> bool:
+        """Finger-gun trigger. True on the frame the cocked thumb comes down onto the fingers."""
+        if hand is None or not self.thumb_click:
+            self._thumb_out_since = None
+            self._thumb_down = False
+            self._still_prev = None
+            return False
+        # Knuckle speed, smoothed over a few frames (MediaPipe jitters frame to frame).
+        k = hand.points[INDEX_MCP]
+        if self._still_prev is not None and t > self._still_prev[0]:
+            v = math.hypot(k.x - self._still_prev[1], k.y - self._still_prev[2]) / (t - self._still_prev[0])
+            self._still_speed = 0.5 * self._still_speed + 0.5 * v
+        self._still_prev = (t, k.x, k.y)
+        reach = thumb_reach(hand)
+        gun = pose in ("point", "victory")
+        # Cocked: thumb up and away from the index tip (a v3 pinch is not a cocked thumb).
+        if gun and reach > THUMB_ARM_OUT and ratio > PINCH_OFF:
+            if self._thumb_out_since is None:
+                self._thumb_out_since = t
+            # Right after a tap the thumb re-arms at once, so two taps make a double click.
+            wait = 0.0 if (t - self._thumb_tap_t) <= THUMB_ARM_GRACE + _EPS else THUMB_ARM
+            if (t - self._thumb_out_since) >= wait - _EPS:
+                self._thumb_armed_t = t
+        else:
+            self._thumb_out_since = None
+        if self._thumb_down:
+            if reach > THUMB_UP_OUT:
+                self._thumb_down = False
+            return False
+        if (gun and reach < THUMB_IN and (t - self._thumb_armed_t) <= THUMB_ARM_GRACE + _EPS
+                and self._still_speed <= THUMB_STILL + _EPS):
+            self._thumb_down = True
+            self._thumb_armed_t = -math.inf
+            self._thumb_tap_t = t
+            return True
+        return False
 
     def _update_thumbs(self, t: float, hand: Hand | None, palm: float, pose: str, out: list[Command]) -> None:
         if self._phase in ("pinch", "drag"):
@@ -356,7 +466,13 @@ class InteractionEngine:
         self._cursor_hist.clear()
         n = max(FLICK_MIN_STEPS, min(FLICK_MAX_STEPS, round(travel / FLICK_STEP)))
         up_steps = -n if SCROLL_NATURAL else n          # finger up -> page up -> wheel down
-        out.append(Command("scroll", t, steps=up_steps if direction == "up" else -up_steps))
+        steps = up_steps if direction == "up" else -up_steps
+        out.append(Command("scroll", t, steps=steps))
+        # Momentum: a flick the same way adds to the glide, the other way replaces it.
+        v = steps * GLIDE_PER_STEP
+        if self._glide_v and (self._glide_v > 0) == (v > 0):
+            v += self._glide_v
+        self._glide_v, self._glide_t = v, t
         self._engage(t, out)
         self._last_flick = (direction, t)
         self._flick_until = t + FLICK_FREEZE
@@ -400,6 +516,10 @@ class InteractionEngine:
         if tracked:
             self._last_tracked_t = t
 
+        thumb_tap = self._update_thumb_tap(t, hand, pose, ratio)
+        if pinch_on:
+            self._thumb_armed_t = -math.inf      # a v3 pinch is never the start of a thumb tap
+        self._update_glide(t, pose, out)
         self._update_thumbs(t, hand, palm, pose, out)
         if self._update_swipe(t, hand, palm, pc, pose, blade, out):
             if self._phase == "point":
@@ -438,16 +558,24 @@ class InteractionEngine:
                 out.append(Command("disengage", t))
             return out
         self._lost_since = None
-        assert pc is not None and tip is not None
+        assert pc is not None and tip is not None and hand is not None
+        knuckle = hand.points[INDEX_MCP]          # steadier than the tip: clicking moves the tip
 
         if self._phase in ("idle", "point"):
             recently_pointing = self._phase == "point" or (t - self._last_point_t) <= POINT_GRACE + _EPS
             if self._update_flick(t, tip, recently_pointing and pose != "pinch" and not pinch_on, ratio, pose, out):
                 return out
             flicked_lately = (t - self._last_flick[1]) < FLICK_PINCH_BLOCK - _EPS
-            if pinch_on and recently_pointing and not flicked_lately:
+            if thumb_tap and pose == "victory" and in_zone:
+                self._engage(t, out)
+                out.append(Command("right_click", t))
+                return out
+            gun_tap = thumb_tap and pose == "point" and recently_pointing
+            if (pinch_on or gun_tap) and recently_pointing and not flicked_lately:
+                self._stop_glide()
                 self._rewind(t, out)
                 self._phase = "pinch"
+                self._press_src = "thumb" if gun_tap and not pinch_on else "pinch"
                 self._pinch_start = t
                 self._release_since = None
                 self._progress = 0.0
@@ -474,13 +602,13 @@ class InteractionEngine:
                         self._engage(t, out)
                         self._phase = "point"
                         self._cursor_hist.clear()
-                        self._seed(tip, t)
+                        self._seed(knuckle, t)
                 elif t < self._flick_until:
                     pass                          # the finger coming back after a flick: cursor still
                 elif self._last_fx is None:
-                    self._seed(tip, t)            # first frame after a flick
+                    self._seed(knuckle, t)        # first frame after a flick
                 else:
-                    self._follow(tip, t, out)
+                    self._follow(knuckle, t, out)
                 self._last_point_t = t
                 return out
 
@@ -493,7 +621,8 @@ class InteractionEngine:
             return out
 
         if self._phase in ("pinch", "drag"):
-            if pinch_released:
+            released = (not self._thumb_down) if self._press_src == "thumb" else pinch_released
+            if released:
                 if self._release_since is None:
                     self._release_since = t
                 if (t - self._release_since) >= RELEASE_HOLD - _EPS:
@@ -505,14 +634,15 @@ class InteractionEngine:
 
             if self._phase == "pinch":
                 held = t - self._pinch_start
-                if held >= DRAG_HOLD - _EPS:
+                hold = THUMB_DRAG_HOLD if self._press_src == "thumb" else DRAG_HOLD
+                if held >= hold - _EPS:
                     self._engage(t, out)
                     self._phase = "drag"
                     self._progress = 0.0
                     out.append(Command("press", t))
                     self._seed(pc, t)
                     return out
-                self._progress = min(1.0, held / DRAG_HOLD)
+                self._progress = min(1.0, held / hold)
                 return out
 
             # Drag: follow the palm centre (steadier than the pinched fingertips).
@@ -520,6 +650,9 @@ class InteractionEngine:
             return out
 
         if self._phase == "scroll":
+            if thumb_tap and pose == "victory":
+                out.append(Command("right_click", t))
+                return out
             if pose == "victory":
                 self._not_v_since = None
                 self._scroll_acc += pc.y - self._scroll_y

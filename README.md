@@ -80,6 +80,22 @@ Lura downloads her own **Node.js** runtime into the data folder (`<data>/node`) 
 first start, so the built-in Chrome, web and files connectors (and any `npx`
 connector you add) work without installing Node.js yourself.
 
+### Lura Air gestures
+
+Hold your hand close to the camera:
+
+- **Move:** point one finger; the mouse follows your index knuckle. Slow = small precise
+  steps, fast = across the screen. Close the finger to lift the mouse.
+- **Click:** finger gun — point with the thumb up, tap the thumb down onto the middle finger
+  and up again (twice = double-click). Touching thumb and index tip clicks too.
+- **Drag / draw:** keep the thumb down (about ⅓ s), move, thumb up to let go.
+- **Right-click:** two fingers (V) with the same thumb tap.
+- **Scroll:** flick the pointing finger up or down like a phone; the page glides and slows
+  down by itself, a fist stops it. Two fingers (V) moved up/down scroll slowly.
+- **Workspaces:** sweep the edge of your hand left or right. **Yes / no:** thumbs up / down.
+
+The thumb-tap click can be switched off in the **Hands** tab (`air_thumb_click`).
+
 ### Lura Air on macOS
 
 Turning on **Lura Air** (hand control) on a Mac asks for two privacy permissions:

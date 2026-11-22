@@ -193,6 +193,8 @@ def cmd_run(args) -> int:
             overlay.state.subtitles_enabled = c.settings.current.subtitles
         if any(k in changed for k in LOOK_SETTINGS):
             overlay.state.look = settings_look(c.settings.current)
+        if "air_thumb_click" in changed:
+            c.air.set_thumb_click(c.settings.current.air_thumb_click)
         if "air_enabled" in changed or "air_camera" in changed:
             apply_air()
 

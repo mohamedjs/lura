@@ -110,8 +110,10 @@ class AirService:
         engine_factory: Callable[[], InteractionEngine] = InteractionEngine,
         clock: Callable[[], float] = time.monotonic,
         mode: str = "universal",
+        thumb_click: bool = True,
     ) -> None:
         self._publish_fn = publish
+        self._thumb_click = thumb_click
         self._camera_wanted = camera
         self._camera_factory = camera_factory
         self._landmarker_factory = landmarker_factory
@@ -122,6 +124,7 @@ class AirService:
         self._lock = threading.Lock()
         self._state = AirState()
         self._engine = engine_factory()
+        self._engine.thumb_click = thumb_click
         self._engine_state: dict = dict(self._engine.state)
         self._stats = Stats()
         self._subscribers: list[Callable[[GestureEvent], None]] = []
@@ -138,6 +141,12 @@ class AirService:
     def running(self) -> bool:
         with self._lock:
             return self._thread is not None and self._thread.is_alive()
+
+    def set_thumb_click(self, on: bool) -> None:
+        """Finger-gun thumb clicks on/off, live (settings ``air_thumb_click``)."""
+        with self._lock:
+            self._thumb_click = bool(on)
+            self._engine.thumb_click = bool(on)
 
     def set_camera(self, name: str) -> None:
         with self._lock:
@@ -202,6 +211,7 @@ class AirService:
                 return
             self._stop.clear()
             self._engine = self._engine_factory()
+            self._engine.thumb_click = self._thumb_click
             self._engine_state = dict(self._engine.state)
             self._stats = Stats()
             self._last_gesture = ""
@@ -625,6 +635,15 @@ class AirController:
                     dx=prev.dx + cmd.dx,
                     dy=prev.dy + cmd.dy,
                 )
+            elif (
+                cmd.kind == "scroll"
+                and self._queue
+                and self._queue[-1].kind == "scroll"
+                and (self._queue[-1].steps > 0) == (cmd.steps > 0)
+            ):
+                # A flick's glide sends a few steps every frame; one wheel call for what is waiting.
+                prev = self._queue[-1]
+                self._queue[-1] = Command("scroll", cmd.t, steps=prev.steps + cmd.steps, text=prev.text)
             else:
                 if len(self._queue) >= _QUEUE_MAX:
                     self._queue.popleft()
@@ -858,6 +877,11 @@ class AirController:
 
             if k == "click":
                 r = self._desktop.run("pointer_click", {"button": "left", "count": 1})
+                self._feedback("pointer_click", r.ok, r.message)
+                return
+
+            if k == "right_click":
+                r = self._desktop.run("pointer_click", {"button": "right", "count": 1})
                 self._feedback("pointer_click", r.ok, r.message)
                 return
 

@@ -54,13 +54,15 @@ def _step_hand(
     size: float = 0.28,
     dt: float = 1.0 / 30.0,
     pinch_gap: float | None = None,
+    thumb: str | None = None,
 ) -> tuple[float, list[Command]]:
     out: list[Command] = []
     n = max(1, round(dur / dt))
     t = t0
     for i in range(n + 1):
         t = t0 + i * dt
-        out.extend(eng.update(t, (make_hand(pose, cx=cx, cy=cy, size=size, pinch_gap=pinch_gap),)))
+        out.extend(eng.update(t, (make_hand(pose, cx=cx, cy=cy, size=size, pinch_gap=pinch_gap,
+                                            thumb=thumb),)))
     return t, out
 
 
@@ -230,6 +232,118 @@ def check_tap_click_and_hold_drag() -> None:
     assert not cmds, cmds
 
 
+def check_finger_gun_click_drag_right_click() -> None:
+    from lura.modules.air.engine import THUMB_ARM, THUMB_DRAG_HOLD, thumb_reach
+    from lura.modules.air.engine import THUMB_ARM_OUT, THUMB_IN
+    assert thumb_reach(make_hand("point", size=0.28, thumb="up")) > THUMB_ARM_OUT
+    assert thumb_reach(make_hand("point", size=0.28, thumb="down")) < THUMB_IN
+    # Cock the thumb, tap it down and up: one click, the cursor does not move.
+    eng = InteractionEngine()
+    t = _point(eng)
+    t, cmds = _step_hand(eng, t + 0.03, THUMB_ARM + 0.1, "point", size=0.28, thumb="up")
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.1, "point", size=0.28, thumb="down")
+    t, cmds3 = _step_hand(eng, t + 0.03, 0.15, "point", size=0.28, thumb="up")
+    allc = cmds + cmds2 + cmds3
+    assert _kinds(allc) == ["click"], _kinds(allc)
+    assert sum(abs(c.dx) + abs(c.dy) for c in allc if c.kind == "cursor") == 0, allc
+    # A second tap right away (no wait to re-arm) -> a second click = double click.
+    t, cmds = _step_hand(eng, t + 0.03, 0.1, "point", size=0.28, thumb="down")
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.1, "point", size=0.28, thumb="up")
+    assert _kinds(cmds + cmds2) == ["click"], _kinds(cmds + cmds2)
+    # Keep the thumb down -> press; move -> cursor (drawing); thumb up -> release.
+    t, _ = _step_hand(eng, t + 0.03, THUMB_ARM + 0.3, "point", size=0.28, thumb="up")
+    t, cmds = _step_hand(eng, t + 0.03, THUMB_DRAG_HOLD + 0.1, "point", size=0.28, thumb="down")
+    assert _kinds(cmds) == ["press"], _kinds(cmds)
+    out: list[Command] = []
+    for i in range(1, 16):
+        out.extend(eng.update(t + i / 30.0, (make_hand("point", cx=0.5 + 0.01 * i, size=0.28, thumb="down"),)))
+    assert sum(c.dx for c in out if c.kind == "cursor") > 100, out
+    t += 0.6
+    _, cmds = _step_hand(eng, t, 0.2, "point", cx=0.65, size=0.28, thumb="up")
+    assert _kinds(cmds) == ["release"], _kinds(cmds)
+    # The thumb coming down while the hand sweeps fast (a relaxed thumb drifting): no click.
+    eng = InteractionEngine()
+    t = _point(eng, cx=0.3)
+    t, _ = _step_hand(eng, t + 0.03, THUMB_ARM + 0.1, "point", cx=0.3, size=0.28, thumb="up")
+    out = []
+    for i in range(1, 12):
+        out += eng.update(t + i / 30.0, (make_hand("point", cx=0.3 + 0.02 * i, size=0.28,
+                                                   thumb="up" if i < 6 else "down"),))
+    assert not [c for c in out if c.kind in ("click", "press")], _kinds(out)
+    # Switched off (settings air_thumb_click = false): the tap does nothing, the pinch still clicks.
+    eng = InteractionEngine(thumb_click=False)
+    t = _point(eng)
+    t, cmds = _step_hand(eng, t + 0.03, THUMB_ARM + 0.1, "point", size=0.28, thumb="up")
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.15, "point", size=0.28, thumb="down")
+    t, cmds3 = _step_hand(eng, t + 0.03, 0.15, "point", size=0.28, thumb="up")
+    assert not _kinds(cmds + cmds2 + cmds3), _kinds(cmds + cmds2 + cmds3)
+    t, cmds = _step_hand(eng, t + 0.03, 0.15, "point", size=0.28, pinch_gap=0.0)
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.2, "point", size=0.28)
+    assert _kinds(cmds + cmds2) == ["click"], _kinds(cmds + cmds2)
+    # Pointing with the thumb tucked the whole time (never cocked): nothing but the cursor.
+    eng = InteractionEngine()
+    _, cmds = _step_hand(eng, 0.0, 2.0, "point", size=0.28, thumb="down")
+    assert _kinds(cmds) == ["engage"], _kinds(cmds)
+    # V with the same thumb tap -> right click.
+    eng = InteractionEngine()
+    t, cmds = _step_hand(eng, 0.0, THUMB_ARM + 0.1, "victory", size=0.28, thumb="up")
+    t, cmds2 = _step_hand(eng, t + 0.03, 0.15, "victory", size=0.28, thumb="down")
+    assert _kinds(cmds2).count("right_click") == 1 and "click" not in _kinds(cmds + cmds2), cmds + cmds2
+    # ... also once V scrolling is running.
+    eng = InteractionEngine()
+    t, _ = _step_hand(eng, 0.0, SCROLL_ENTER + THUMB_ARM + 0.2, "victory", size=0.28, thumb="up")
+    assert eng.state["phase"] == "scroll"
+    t, cmds = _step_hand(eng, t + 0.03, 0.15, "victory", size=0.28, thumb="down")
+    assert _kinds(cmds) == ["right_click"], _kinds(cmds)
+
+
+def check_pointer_acceleration() -> None:
+    from lura.modules.air.engine import GAIN_FAST, GAIN_SLOW, accel_gain
+    assert accel_gain(0.0) == GAIN_SLOW and accel_gain(5.0) == GAIN_FAST
+    assert GAIN_SLOW < accel_gain(0.4) < GAIN_FAST
+
+    def travel(step: float, frames: int) -> float:
+        eng = InteractionEngine()
+        t = _point(eng, cx=0.3)
+        out: list[Command] = []
+        for i in range(1, frames + 31):                 # then held still while the filter settles
+            out += eng.update(t + i / 30.0, (make_hand("point", cx=0.3 + step * min(i, frames), size=0.28),))
+        return sum(c.dx for c in out if c.kind == "cursor")
+    # The same 0.3 of the frame: slowly (3 s) moves the cursor much less than quickly (0.3 s).
+    slow, fast = travel(0.0033, 90), travel(0.033, 9)
+    assert fast > 1.5 * slow, (slow, fast)
+
+
+def check_flick_glide() -> None:
+    eng = InteractionEngine()
+    t = _point(eng, cx=0.5, cy=0.6)
+    out: list[Command] = []
+    for i in range(1, 5):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
+    flick = [c for c in out if c.kind == "scroll" and c.text != "glide"]
+    assert len(flick) == 1, out
+    glide: list[Command] = []
+    for _ in range(45):
+        t += 1 / 30.0
+        glide += eng.update(t, (make_hand("point", cx=0.5, cy=0.6, size=0.28),))
+    steps = [c.steps for c in glide if c.kind == "scroll"]
+    assert steps and all(s < 0 for s in steps), glide             # keeps going the same way ...
+    assert abs(sum(steps)) >= abs(flick[0].steps) // 2, (steps, flick)
+    assert max(c.t for c in glide if c.kind == "scroll") < t - 0.3, glide  # ... and comes to rest
+    # A fist stops the glide at once.
+    eng = InteractionEngine()
+    t = _point(eng, cx=0.5, cy=0.6)
+    for i in range(1, 5):
+        t += 1 / 30.0
+        eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
+    out = []
+    for _ in range(20):
+        t += 1 / 30.0
+        out += eng.update(t, (make_hand("fist", cx=0.5, cy=0.6, size=0.28),))
+    assert not [c for c in out if c.kind == "scroll"], out
+
+
 def _sweep(eng: InteractionEngine, t0: float, pose: str, x0: float, step: float, n: int = 12) -> list[Command]:
     out: list[Command] = []
     for i in range(n):
@@ -288,22 +402,27 @@ def check_flick_scroll() -> None:
     for i in range(1, 5):
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
-    scrolls = [c for c in out if c.kind == "scroll"]
+    scrolls = [c for c in out if c.kind == "scroll" and c.text != "glide"]
     assert len(scrolls) == 1 and scrolls[0].steps <= -3, out
     net_y = sum(c.dy for c in out if c.kind == "cursor")
     assert abs(net_y) <= 12, (net_y, out)                 # the flick's cursor movement was undone
-    # The finger coming back down (fast, inside FLICK_RETURN): no cursor, no opposite scroll.
+    # The finger coming back down (fast, inside FLICK_RETURN): no cursor, no opposite scroll; the
+    # page keeps gliding the same way.
     out = []
     for i in range(1, 5):
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.45 + 0.0375 * i, size=0.28),))
-    assert not [c for c in out if c.kind in ("scroll", "cursor")], out
+    assert not [c for c in out if c.kind == "cursor"], out
+    assert all(c.text == "glide" and c.steps < 0 for c in out if c.kind == "scroll"), out
     # A pinch right after a flick does not click.
     out = []
     for i in range(6):
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6, size=0.28, pinch_gap=0.02),))
     assert not [c for c in out if c.kind in ("click", "press")], out
+    for _ in range(30):                                   # let the glide die out
+        t += 1 / 30.0
+        eng.update(t, (make_hand("point", cx=0.5, cy=0.6, size=0.28),))
     # After the freeze, a second flick up scrolls again.
     t += max(FLICK_FREEZE, FLICK_RETURN)
     for _ in range(4):
@@ -313,7 +432,7 @@ def check_flick_scroll() -> None:
     for i in range(1, 5):
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.6 - 0.0375 * i, size=0.28),))
-    assert [c.steps < 0 for c in out if c.kind == "scroll"] == [True], out
+    assert [c.steps < 0 for c in out if c.kind == "scroll" and c.text != "glide"] == [True], out
     # A flick down -> wheel up (after FLICK_RETURN).
     t += FLICK_RETURN + 0.1
     for _ in range(4):
@@ -323,7 +442,7 @@ def check_flick_scroll() -> None:
     for i in range(1, 5):
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.45 + 0.0375 * i, size=0.28),))
-    assert [c.steps > 0 for c in out if c.kind == "scroll"] == [True], out
+    assert [c.steps > 0 for c in out if c.kind == "scroll" and c.text != "glide"] == [True], out
     # Slow vertical movement is the mouse, not a scroll.
     eng = InteractionEngine()
     t = _point(eng, cx=0.5, cy=0.7)
@@ -332,7 +451,7 @@ def check_flick_scroll() -> None:
         t += 1 / 30.0
         out += eng.update(t, (make_hand("point", cx=0.5, cy=0.7 - 0.006 * i, size=0.28),))
     assert not [c for c in out if c.kind == "scroll"], out
-    assert sum(c.dy for c in out if c.kind == "cursor") < -150, out
+    assert sum(c.dy for c in out if c.kind == "cursor") < -100, out    # slow = precise (acceleration)
 
 
 def check_scroll_thumbs_disengage_hint() -> None:
@@ -521,12 +640,14 @@ def check_controller_click_drag_swipe() -> None:
     ctrl.process(Command("press", 0.2))
     ctrl.process(Command("release", 0.3))
     ctrl.process(Command("release", 0.35))          # no second button-up
+    ctrl.process(Command("right_click", 0.37))
     ctrl.process(Command("swipe", 0.4, direction="right"))
     ctrl.process(Command("swipe", 0.5, direction="left"))
     assert desk.runs == [
         ("pointer_click", {"button": "left", "count": 1}),
         ("pointer_down", {"button": "left"}),
         ("pointer_up", {"button": "left"}),
+        ("pointer_click", {"button": "right", "count": 1}),
         ("workspace_switch", {"target": "next"}),
         ("workspace_switch", {"target": "prev"}),
     ], desk.runs
@@ -586,6 +707,13 @@ def check_camera_fallback() -> None:
         time.sleep(0.01)
     svc.stop()
     assert made[:2] == ["dead", "good"], made
+
+
+def check_air_service_thumb_click_setting() -> None:
+    svc = AirService(None, thumb_click=False)
+    assert svc._engine.thumb_click is False
+    svc.set_thumb_click(True)
+    assert svc._engine.thumb_click is True
 
 
 def check_air_service_commands() -> None:
