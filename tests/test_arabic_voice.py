@@ -38,7 +38,7 @@ def checksum_mismatch_deletes() -> None:
         src.write_bytes(b"hello world")
         target = root / "out" / "sample.bin"
         try:
-            arabic_voice._download("file://" + str(src), target, "0" * 64)
+            arabic_voice._download(src.as_uri(), target, "0" * 64)
             raise AssertionError("expected ValueError on checksum mismatch")
         except ValueError:
             pass
