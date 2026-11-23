@@ -104,6 +104,20 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   signs it ad hoc), else `piper-tts` on PATH — never `piper` (apt's is a mouse tool).
   Voices are always downloaded, not shipped (dataset licences). A free OpenRouter speech
   model that hits its daily limit falls back to Gemini 3.8 Flash TTS until `X-RateLimit-Reset`.
+  - **Offline Arabic voice (tiny-voca-arabic):** `voice/infrastructure/offline.py` (`OfflineTTS`)
+    routes sentences containing Arabic script to `voice/infrastructure/arabic_voice.py`
+    (`TinyVocaArabicTTS`, MSA female ONNX via `onnxruntime`, vendored front end + CATT in
+    `voice/infrastructure/tiny_voca/`, Apache-2.0; ~114 MB downloaded once into
+    `<data>/arabic-voice/` with pinned SHA-256) and keeps Piper for English and as Arabic
+    backup on errors or when unavailable; Latin-script words in Arabic sentences are skipped.
+- **2.7 — offline Arabic voice + tashkeel:** tiny-voca-arabic (above) speaks Arabic when the
+  online voices fail. `tiny_voca/arabic_frontend.merge_tashkeel` keeps the brain's own marks letter
+  by letter (CATT only fills bare letters) and gives a bare last letter a sukun, not CATT's MSA case
+  ending (Egyptian reading). The prompt's closing language rule asks for full tashkeel, and
+  `assistant/domain.with_tashkeel_note` adds `[Reply with full tashkeel on every Arabic letter.]` to
+  the newest user turn of each request (not stored): with old untashkeeled replies in the history,
+  deepseek-v4-flash copied them (3% marked) until the note (81–98%). `LURA_OFFLINE_VOICE=1` makes
+  `_OfflineFallback` always speak offline, to hear the offline voices.
 - **2.6 — Air gestures v4 (`air/engine.py`):** cursor follows the index knuckle (INDEX_MCP), not the
   tip, with pointer acceleration (`accel_gain`: ×0.6 slow … ×1.6 fast); finger-gun click = cocked
   thumb (`thumb_reach` > 0.65 for 0.2 s) tapped down (< 0.5) with the knuckle still (`THUMB_STILL`),

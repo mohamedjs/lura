@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
 import threading
 import time
@@ -220,8 +221,8 @@ def elevenlabs_voice(settings: Settings, account_voices) -> str:
 
 
 class _OfflineFallback:
-    """Speak with Piper when every online voice failed, whatever the reason
-    (out of quota, out of credit, no network): a silent Lura is the worst case."""
+    """Speak with the offline voices (tiny-voca for Arabic, Piper) when every online voice failed,
+    whatever the reason (out of quota, out of credit, no network): a silent Lura is the worst case."""
 
     #: After out-of-credit/quota (or no network), skip the online voice this long:
     #: otherwise every sentence pays a failed round trip before Piper speaks.
@@ -231,7 +232,9 @@ class _OfflineFallback:
         self._online, self._offline, self._skip = online, offline, skip   # skip: VoiceService's, outlives a reply
 
     def _skipping(self) -> bool:
-        return self._skip.get("online", 0.0) > time.monotonic() and _offline_ready()
+        # LURA_OFFLINE_VOICE=1: always speak offline (to hear the offline voices without running out of credit).
+        forced = os.environ.get("LURA_OFFLINE_VOICE") == "1"
+        return (forced or self._skip.get("online", 0.0) > time.monotonic()) and _offline_ready()
 
     def _failed(self, exc: Exception) -> None:
         if isinstance(exc, HttpError) and exc.status in (None, 402, 429):
@@ -266,7 +269,7 @@ class _OfflineFallback:
 
 
 def _offline_ready() -> bool:
-    from .infrastructure.piper import ready
+    from .infrastructure.offline import ready
     return ready()
 
 
@@ -320,7 +323,7 @@ class VoiceService:
         log.warning("%s voice is out of quota; using the other provider for %.0f min.", provider, wait / 60)
 
     def synthesizer(self, settings: Settings, voice: str | None = None, offline: bool = True) -> SpeechSynthesizer:
-        """``offline``: Piper behind it all — off where the online voice itself is being checked."""
+        """``offline``: the offline voices behind it all — off where the online voice itself is being checked."""
         from .infrastructure.tts import GeminiTTS, OpenRouterTTS, StreamSupport
 
         if self._streaming is None:
@@ -352,7 +355,7 @@ class VoiceService:
             # Any failure, not just quota: some refuse a language outright (heygen and Arabic, a 400).
             return _FallbackSynthesizer(own, gemini, lambda exc: self._mark_429(model, exc), any_error=True)
 
-        from .infrastructure.piper import PiperTTS
+        from .infrastructure.offline import OfflineTTS
 
         providers = self._voice_providers(settings)
         primary = build(providers[0])
@@ -360,7 +363,7 @@ class VoiceService:
             primary = _FallbackSynthesizer(primary, build(providers[1]),
                                            lambda exc: self._mark_429(providers[0], exc),
                                            any_error=providers[0] == ELEVENLABS)
-        return _OfflineFallback(primary, PiperTTS(), self._cooldown_until) if offline else primary
+        return _OfflineFallback(primary, OfflineTTS(), self._cooldown_until) if offline else primary
 
     def speech_models(self) -> list[dict]:
         """OpenRouter's speech models with their voices, fetched at most once an hour."""
@@ -473,9 +476,14 @@ class VoiceService:
 
     @staticmethod
     def ensure_offline_voice() -> bool:
-        """Install Piper and its voices if missing (downloads ~150 MB once)."""
-        from .infrastructure.piper import ensure
+        """Install Piper and the Arabic voice if missing (~260 MB once)."""
+        from .infrastructure.offline import ensure
         return ensure()
+
+    @staticmethod
+    def offline_voices() -> dict[str, bool]:
+        from .infrastructure import arabic_voice, piper
+        return {"piper": piper.ready(), "arabic": arabic_voice.ready()}
 
     @staticmethod
     def wake_model_present() -> bool:

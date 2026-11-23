@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 
 from ..brain import Message
@@ -64,7 +65,12 @@ def language_rule(language: str) -> str:
             f"English, answer in English; if they mix, use the one they mostly used. Your default is "
             f"{default}: use it when you speak first, or when you cannot tell (a name, a one-word "
             f"reply, noise). Keep names, commands, file names and technical terms as they are. Say "
-            f"numbers and units the way a speaker of that language says them out loud.")
+            f"numbers and units the way a speaker of that language says them out loud. "
+            f"Arabic replies must carry full tashkeel: the voice cannot guess vowels and reads only "
+            f"the marks you write. Put a mark on EVERY Arabic letter of EVERY word, short words "
+            f"included: fatha, damma or kasra on voweled letters, sukun on silent ones, shadda on "
+            f"doubled ones, as you pronounce it in Egyptian. A reply with bare letters is wrong. "
+            f"Example: «أَيْوَه يَا مُحَمَّدْ، أَنَا فَاهْمَة. قُولِّي عَايِزْنِي أَعْمِلْ إِيه؟»")
 
 
 def addressing_rule(user_gender: str, assistant_gender: str) -> str:
@@ -242,6 +248,29 @@ def message_tokens(message: Message) -> int:
     for call in message.tool_calls:
         cost += tokens(call.name + str(call.arguments))
     return cost
+
+
+#: Appended to the newest Arabic user turn, for this request only. With earlier replies in the
+#: history written without tashkeel, a model copies them and ignores the system prompt's rule
+#: (deepseek: 3% of letters marked); this reminder brings it to 80-98%. The voice needs the marks.
+TASHKEEL_NOTE = "\n\n[Reply with full tashkeel on every Arabic letter.]"
+_ARABIC_SCRIPT = re.compile("[\u0621-\u064A]")
+
+
+def with_tashkeel_note(history: list[Message], arabic_default: bool = False) -> list[Message]:
+    """``history`` with TASHKEEL_NOTE on its newest user turn when that turn is in Arabic script or
+    the default language is Arabic. Never changes the stored history."""
+    for i in range(len(history) - 1, -1, -1):
+        turn = history[i]
+        if turn.role != "user":
+            continue
+        # Default Arabic: always (a mis-heard turn can come out in Latin letters and still get an
+        # Arabic reply; the note does nothing to an English one).
+        arabic = arabic_default or bool(_ARABIC_SCRIPT.search(turn.text))
+        if not arabic:
+            return history
+        return history[:i] + [dataclasses.replace(turn, text=turn.text + TASHKEEL_NOTE)] + history[i + 1:]
+    return history
 
 
 def fit_history(history: list[Message], budget: int) -> list[Message]:

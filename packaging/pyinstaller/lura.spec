@@ -21,11 +21,14 @@ datas = [
     (str(LURA / "shared" / "i18n" / "*.json"), "lura/shared/i18n"),
     (str(LURA / "modules" / "dashboard" / "static"), "lura/modules/dashboard/static"),
     (str(LURA / "modules" / "overlay" / "holo" / "*.npz"), "lura/modules/overlay/holo"),
+    (str(LURA / "modules" / "voice" / "infrastructure" / "tiny_voca" / "LICENSE"), "lura/modules/voice/infrastructure/tiny_voca"),
+    (str(LURA / "modules" / "voice" / "infrastructure" / "tiny_voca" / "NOTICE"), "lura/modules/voice/infrastructure/tiny_voca"),
+    (str(LURA / "modules" / "voice" / "infrastructure" / "tiny_voca" / "catt" / "LICENSE"), "lura/modules/voice/infrastructure/tiny_voca/catt"),
 ]
 binaries = []
 hidden = collect_submodules("lura")
 for package in ("certifi", "vosk", "sounddevice", "_sounddevice_data", "anthropic", "google.genai", "cairo",
-                "webview", "clr_loader", "pythonnet", "mediapipe", "cv2"):
+                "webview", "clr_loader", "pythonnet", "mediapipe", "cv2", "onnxruntime"):
     try:
         d, b, h = collect_all(package)
         datas += d

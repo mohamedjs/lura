@@ -140,6 +140,17 @@ def check_assistant_rules():
     old_default = system_prompt(LEGACY_PERSONA, "Lura", "", "en", "")
     assert "user's own instructions" not in old_default and "save it with remember" in old_default
     assert NO_REPLY not in system_prompt("", "Lura", "", "en", "", realtime=True), "Live speaks; it stays silent instead"
+    assert "full tashkeel" in system_prompt("", "Lura", "", "ar", ""), "Arabic replies carry tashkeel for the voice"
+    from lura.modules.assistant.domain import TASHKEEL_NOTE, with_tashkeel_note
+    from lura.modules.brain import Message as _M
+    convo = [_M("user", "ازيك"), _M("assistant", "تمام"), _M("user", "إيه الأخبار؟"), _M("tool", "x")]
+    sent = with_tashkeel_note(convo)
+    assert sent[2].text == "إيه الأخبار؟" + TASHKEEL_NOTE and sent[0].text == "ازيك", "newest user turn only"
+    assert convo[2].text == "إيه الأخبار؟", "the stored history is untouched"
+    assert with_tashkeel_note([_M("user", "what's up?")]) [0].text == "what's up?", "English: no note"
+    assert with_tashkeel_note([_M("user", "Light in")], arabic_default=True)[0].text == "Light in" + TASHKEEL_NOTE
+    assert with_tashkeel_note([_M("user", "", audio_wav=b"RIFF")], arabic_default=True)[0].text == TASHKEEL_NOTE
+    assert with_tashkeel_note([_M("user", "", audio_wav=b"RIFF")])[0].text == ""
     assert system_prompt("Use {braces} freely", "Lura", "", "en", "")   # a stray placeholder never breaks it
     last = prompt.splitlines()[-1]
     assert last.startswith("IMPORTANT: Reply in the language the user speaks"), "language rule comes last"

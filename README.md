@@ -175,6 +175,17 @@ inside the Linux and Windows builds; on macOS and source installs Lura downloads
 the first time she starts (macOS not tested yet). The two voices (~130 MB, their own dataset licences) are
 downloaded from Hugging Face into `<data>/piper/`.
 
+For sentences containing Arabic script, Lura uses
+[tiny-voca-arabic](https://huggingface.co/oddadmix/tiny-voca-arabic) first (Modern
+Standard Arabic, female, downloaded once ~110 MB into `<data>/arabic-voice/`, Apache-2.0 —
+built on [tiny-voca](https://github.com/n4ze3m/tiny-voca) by Muhammed Nazeem, the Arabic
+model by oddadmix, and the [CATT](https://github.com/abjadai/catt) diacritizer by Abjad AI),
+keeping Piper for English sentences and as a backup for Arabic if tiny-voca is unavailable
+or fails. Latin-script words inside Arabic sentences are skipped by the Arabic front end. Lura's brain is
+asked to write Arabic with full tashkeel so the offline voice reads it as she means it (Egyptian
+included); to hear the offline voices while your online voice still works, start Lura with
+`LURA_OFFLINE_VOICE=1`.
+
 `mcp.json` uses the same format as every other MCP client, so you can paste a
 server's README snippet straight in.
 

@@ -170,7 +170,9 @@ class PipelineConversation:
         said = ""
         fed = 0
         try:
-            for event in self._model.stream(self._system, domain.fit_history(self._history, self._budget),
+            history = domain.with_tashkeel_note(domain.fit_history(self._history, self._budget),
+                                                arabic_default=self.s.language == "ar")
+            for event in self._model.stream(self._system, history,
                                             self._tools.specs(self._session) if with_tools else []):
                 if player.interrupted:
                     return self._cut_short(player, None)

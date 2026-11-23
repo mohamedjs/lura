@@ -1,0 +1,12 @@
+Third-party components vendored in this directory (all Apache-2.0):
+
+- tiny-voca by Muhammed Nazeem
+  https://github.com/n4ze3m/tiny-voca (Apache-2.0)
+
+- tiny-voca-arabic model and Arabic front end by oddadmix
+  https://huggingface.co/oddadmix/tiny-voca-arabic (Apache-2.0)
+
+- CATT diacritizer by Abjad AI
+  https://github.com/abjadai/catt (Apache-2.0)
+
+The voice is synthetic.

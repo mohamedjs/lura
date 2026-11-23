@@ -1,6 +1,6 @@
 [project]
 name = "lura"
-version = "2.6.0"
+version = "2.7.0"
 description = "Lura — a voice-first desktop assistant: Gemini, OpenAI, Claude or OpenRouter thinks, Gemini 3.8 speaks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -10,6 +10,9 @@ dependencies = [
     "sounddevice>=0.4.6",
     "vosk>=0.3.44",  # 0.3.45 has no macOS wheel
     "certifi",       # CA bundle for frozen builds whose Python cannot find the OS one
+    # The offline Arabic voice (tiny-voca). Intel Macs: no wheels after 1.23.2.
+    "onnxruntime>=1.20; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "onnxruntime>=1.20,<1.24; sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]
 
 [project.optional-dependencies]
@@ -43,4 +46,7 @@ lura = [
     "modules/dashboard/static/*",
     "modules/dashboard/static/fonts/*",
     "modules/overlay/holo/*.npz",
+    "modules/voice/infrastructure/tiny_voca/LICENSE",
+    "modules/voice/infrastructure/tiny_voca/NOTICE",
+    "modules/voice/infrastructure/tiny_voca/catt/LICENSE",
 ]

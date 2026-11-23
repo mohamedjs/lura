@@ -92,6 +92,9 @@ def run(c) -> int:
             (ok if pcm else bad)(f"{len(pcm)} bytes of speech")
         except Exception as exc:
             bad(f"speech: {exc}")
+        v = c.voice.offline_voices()
+        ok(f"offline voices: Piper {'ready' if v['piper'] else 'not installed'}, "
+           f"Arabic {'ready' if v['arabic'] else 'not installed'}")
 
     print("\n── connectors ──")
     if shutil.which("npx") or shutil.which("npx.cmd"):

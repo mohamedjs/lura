@@ -203,7 +203,8 @@ def check_thumbs_answer_stops_recording() -> None:
 
         assert len(model.requests) == 1, model.requests
         last_user = model.requests[0][-1]
-        assert last_user.role == "user" and last_user.text == expected_word, last_user
+        from lura.modules.assistant.domain import TASHKEEL_NOTE   # sent with Arabic turns, never stored
+        assert last_user.role == "user" and last_user.text.removesuffix(TASHKEEL_NOTE) == expected_word, last_user
         assert ("you", expected_icon + expected_word) in presence.captions, presence.captions
         assert ["add", "user", expected_word] in memory.rows, memory.rows
 
