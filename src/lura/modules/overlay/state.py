@@ -26,6 +26,7 @@ class AirView:
     ring: tuple[str, str, str, str] | None = None       # (left, right, up, down) labels when ring open
     ring_hover: str = ""                # "left" | "right" | "up" | "down" | ""
     grab_progress: float = 0.0          # 0..1 hold-in-centre progress towards grab
+    phase: str = ""                     # engine phase: idle point pinch drag scroll two
     hand_age: float = 99.0              # s since a hand appeared (drives the scan sweep)
     pulse_ok: bool | None = None        # result of the last Air action, None = none yet
     pulse_age: float = 99.0             # s since that action

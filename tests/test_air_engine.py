@@ -21,6 +21,7 @@ from lura.modules.air import (
 )
 from lura.modules.air.domain import KINDS, Hand, Point
 from lura.modules.air.engine import (
+    CURSOR_GAIN,
     DISENGAGE_AFTER,
     DRAG_HOLD,
     HINT_AFTER,
@@ -33,6 +34,9 @@ from lura.modules.air.engine import (
     SWIPE_RETURN,
     THUMB_HOLD,
     THUMB_PALM,
+    TWO_COOLDOWN,
+    TWO_DRAG_HOLD,
+    TWO_ENTER,
     ZONE_PALM,
 )
 from lura.modules.computer import ActionResult, Rect, WindowGrip
@@ -782,6 +786,220 @@ def check_replay_recordings() -> None:
             assert "confirm" in thumbs and "deny" in thumbs, thumbs
             scrolls = [c for lbl, _, c in emitted if lbl == "v_scroll" and c.kind == "scroll"]
             assert len(scrolls) >= 3, len(scrolls)
+
+
+def check_two_hands_engine() -> None:
+    dt = 1.0 / 30.0
+
+    def pair_hands(
+        lx: float,
+        rx: float,
+        cy: float = 0.55,
+        *,
+        l_pose: str = "pinch",
+        r_pose: str = "pinch",
+        l_gap: float | None = None,
+        r_gap: float | None = None,
+        size: float = 0.22,
+    ) -> tuple[Hand, Hand]:
+        return (
+            make_hand(l_pose, cx=lx, cy=cy, size=size, side="Left", pinch_gap=l_gap),
+            make_hand(r_pose, cx=rx, cy=cy, size=size, side="Right", pinch_gap=r_gap),
+        )
+
+    # 1. Two in-frame hands pinching from frame 0, held 0.3 s -> one two_start, no click/press/right_click.
+    eng = InteractionEngine()
+    t = 0.0
+    out: list[Command] = []
+    for i in range(10):
+        t = i * dt
+        out.extend(eng.update(t, pair_hands(0.40, 0.60)))
+    assert _kinds(out).count("two_start") == 1, out
+    assert not any(c.kind in ("click", "press", "right_click") for c in out), out
+    assert eng.state["phase"] == "two"
+
+    # 2. Spread apart to 1.5x over 0.5 s -> progress in 1.35..1.65; shrink to 0.7x -> 0.6..0.8.
+    out = []
+    for i in range(1, 16):
+        t += dt
+        frac = min(1.0, i / 10.0)
+        half = 0.10 + 0.05 * frac
+        out.extend(eng.update(t, pair_hands(0.50 - half, 0.50 + half)))
+    moves = [c for c in out if c.kind == "two_move"]
+    assert moves and 1.35 <= moves[-1].progress <= 1.65, moves
+
+    out = []
+    for i in range(1, 21):
+        t += dt
+        frac = min(1.0, i / 10.0)
+        half = 0.15 - 0.08 * frac
+        out.extend(eng.update(t, pair_hands(0.50 - half, 0.50 + half)))
+    moves = [c for c in out if c.kind == "two_move"]
+    assert moves and 0.60 <= moves[-1].progress <= 0.80, moves
+
+    # 3. Move both hands right by 0.1 frame width with same distance -> summed dx ~ 0.1 * 1920 * CURSOR_GAIN, progress == 1.0.
+    eng_m = InteractionEngine()
+    t_m = 0.0
+    for i in range(8):
+        t_m = i * dt
+        eng_m.update(t_m, pair_hands(0.35, 0.55))
+    assert eng_m.state["phase"] == "two"
+    out = []
+    for i in range(1, 16):
+        t_m += dt
+        shift = 0.1 * (i / 15.0)
+        out.extend(eng_m.update(t_m, pair_hands(0.35 + shift, 0.55 + shift)))
+    moves = [c for c in out if c.kind == "two_move"]
+    expected_dx = 0.1 * 1920.0 * CURSOR_GAIN
+    got_dx = sum(c.dx for c in moves)
+    assert abs(got_dx - expected_dx) <= 0.15 * expected_dx, (got_dx, expected_dx)
+    assert moves and all(c.progress == 1.0 for c in moves), moves
+
+    # 4. Open one hand's pinch (ratio 0.6) for > RELEASE_HOLD -> one two_end; re-pinching within TWO_COOLDOWN -> no click.
+    out = []
+    for _ in range(5):
+        t_m += dt
+        out.extend(eng_m.update(t_m, pair_hands(0.45, 0.65, r_gap=0.6)))
+    assert _kinds(out) == ["two_end"], out
+    end_t = out[0].t
+    re_out: list[Command] = []
+    while t_m < end_t + TWO_COOLDOWN - 0.1:
+        t_m += dt
+        phase_t = t_m - end_t
+        if phase_t < 0.2:
+            h = make_hand("point", cx=0.65, cy=0.55, size=0.22, side="Right")
+        elif phase_t < 0.3:
+            h = make_hand("point", cx=0.65, cy=0.55, size=0.22, side="Right", pinch_gap=0.0)
+        else:
+            h = make_hand("point", cx=0.65, cy=0.55, size=0.22, side="Right")
+        re_out.extend(eng_m.update(t_m, (h,)))
+    assert not any(c.kind == "click" for c in re_out), re_out
+
+    # 5. Right hand pinches (one-hand pinch phase), left joins 0.3 s later -> two_start, no click, no press.
+    eng_j = InteractionEngine()
+    t_j = _point(eng_j, cx=0.60, cy=0.55)
+    out = []
+    for _ in range(9):
+        t_j += dt
+        out.extend(eng_j.update(t_j, (make_hand("point", cx=0.60, cy=0.55, size=0.22, side="Right", pinch_gap=0.0),)))
+    assert eng_j.state["phase"] == "pinch"
+    for _ in range(8):
+        t_j += dt
+        out.extend(eng_j.update(t_j, pair_hands(0.40, 0.60, r_pose="point", r_gap=0.0)))
+    assert _kinds(out) == ["two_start"], out
+    assert eng_j.state["phase"] == "two"
+
+    # 6. Regression: one hand only, point then pinch-tap -> click; hold > DRAG_HOLD -> press.
+    eng_r = InteractionEngine()
+    t_r = _point(eng_r)
+    t_r, c1 = _step_hand(eng_r, t_r + dt, 0.15, "point", size=0.28, pinch_gap=0.0)
+    t_r, c2 = _step_hand(eng_r, t_r + dt, 0.20, "point", size=0.28)
+    assert _kinds(c1 + c2) == ["click"], _kinds(c1 + c2)
+    t_r, c3 = _step_hand(eng_r, t_r + dt, DRAG_HOLD + 0.1, "point", size=0.28, pinch_gap=0.0)
+    assert _kinds(c3) == ["press"], _kinds(c3)
+
+    # 7. One-hand pinch held 0.9 s while a second open hand is visible -> no press yet; held 1.3 s -> press.
+    eng_w = InteractionEngine()
+    t_w = _point(eng_w, cx=0.60, cy=0.55)
+    t_start = t_w + dt
+    out_90: list[Command] = []
+    for i in range(int(0.9 / dt)):
+        t_w = t_start + i * dt
+        out_90.extend(eng_w.update(t_w, (
+            make_hand("point", cx=0.60, cy=0.55, size=0.28, side="Right", pinch_gap=0.0),
+            make_hand("open_palm", cx=0.30, cy=0.55, size=0.22, side="Left"),
+        )))
+    assert "press" not in _kinds(out_90), out_90
+    assert eng_w.state["phase"] == "pinch"
+    out_130: list[Command] = []
+    while (t_w - t_start) < max(TWO_DRAG_HOLD + 0.1, 1.3):
+        t_w += dt
+        out_130.extend(eng_w.update(t_w, (
+            make_hand("point", cx=0.60, cy=0.55, size=0.28, side="Right", pinch_gap=0.0),
+            make_hand("open_palm", cx=0.30, cy=0.55, size=0.22, side="Left"),
+        )))
+    assert _kinds(out_130) == ["press"], out_130
+
+    # 8. Hand lost (only one hand) during "two" -> two_end after RELEASE_HOLD.
+    eng_l = InteractionEngine()
+    t_l = 0.0
+    for i in range(int((TWO_ENTER + 0.1) / dt) + 1):
+        t_l = i * dt
+        eng_l.update(t_l, pair_hands(0.40, 0.60))
+    assert eng_l.state["phase"] == "two"
+    out = []
+    for _ in range(int((RELEASE_HOLD + 0.08) / dt) + 1):
+        t_l += dt
+        out.extend(eng_l.update(t_l, (make_hand("pinch", cx=0.60, cy=0.55, size=0.22, side="Right"),)))
+    assert _kinds(out) == ["two_end"], out
+    assert eng_l.state["phase"] == "idle"
+
+
+def check_two_hands_controller() -> None:
+    class TwoDesktop(FakeDesktop):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.active_monitor = Rect(0, 0, 1920, 1080)
+            self.active_target: tuple[int, str, str] | None = self.target
+
+        def screen_bounds(self, monitor: str = "all") -> Rect:
+            return self.active_monitor if monitor == "active" else BOUNDS
+
+        def active_app(self) -> tuple[int, str, str] | None:
+            return self.active_target
+
+    air = FakeAir()
+    desk = TwoDesktop(pointer_pos=(400, 300), target=(42, "code", "Notes"))
+    pub: list[tuple[str, dict]] = []
+    ctrl = AirController(air, desk, lambda n, p: pub.append((n, p)))  # type: ignore[arg-type]
+    ctrl.process(Command("engage", 0.0))
+
+    # two_start with window under cursor -> window_focus + grip.
+    desk.runs.clear()
+    desk.grips.clear()
+    ctrl.process(Command("two_start", 1.0))
+    assert desk.runs == [("window_focus", {"window": 42})], desk.runs
+    assert desk.grips == [42], desk.grips
+
+    # two_move(progress=1.5) on 800x600 at (100,100) -> 1200x900 centred on (500,400);
+    # progress=0.2 -> clamped to 400x300 minimum.
+    ctrl.process(Command("two_move", 1.1, dx=0.0, dy=0.0, progress=1.5))
+    assert len(desk.places) == 1
+    rect = desk.places[-1][1]
+    assert (rect.width, rect.height) == (1200, 900) and rect.center == (500, 400), rect
+
+    ctrl.process(Command("two_move", 1.2, dx=0.0, dy=0.0, progress=0.2))
+    rect = desk.places[-1][1]
+    assert (rect.width, rect.height) == (400, 300) and rect.center == (500, 400), rect
+
+    # dx=50, dy=-20 -> centre moves by (50, -20).
+    ctrl.process(Command("two_move", 1.3, dx=50.0, dy=-20.0, progress=1.0))
+    rect = desk.places[-1][1]
+    assert (rect.width, rect.height) == (800, 600) and rect.center == (550, 380), rect
+
+    # two_end with final rect >= 95% of 1920x1080 monitor -> window_maximize.
+    desk.runs.clear()
+    ctrl.process(Command("two_move", 1.4, dx=0.0, dy=0.0, progress=2.4))
+    ctrl.process(Command("two_end", 1.5))
+    assert desk.runs == [("window_maximize", {"window": 7})], desk.runs
+
+    # 30 queued two_move commands coalesce into one with summed dx/dy and newest progress.
+    ctrl._queue.clear()
+    for i in range(30):
+        ctrl._enqueue(Command("two_move", 2.0 + i * 0.01, dx=2.0, dy=-1.0, progress=1.0 + i * 0.02))
+    assert len(ctrl._queue) == 1, ctrl._queue
+    merged = ctrl._queue[0]
+    assert merged.kind == "two_move"
+    assert merged.dx == 60.0 and merged.dy == -30.0
+    assert abs(merged.progress - (1.0 + 29 * 0.02)) < 1e-9
+    ctrl._queue.clear()
+
+    # No window under cursor and no active app -> feedback ok False.
+    desk.target = None
+    desk.active_target = None
+    pub.clear()
+    ctrl.process(Command("two_start", 3.0))
+    assert pub and pub[-1][1]["ok"] is False, pub
 
 
 def main() -> int:

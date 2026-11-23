@@ -1022,5 +1022,20 @@ def _air_hud(cr, size: int, pal: Palette, air: AirView, t: float) -> None:
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.85 if bright else 0.45)
         cr.show_text(label)
 
+    # 9. Two-hand resize/move indicator: scale label and two dots left/right of the radar.
+    if air.phase == "two":
+        cr.set_source_rgba(*pal.accent, 0.98)
+        for sx in (-1.0, 1.0):
+            cr.arc(cx + sx * (R + 6.0 * u), cy, 2.6 * u, 0.0, 2.0 * math.pi)
+            cr.fill()
+        text = f"x{air.grab_progress:.1f}"
+        cr.select_font_face("Sans", cairo.FONT_SLANT_NORMAL, cairo.FONT_WEIGHT_BOLD)
+        cr.set_font_size(max(7.0, 9.0 * u))
+        ext = cr.text_extents(text)
+        tx = max(2.0 * u, min(size - ext.width - 2.0 * u, cx - ext.width / 2.0 - ext.x_bearing))
+        ty = max(ext.height + 2.0 * u, min(size - 2.0 * u, cy - R - 10.0 * u - ext.height / 2.0 - ext.y_bearing))
+        cr.move_to(tx, ty)
+        cr.show_text(text)
+
 
 _STYLES = {"face": _face_style, "orb": _orb_style, "ring": _ring_style, "bust": _bust_style}

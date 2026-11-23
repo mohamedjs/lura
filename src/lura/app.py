@@ -228,6 +228,7 @@ def cmd_run(args) -> int:
             ring=st["ring_labels"],
             ring_hover=st["ring_hover"],
             grab_progress=st["grab_progress"],
+            phase=st["phase"],
             pulse_ok=last["ok"],
             pulse_age=now - last["t"],
             message=last["message"],

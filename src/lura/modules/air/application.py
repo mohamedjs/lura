@@ -42,6 +42,8 @@ _IDLE_INTERVAL = 1.0 / 8.0
 _QUEUE_MAX = 64
 _POINTER_RESYNC_S = 1.0
 _BOUNDS_CACHE_S = 5.0
+_TWO_MIN_W, _TWO_MIN_H = 400, 300      # px: smallest window a two-hand pinch makes
+_TWO_MAXIMIZE = 0.95                    # final rect >= this share of the monitor in both directions -> maximize
 
 
 class Camera(Protocol):
@@ -539,6 +541,11 @@ class AirController:
         self._grab_dy: float = 0.0
         self._last_place: Rect | None = None
         self._grab_target: str = ""
+        self._two: WindowGrip | None = None
+        self._two_dx: float = 0.0
+        self._two_dy: float = 0.0
+        self._two_scale: float = 1.0
+        self._two_last: Rect | None = None
         self._pressed: bool = False
 
     @property
@@ -560,6 +567,11 @@ class AirController:
         self._grab_dy = 0.0
         self._last_place = None
         self._grab_target = ""
+        self._two = None
+        self._two_dx = 0.0
+        self._two_dy = 0.0
+        self._two_scale = 1.0
+        self._two_last = None
 
     def set_mode(self, mode: str) -> None:
         if mode not in MODES:
@@ -634,6 +646,19 @@ class AirController:
                     cmd.t,
                     dx=prev.dx + cmd.dx,
                     dy=prev.dy + cmd.dy,
+                )
+            elif (
+                cmd.kind == "two_move"
+                and self._queue
+                and self._queue[-1].kind == "two_move"
+            ):
+                prev = self._queue[-1]
+                self._queue[-1] = Command(
+                    "two_move",
+                    cmd.t,
+                    dx=prev.dx + cmd.dx,
+                    dy=prev.dy + cmd.dy,
+                    progress=cmd.progress,
                 )
             elif (
                 cmd.kind == "scroll"
@@ -873,6 +898,100 @@ class AirController:
                 else:
                     label = grip.title or f"window {grip.id}"
                     self._feedback("window_move", True, f"Moved {label}.")
+                return
+
+            if k == "two_start":
+                self._ring_labels = None
+                self._ring_target = None
+                if self._grab is not None:
+                    self._grab = None
+                    self._grab_dx = 0.0
+                    self._grab_dy = 0.0
+                    self._last_place = None
+                    self._grab_target = ""
+                cx, cy = self._ensure_cursor()
+                target = self._window_at(round(cx), round(cy))
+                if target is None:
+                    try:
+                        target = self._desktop.active_app()
+                    except Exception:
+                        log.warning("Air active_app failed", exc_info=True)
+                        target = None
+                if target is None:
+                    self._feedback("window_resize", False, "No window under the cursor.")
+                    return
+                wid, app, title = target
+                self._desktop.run("window_focus", {"window": wid})
+                try:
+                    grip = self._desktop.grip(wid)
+                except Exception as exc:
+                    log.warning("Air two_start grip failed", exc_info=True)
+                    self._feedback("window_resize", False, str(exc))
+                    return
+                self._two = grip
+                self._two_dx = 0.0
+                self._two_dy = 0.0
+                self._two_scale = 1.0
+                self._two_last = None
+                self._feedback("window_resize", True, f"Holding {title or app}.")
+                return
+
+            if k == "two_move":
+                if self._two is None:
+                    return
+                self._two_dx += cmd.dx
+                self._two_dy += cmd.dy
+                self._two_scale = cmd.progress or 1.0
+                s = self._two.start
+                b = self._two.bounds
+                w = max(_TWO_MIN_W, min(b.width, round(s.width * self._two_scale)))
+                h = max(_TWO_MIN_H, min(b.height, round(s.height * self._two_scale)))
+                cx, cy = s.center
+                cx += round(self._two_dx)
+                cy += round(self._two_dy)
+                rect = Rect(cx - w // 2, cy - h // 2, w, h)
+                ref = self._two_last if self._two_last is not None else s
+                if moved(rect, ref):
+                    try:
+                        self._desktop.place(self._two, rect)
+                    except Exception as exc:
+                        log.warning("Air two_move place failed", exc_info=True)
+                        self._two = None
+                        self._two_dx = 0.0
+                        self._two_dy = 0.0
+                        self._two_scale = 1.0
+                        self._two_last = None
+                        self._feedback("window_resize", False, str(exc))
+                        return
+                    self._two_last = rect
+                return
+
+            if k == "two_end":
+                if self._two is None:
+                    return
+                grip = self._two
+                last = self._two_last or grip.start
+                self._two = None
+                self._two_dx = 0.0
+                self._two_dy = 0.0
+                self._two_scale = 1.0
+                self._two_last = None
+                try:
+                    mon = self._desktop.screen_bounds("active")
+                except Exception:
+                    log.warning("Air screen_bounds('active') failed", exc_info=True)
+                    mon = grip.bounds
+                if (
+                    mon.width > 0
+                    and mon.height > 0
+                    and last.width >= _TWO_MAXIMIZE * mon.width
+                    and last.height >= _TWO_MAXIMIZE * mon.height
+                ):
+                    r = self._desktop.run("window_maximize", {"window": grip.id})
+                    self._feedback("window_maximize", r.ok, r.message)
+                else:
+                    label = grip.title or f"window {grip.id}"
+                    self._feedback("window_resize", True, f"Resized {label} to {last.width}×{last.height}.")
                 return
 
             if k == "click":

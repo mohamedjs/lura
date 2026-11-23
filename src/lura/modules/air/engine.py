@@ -109,6 +109,15 @@ CURSOR_GAIN = 1.5         # full-frame-width finger move = 1920 x CURSOR_GAIN sc
 ACCEL_SLOW, ACCEL_FAST = 0.10, 0.80   # hand speed (normalized units / s) of the two gain ends
 GAIN_SLOW, GAIN_FAST = 0.6, 1.6       # gain multiplier at / below ACCEL_SLOW and at / above ACCEL_FAST
 EURO_MIN_CUTOFF, EURO_BETA = 0.6, 0.01
+TWO_PALM = 0.14           # both hands at least this big to start/keep a two-hand pinch (two hands
+                          # held apart sit a little farther from the camera than one)
+TWO_ENTER = 0.12          # s both hands must be pinching before the window is taken
+TWO_DRAG_HOLD = 1.2       # s: while a second hand is up, a one-hand pinch waits this long before
+                          # mouse-down (instead of DRAG_HOLD), so the second pinch can still arrive
+TWO_DEADZONE = 0.04       # |scale - 1| below this = 1.0 (moving both hands must not resize)
+TWO_SCALE_MIN, TWO_SCALE_MAX = 0.25, 4.0
+TWO_COOLDOWN = 0.6        # s after a two-hand pinch ends in which no one-hand pinch/click starts
+TWO_EURO_MIN_CUTOFF, TWO_EURO_BETA = 1.0, 0.02   # filter on the distance between the two pinches
 
 _EPS = 1e-9
 _HINT_MIN_PALM = 0.08
@@ -120,14 +129,27 @@ _FAR_HINT_TEXT = "Move your hand closer to the camera."
 @dataclass(frozen=True)
 class Command:
     kind: str     # "engage" "disengage" "cursor" "click" "right_click" "press" "release" "swipe" "scroll"
-                  # "intent" "hint" (the controller still accepts the v2 ring_* / grab_* kinds)
+                  # "intent" "hint" "two_start" "two_move" "two_end"
+                  # (the controller still accepts the v2 ring_* / grab_* kinds)
     t: float
     dx: float = 0.0
-    dy: float = 0.0     # cursor: screen px (relative)
+    dy: float = 0.0     # cursor / two_move: screen px (relative)
     direction: str = ""                  # swipe: "left" | "right"
     steps: int = 0                       # scroll: + = up, - = down
     text: str = ""                       # intent: "confirm"/"deny"; hint: the sentence; scroll: "glide"
     progress: float = 0.0
+
+
+def pinch_point(hand: Hand) -> Point:
+    """Midpoint of the thumb tip and the index tip (where the fingers meet)."""
+    a, b = hand.points[THUMB_TIP], hand.points[INDEX_TIP]
+    return Point((a.x + b.x) * 0.5, (a.y + b.y) * 0.5, (a.z + b.z) * 0.5)
+
+
+def _two_geom(pair: tuple[Hand, Hand]) -> tuple[float, tuple[float, float]]:
+    p0, p1 = pinch_point(pair[0]), pinch_point(pair[1])
+    d = math.hypot((p0.x - p1.x) * ASPECT, p0.y - p1.y)
+    return d, ((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5)
 
 
 def blade_ratio(hand: Hand) -> float:
@@ -166,11 +188,12 @@ class InteractionEngine:
         self._scale_y = float(screen_px_per_frame) * (9.0 / 16.0)
         self._fx = OneEuro(min_cutoff=EURO_MIN_CUTOFF, beta=EURO_BETA)
         self._fy = OneEuro(min_cutoff=EURO_MIN_CUTOFF, beta=EURO_BETA)
+        self._two_filter = OneEuro(min_cutoff=TWO_EURO_MIN_CUTOFF, beta=TWO_EURO_BETA)
         self.reset()
 
     def reset(self) -> None:
         self._engaged = False
-        self._phase: str = "idle"          # idle | point | pinch | drag | scroll
+        self._phase: str = "idle"          # idle | point | pinch | drag | scroll | two
         self._zone: str = "none"
         self._progress: float = 0.0
 
@@ -222,6 +245,24 @@ class InteractionEngine:
         self._thumb_since: float = 0.0
         self._thumb_fired: bool = False
         self._thumb_last: tuple[str, float] = ("", -math.inf)
+
+        self._two_since: float | None = None
+        self._two_d0: float = 0.0
+        self._two_mid: tuple[float, float] | None = None
+        self._two_scale: float = 1.0
+        self._two_emitted_scale: float = 1.0
+        self._two_release_since: float | None = None
+        self._two_block_until: float = -math.inf
+        self._two_filter.reset()
+
+    def _clear_two(self) -> None:
+        self._two_since = None
+        self._two_d0 = 0.0
+        self._two_mid = None
+        self._two_scale = 1.0
+        self._two_emitted_scale = 1.0
+        self._two_release_since = None
+        self._two_filter.reset()
 
     @property
     def state(self) -> dict:
@@ -481,10 +522,117 @@ class InteractionEngine:
         self._last_fy = None
         return True
 
+    def _pinch_flags(self, hand: Hand) -> tuple[bool, bool, float]:
+        """(pinch_on, pinch_released, ratio) with the exact rules already in update()."""
+        ratio = pinch_ratio(hand)
+        reach = dist(hand.points[WRIST], hand.points[INDEX_TIP]) / max(
+            dist(hand.points[WRIST], hand.points[INDEX_PIP]), 1e-6)
+        pinch_on = (ratio < PINCH_ON and reach > PINCH_REACH) or ratio < PINCH_TIGHT
+        pinch_released = ratio > PINCH_OFF or (reach < PINCH_REACH_END and ratio > PINCH_SLIP)
+        return pinch_on, pinch_released, ratio
+
     # -- main ----------------------------------------------------------------
 
     def update(self, t: float, hands: Sequence[Hand]) -> list[Command]:
         out: list[Command] = []
+
+        big = [h for h in hands if palm_size(h) >= TWO_PALM - _EPS]
+        pair: tuple[Hand, Hand] | None = None
+        if len(big) >= 2:
+            big.sort(key=lambda h: h.score, reverse=True)
+            pair = (big[0], big[1])
+
+        if self._phase == "two":
+            any_tracked = any(palm_size(h) >= TRACK_PALM - _EPS for h in hands)
+            if any_tracked:
+                self._last_tracked_t = t
+            if pair is not None:
+                self._zone = "ok"
+                _, p0_rel, _ = self._pinch_flags(pair[0])
+                _, p1_rel, _ = self._pinch_flags(pair[1])
+                releasing = p0_rel or p1_rel
+            else:
+                self._zone = "none"
+                releasing = True
+            if releasing:
+                if (
+                    not any_tracked
+                    and self._engaged
+                    and (t - self._last_tracked_t) >= DISENGAGE_AFTER - _EPS
+                ):
+                    out.append(Command("two_end", t))
+                    self._clear_two()
+                    self._to_idle()
+                    self._two_block_until = t + TWO_COOLDOWN
+                    self._last_point_t = -math.inf
+                    self._engaged = False
+                    out.append(Command("disengage", t))
+                    return out
+                if self._two_release_since is None:
+                    self._two_release_since = t
+                if (t - self._two_release_since) >= RELEASE_HOLD - _EPS:
+                    out.append(Command("two_end", t))
+                    self._clear_two()
+                    self._to_idle()
+                    self._two_block_until = t + TWO_COOLDOWN
+                    self._last_point_t = -math.inf
+                return out
+            self._two_release_since = None
+            assert pair is not None and self._two_mid is not None
+            raw_d, mid = _two_geom(pair)
+            d = self._two_filter(raw_d, t)
+            scale = d / max(self._two_d0, 1e-6)
+            if abs(scale - 1.0) < TWO_DEADZONE:
+                scale = 1.0
+            scale = max(TWO_SCALE_MIN, min(TWO_SCALE_MAX, scale))
+            dx = (mid[0] - self._two_mid[0]) * self._scale_x
+            dy = (mid[1] - self._two_mid[1]) * self._scale_y
+            self._two_scale = scale
+            self._progress = scale
+            if (
+                abs(dx) >= 0.5
+                or abs(dy) >= 0.5
+                or abs(scale - self._two_emitted_scale) >= 0.01 - _EPS
+            ):
+                self._two_mid = mid
+                self._two_emitted_scale = scale
+                out.append(Command("two_move", t, dx=dx, dy=dy, progress=scale))
+            return out
+
+        if (
+            self._phase in ("idle", "point", "pinch", "drag")
+            and pair is not None
+            and _in_frame(pair[0])
+            and _in_frame(pair[1])
+            and self._pinch_flags(pair[0])[0]
+            and self._pinch_flags(pair[1])[0]
+            and t >= self._two_block_until - _EPS
+        ):
+            if self._two_since is None:
+                self._two_since = t
+            if (t - self._two_since) >= TWO_ENTER - _EPS:
+                if self._phase == "drag":
+                    out.append(Command("release", t))
+                self._stop_glide()
+                self._engage(t, out)
+                self._to_idle()
+                self._phase = "two"
+                self._zone = "ok"
+                self._last_tracked_t = t
+                self._two_since = None
+                self._two_release_since = None
+                self._two_filter.reset()
+                raw_d, mid = _two_geom(pair)
+                self._two_d0 = self._two_filter(raw_d, t)
+                self._two_mid = mid
+                self._two_scale = 1.0
+                self._two_emitted_scale = 1.0
+                self._progress = 1.0
+                out.append(Command("two_start", t))
+                return out
+        else:
+            self._two_since = None
+
         hand = max(hands, key=lambda h: h.score) if hands else None
 
         if hand is not None:
@@ -493,11 +641,7 @@ class InteractionEngine:
             tip = hand.points[INDEX_TIP]
             in_zone = palm >= ZONE_PALM - _EPS and _in_frame(hand)
             tracked = palm >= TRACK_PALM - _EPS
-            ratio = pinch_ratio(hand)
-            reach = dist(hand.points[WRIST], hand.points[INDEX_TIP]) / max(
-                dist(hand.points[WRIST], hand.points[INDEX_PIP]), 1e-6)
-            pinch_on = (ratio < PINCH_ON and reach > PINCH_REACH) or ratio < PINCH_TIGHT
-            pinch_released = ratio > PINCH_OFF or (reach < PINCH_REACH_END and ratio > PINCH_SLIP)
+            pinch_on, pinch_released, ratio = self._pinch_flags(hand)
             pose, _ = classify_pose(hand, self._phase in ("pinch", "drag"), self._last_ext)
             ext = extended(hand, self._last_ext)
             self._last_ext = ext
@@ -553,6 +697,9 @@ class InteractionEngine:
             if self._engaged and (t - self._last_tracked_t) >= DISENGAGE_AFTER - _EPS:
                 if self._phase == "drag":
                     out.append(Command("release", t))
+                elif self._phase == "two":
+                    out.append(Command("two_end", t))
+                    self._clear_two()
                 self._to_idle()
                 self._engaged = False
                 out.append(Command("disengage", t))
@@ -566,12 +713,17 @@ class InteractionEngine:
             if self._update_flick(t, tip, recently_pointing and pose != "pinch" and not pinch_on, ratio, pose, out):
                 return out
             flicked_lately = (t - self._last_flick[1]) < FLICK_PINCH_BLOCK - _EPS
-            if thumb_tap and pose == "victory" and in_zone:
+            if thumb_tap and pose == "victory" and in_zone and t >= self._two_block_until - _EPS:
                 self._engage(t, out)
                 out.append(Command("right_click", t))
                 return out
             gun_tap = thumb_tap and pose == "point" and recently_pointing
-            if (pinch_on or gun_tap) and recently_pointing and not flicked_lately:
+            if (
+                (pinch_on or gun_tap)
+                and recently_pointing
+                and not flicked_lately
+                and t >= self._two_block_until - _EPS
+            ):
                 self._stop_glide()
                 self._rewind(t, out)
                 self._phase = "pinch"
@@ -626,6 +778,8 @@ class InteractionEngine:
                 if self._release_since is None:
                     self._release_since = t
                 if (t - self._release_since) >= RELEASE_HOLD - _EPS:
+                    if self._phase == "pinch" and self._two_since is not None:
+                        return out
                     out.append(Command("release" if self._phase == "drag" else "click", t))
                     self._to_idle()
                     self._last_point_t = t       # back to pointing: a second tap is a double click
@@ -635,6 +789,8 @@ class InteractionEngine:
             if self._phase == "pinch":
                 held = t - self._pinch_start
                 hold = THUMB_DRAG_HOLD if self._press_src == "thumb" else DRAG_HOLD
+                if any(h is not hand and palm_size(h) >= TWO_PALM - _EPS for h in hands):
+                    hold = max(hold, TWO_DRAG_HOLD)
                 if held >= hold - _EPS:
                     self._engage(t, out)
                     self._phase = "drag"
@@ -650,7 +806,7 @@ class InteractionEngine:
             return out
 
         if self._phase == "scroll":
-            if thumb_tap and pose == "victory":
+            if thumb_tap and pose == "victory" and t >= self._two_block_until - _EPS:
                 out.append(Command("right_click", t))
                 return out
             if pose == "victory":
