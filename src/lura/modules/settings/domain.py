@@ -199,6 +199,9 @@ class Settings:
     #: Lura Air: click with a finger-gun thumb tap (thumb down onto the middle finger). Off = only
     #: the thumb-to-index pinch clicks.
     air_thumb_click: bool = True
+    #: Lura may take a screenshot of the window you point at when you ask her to look
+    #: (look_at_screen); it goes to your brain provider.
+    look_enabled: bool = True
     dashboard_port: int = 47321
     onboarded: bool = False
 

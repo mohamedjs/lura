@@ -224,10 +224,11 @@ def render_surface(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, am
     cr.set_operator(cairo.OPERATOR_OVER)
     cr.set_line_cap(cairo.LINE_CAP_ROUND)
     cr.set_line_join(cairo.LINE_JOIN_ROUND)
+    gaze = air.gaze if air is not None and air.on else None
     if look.style == "bust":
-        _bust_style(cr, t, blender, size, amp, look.palette, look.figure)
+        _bust_style(cr, t, blender, size, amp, look.palette, look.figure, gaze=gaze)
     else:
-        _STYLES.get(look.style, _face_style)(cr, t, blender, size, amp, look.palette)
+        _STYLES.get(look.style, _face_style)(cr, t, blender, size, amp, look.palette, gaze=gaze)
     if tools:
         _tool_badges(cr, size, look.palette, tools, t, _ORIGIN.get(look.style, (0.5, 0.5)))
     if air is not None and air.on:
@@ -235,19 +236,32 @@ def render_surface(t: float, blender: StateBlender, size: int = OVERLAY_SIZE, am
     return surface
 
 
-def _motion(t: float, b: StateBlender, amp: float):
+GAZE_YAW = 0.6
+GAZE_PITCH = 0.2
+GAZE_SIGN_X = 1.0
+GAZE_SIGN_Y = 1.0
+
+
+def _motion(t: float, b: StateBlender, amp: float, gaze: tuple[float, float] | None = None):
     """Head turn, mouth opening and glow shared by the styles with a face."""
     glow = 0.65 * b.wl + 1.0 * b.wt + 1.25 * b.ws
-    yaw = 0.26 * math.sin(t * 0.45) + b.wt * 0.22 * math.sin(t * 1.3)
-    pitch = 0.07 * math.sin(t * 0.31) - 0.06
+    idle_yaw = 0.26 * math.sin(t * 0.45) + b.wt * 0.22 * math.sin(t * 1.3)
+    idle_pitch = 0.07 * math.sin(t * 0.31) - 0.06
+    if gaze is not None:
+        gx, gy = gaze
+        w = min(1.0, math.hypot(gx, gy) * 3.0)
+        yaw = (1.0 - w) * idle_yaw + w * (GAZE_SIGN_X * GAZE_YAW * gx + 0.06 * math.sin(t * 0.45))
+        pitch = (1.0 - w) * idle_pitch + w * (-0.06 + GAZE_SIGN_Y * GAZE_PITCH * gy)
+    else:
+        yaw, pitch = idle_yaw, idle_pitch
     mouth = b.ws * max(amp, 0.10 * abs(math.sin(t * 7.0)))
     return glow, yaw, pitch, mouth
 
 
 # ── style: the face ─────────────────────────────────────────────────────────
 
-def _face_style(cr, t, b, size, amp, pal: Palette):
-    glow, yaw, pitch, mouth = _motion(t, b, amp)
+def _face_style(cr, t, b, size, amp, pal: Palette, gaze=None):
+    glow, yaw, pitch, mouth = _motion(t, b, amp, gaze=gaze)
     scan_y = 1.25 - (((t * (0.55 + 0.6 * b.wt)) % 2.0) / 2.0) * 2.7
     _face(cr, t, size / OVERLAY_SIZE, pal, _projector(size * 0.5, size * 0.47, size * 0.26),
           size * 0.26, yaw, pitch, scan_y, glow, mouth)
@@ -366,7 +380,7 @@ def _face(cr, t, u, pal: Palette, proj, fs, yaw, pitch, scan_y, glow, mouth):
 _ORB_TH = np.linspace(0.0, 2.0 * math.pi, 97)
 
 
-def _orb_style(cr, t, b, size, amp, pal: Palette):
+def _orb_style(cr, t, b, size, amp, pal: Palette, gaze=None):
     import cairo
 
     u = size / OVERLAY_SIZE
@@ -452,7 +466,7 @@ _RING_N = 72
 _RING_AN = np.arange(_RING_N) / _RING_N * 2.0 * math.pi
 
 
-def _ring_style(cr, t, b, size, amp, pal: Palette):
+def _ring_style(cr, t, b, size, amp, pal: Palette, gaze=None):
     import cairo
 
     u = size / OVERLAY_SIZE
@@ -800,11 +814,11 @@ def _streaks(cr, proj, pal: Palette, u, t, b, amp, yaw):
             cr.stroke()
 
 
-def _bust_style(cr, t, b, size, amp, pal: Palette, figure: str = "female"):
+def _bust_style(cr, t, b, size, amp, pal: Palette, figure: str = "female", gaze=None):
     import cairo
 
-    glow, yaw, pitch, mouth = _motion(t, b, amp)
-    yaw = 0.8 * yaw
+    glow, yaw, pitch, mouth = _motion(t, b, amp, gaze=gaze)
+    yaw = max(-0.3, min(0.3, 0.8 * yaw))
     u = size / OVERLAY_SIZE
     fs = size * 0.155
     cx, cy = size * 0.5, size * 0.24

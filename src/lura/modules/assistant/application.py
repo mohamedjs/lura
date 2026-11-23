@@ -12,6 +12,7 @@ owns turn detection:
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 
@@ -56,6 +57,7 @@ class PipelineConversation:
             # sources), so the model calls them without a find_tools round first.
             self._session.add(preload)
         self._history: list[Message] = []
+        self._blind = False
         self._ending = False
         self._quiet = False          # the brain judged the last turn not meant for it
         self._player = None          # the reply being spoken, for interrupt()
@@ -190,6 +192,17 @@ class PipelineConversation:
                 else:
                     done = event
         except HttpError as exc:
+            if (exc.status in (400, 404, 415, 422) and not self._blind
+                    and any(m.image for m in self._history)):
+                self._blind = True
+                for m in self._history:
+                    if m.image:
+                        m.image = None
+                        m.image_mime = ""
+                        m.text += domain.BLIND_NOTE
+                player.cancel()
+                log.warning("Brain refused the picture (%s); continuing without images.", exc)
+                return self._stream(with_tools)
             player.cancel()
             log.warning("Brain failed: %s", exc)
             self._say(t("assistant.brain_error", self.s.language))
@@ -238,14 +251,24 @@ class PipelineConversation:
     def _run_tools(self, message: Message) -> None:
         for call in message.tool_calls:
             if not call.valid:
-                text, ends = (f"Error: the arguments for {call.name} were incomplete or not valid "
-                              f"JSON ({call.raw_arguments[:200]!r}). Call it again correctly.", False)
+                text, ends, image, mime = (
+                    f"Error: the arguments for {call.name} were incomplete or not valid "
+                    f"JSON ({call.raw_arguments[:200]!r}). Call it again correctly.",
+                    False, None, "",
+                )
             else:
                 log.info("tool %s %s", call.name, call.arguments)
-                text, ends = self._tools.dispatch(call.name, call.arguments, self._session)
+                reply, ends = self._tools.dispatch_reply(call.name, call.arguments, self._session)
+                if reply.image and not self._blind:
+                    text, image, mime = reply.text[:6000], reply.image, reply.image_mime
+                elif reply.image:
+                    text, image, mime = reply.text[:6000] + domain.BLIND_NOTE, None, ""
+                else:
+                    text, image, mime = reply.text[:6000], None, ""
             self._ending = self._ending or ends
-            self._history.append(Message("tool", text[:6000], tool_call_id=call.id,
-                                         tool_name=call.name, is_error=not call.valid))
+            self._history.append(Message("tool", text, tool_call_id=call.id,
+                                         tool_name=call.name, is_error=not call.valid,
+                                         image=image, image_mime=mime))
 
     def _captioner(self):
         if self._caption_transcriber is None:
@@ -426,11 +449,14 @@ class PipelineConversation:
 class Assistant:
     def __init__(self, settings: SettingsService, brain: BrainService, voice: VoiceService,
                  tools: ToolService, bus: EventBus, presence: Presence | None = None,
-                 memory: MemoryService | None = None, extra_prompt=lambda: ""):
+                 memory: MemoryService | None = None, extra_prompt=lambda: "",
+                 air_pointed=lambda: None):
         self._settings = settings
         self._memory = memory
         #: Skills and anything else that adds to the system prompt.
         self._extra_prompt = extra_prompt
+        self._air_pointed = air_pointed
+        self._air_used = -math.inf
         self._brain = brain
         self._voice = voice
         self._tools = tools
@@ -475,6 +501,15 @@ class Assistant:
                 self._talk.set()
 
     def _take_air_point(self) -> tuple[str, str] | None:
+        try:
+            p = self._air_pointed()
+        except Exception:
+            p = None
+        if p and p[3] < domain.AIR_NOTE_SECONDS:
+            stamp = time.monotonic() - p[3]
+            if abs(stamp - self._air_used) > 0.05:
+                self._air_used = stamp
+                return p[1], p[2]
         with self._air_lock:
             point = self._air_point
             self._air_point = None

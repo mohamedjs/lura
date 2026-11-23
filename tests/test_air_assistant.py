@@ -121,10 +121,10 @@ def check_domain_helpers_and_prompt() -> None:
 
     # air_note formats
     note = air_note("google-chrome", "PR #42 - GitHub")
-    assert note == '[The user is pointing at a window: "PR #42 - GitHub" (google-chrome). "This"/"here" means that window.]', note
+    assert note == '[The user is pointing at a window: "PR #42 - GitHub" (google-chrome). "This"/"here" means that window; call look_at_screen to see it.]', note
     long_title = "x" * 120
     assert f'"{long_title[:80]}" (code)' in air_note("code", long_title)
-    assert air_note("vlc", "") == '[The user is pointing at a window: vlc. "This"/"here" means that window.]'
+    assert air_note("vlc", "") == '[The user is pointing at a window: vlc. "This"/"here" means that window; call look_at_screen to see it.]'
     assert air_note("", "") == ""
     assert air_note("  ", "  ") == ""
 

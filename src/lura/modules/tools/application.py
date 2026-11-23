@@ -6,10 +6,12 @@ import logging
 import re
 from typing import Any, Protocol
 
-from ..brain import ToolSpec
+from ..brain import ToolReply, ToolSpec
 from .domain import BUILTIN_TOOLS, END_SESSION, FIND_TOOLS, briefing_sources
 
 log = logging.getLogger(__name__)
+
+IMAGE_UNSUPPORTED = " (The picture cannot be shown in this mode.)"
 
 
 def _brain_name(connector: str, tool: str) -> str:
@@ -32,7 +34,7 @@ class ToolProvider(Protocol):
 
     def tool_specs(self) -> list[ToolSpec]: ...
     def owns(self, name: str) -> bool: ...
-    def call(self, name: str, arguments: dict[str, Any]) -> str: ...
+    def call(self, name: str, arguments: dict[str, Any]) -> str | ToolReply: ...
 
 
 class ToolSession:
@@ -68,9 +70,9 @@ class ToolService:
         extra = self._connectors.all_tools() if self._connectors else []
         return [t for t in BUILTIN_TOOLS if t.name != FIND_TOOLS] + self._provided() + extra
 
-    def dispatch(self, name: str, args: dict[str, Any] | None,
-                 session: ToolSession | None = None) -> tuple[str, bool]:
-        """Run one tool. Returns (text for the model, does this end the session).
+    def dispatch_reply(self, name: str, args: dict[str, Any] | None,
+                       session: ToolSession | None = None) -> tuple[ToolReply, bool]:
+        """Run one tool. Returns (ToolReply for the model, does this end the session).
 
         Never raises: a tool that blows up comes back as text the model can
         talk about, not as a dead conversation.
@@ -80,38 +82,45 @@ class ToolService:
         args = args or {}
         try:
             if name == "run_command":
-                return system.run_command(str(args.get("command", ""))), False
+                return ToolReply(system.run_command(str(args.get("command", "")))), False
             if name == "get_system_briefing":
-                return briefing.as_text(briefing.gather(self._language())), False
+                return ToolReply(briefing.as_text(briefing.gather(self._language()))), False
             if name == "list_applications":
-                return system.list_applications(bool(args.get("running_only", True))), False
+                return ToolReply(system.list_applications(bool(args.get("running_only", True)))), False
             if name == "open_application":
-                return system.open_application(str(args.get("app_name", ""))), False
+                return ToolReply(system.open_application(str(args.get("app_name", "")))), False
             if name == "open_url":
-                return system.open_url(str(args.get("url", ""))), False
+                return ToolReply(system.open_url(str(args.get("url", "")))), False
             if name == "find_files":
-                return system.find_files(str(args.get("query", "")), str(args.get("folder", ""))), False
+                return ToolReply(system.find_files(str(args.get("query", "")), str(args.get("folder", "")))), False
             if name == END_SESSION:
-                return "Session ending now. Say a brief friendly goodbye.", True
+                return ToolReply("Session ending now. Say a brief friendly goodbye."), True
             if name == FIND_TOOLS:
                 if not self._connectors:
-                    return "No extra tools are connected. Try run_command or open_url.", False
+                    return ToolReply("No extra tools are connected. Try run_command or open_url."), False
                 found = self._connectors.search(str(args.get("query", "")))
                 if not found:
-                    return "No connected tool matches that. Try run_command or open_url instead.", False
+                    return ToolReply("No connected tool matches that. Try run_command or open_url instead."), False
                 if session is not None:
                     session.add(found)
                 listing = "\n".join(f"- {t.name}: {t.description[:120]}" for t in found)
-                return f"These tools are now available to call:\n{listing}", False
+                return ToolReply(f"These tools are now available to call:\n{listing}"), False
             for provider in self._providers:
                 if provider.owns(name):
-                    return provider.call(name, args), False
+                    res = provider.call(name, args)
+                    return (res if isinstance(res, ToolReply) else ToolReply(res)), False
             if self._connectors and self._connectors.owns(name):
-                return self._connectors.call(name, args), False
-            return f"Error: unknown tool {name}.", False
+                return ToolReply(self._connectors.call(name, args)), False
+            return ToolReply(f"Error: unknown tool {name}."), False
         except Exception as exc:
             log.warning("Tool %s failed: %s", name, exc)
-            return f"Error running {name}: {exc}", False
+            return ToolReply(f"Error running {name}: {exc}"), False
+
+    def dispatch(self, name: str, args: dict[str, Any] | None,
+                 session: ToolSession | None = None) -> tuple[str, bool]:
+        """Run one tool. Returns (text for the model, does this end the session)."""
+        reply, ends = self.dispatch_reply(name, args, session)
+        return (reply.text + IMAGE_UNSUPPORTED if reply.image else reply.text), ends
 
     def services(self) -> str:
         """The connected MCP servers in a few lines: name, what it is for, and a

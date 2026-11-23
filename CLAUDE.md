@@ -118,6 +118,25 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   the newest user turn of each request (not stored): with old untashkeeled replies in the history,
   deepseek-v4-flash copied them (3% marked) until the note (81–98%). `LURA_OFFLINE_VOICE=1` makes
   `_OfflineFallback` always speak offline, to hear the offline voices.
+- **2.8 — Air + voice together (docs/012, docs/013; Gemini 4 Neon built both, Claude reviewed):**
+  - Two-hand pinch (engine phase `"two"`, Commands `two_start/two_move/two_end`): both hands pinch
+    → the window under the Air cursor is held; hands apart/together scale it around its centre
+    (`progress` = scale, deadzone 0.04, min 400×300), both moving = move, release one hand = drop,
+    ≥95 % of the monitor = maximize. While a second hand is up a one-hand pinch waits
+    `TWO_DRAG_HOLD` 1.2 s before mouse-down, so no stray click/drag; `TWO_COOLDOWN` after.
+  - Pointing reaches the conversation again (v4 never published the `point` intent):
+    `AirController.pointed()` (window under the Air cursor, checked every 0.25 s) is injected into
+    `Assistant(air_pointed=…)` and `ComputerService.configure_look(pointed=…)`.
+  - `look_at_screen` tool (`computer`, setting `look_enabled`, Hands-tab switch): screenshot of the
+    pointed / active window or the monitor; X11 via ctypes `XGetImage` (`computer/infrastructure/
+    capture.py`, X error handler installed so a BadMatch cannot kill the daemon), macOS via
+    `screencapture -R` + Screen Recording check. Longest side 1568 px (cv2 resize, JPEG 85; PNG
+    without cv2). Tool images: `Message.image`, `ToolReply`; OpenAI-compatible adds a user message
+    with `image_url` after the tool run, Claude puts the image in the tool_result; `fit_history`
+    keeps only the newest image; a 400/404/415/422 on a request with an image latches the
+    conversation blind (`BLIND_NOTE`).
+  - The face/bust turns towards the Air cursor (`AirView.gaze`, face centres from both backends).
+  - Not verified live yet: the two-hand thresholds, macOS capture, a real brain looking.
 - **2.6 — Air gestures v4 (`air/engine.py`):** cursor follows the index knuckle (INDEX_MCP), not the
   tip, with pointer acceleration (`accel_gain`: ×0.6 slow … ×1.6 fast); finger-gun click = cocked
   thumb (`thumb_reach` > 0.65 for 0.2 s) tapped down (< 0.5) with the knuckle still (`THUMB_STILL`),

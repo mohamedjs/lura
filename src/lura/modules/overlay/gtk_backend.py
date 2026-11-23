@@ -247,6 +247,7 @@ def _window(monitor, shared: OverlayState, actions: dict, labels: dict):
         return False
 
     win.show_frame = show
+    win.face_center = lambda: (int(face_pos[0]) + cur[0] // 2, int(face_pos[1]) + cur[0] // 2)
     return win
 
 
@@ -278,6 +279,8 @@ def _frames(shared: OverlayState, windows: dict) -> None:
                                               GdkPixbuf.Colorspace.RGB, True, 8, size, size, size * 4)
         frame[0] += 1
         rects = hit_rects(surface, threshold=20) if frame[0] % 5 == 1 else None
+        if frame[0] % 15 == 1:
+            shared.set_face_centers([win.face_center() for win in list(windows.values())])
         # idle_add, not a direct call: Gtk.main() runs in a daemon thread and
         # setting the pixbuf inline leaves the overlay blank on screen.
         for win in list(windows.values()):

@@ -273,6 +273,29 @@ def window_list() -> list[dict]:
     return out
 
 
+_screen_capture_requested = False
+
+
+def screen_capture_allowed(request: bool) -> bool:
+    global _screen_capture_requested
+    lib = _lib()
+    preflight = getattr(lib.cg, "CGPreflightScreenCaptureAccess", None)
+    if preflight is None:
+        return True
+    preflight.argtypes = []
+    preflight.restype = ctypes.c_bool
+    if bool(preflight()):
+        return True
+    if request and not _screen_capture_requested:
+        _screen_capture_requested = True
+        req = getattr(lib.cg, "CGRequestScreenCaptureAccess", None)
+        if req is not None:
+            req.argtypes = []
+            req.restype = ctypes.c_bool
+            req()
+    return False
+
+
 def ax_trusted(prompt: bool = False) -> bool:
     try:
         lib = _lib()

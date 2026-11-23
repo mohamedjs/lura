@@ -7,8 +7,17 @@ import os
 import time
 from dataclasses import replace
 
-from ..domain import Monitor, Rect, Window, monitor_for, work_area
-from . import quartz
+from ..domain import (
+    LOOK_JPEG_QUALITY,
+    LOOK_MAX_SIDE,
+    ActionError,
+    Monitor,
+    Rect,
+    Window,
+    monitor_for,
+    work_area,
+)
+from . import capture, quartz
 from .macos_pure import (
     MacCombo,
     parse_combo,
@@ -140,6 +149,14 @@ class MacBackend:
 
     def pointer(self) -> tuple[int, int]:
         return quartz.cursor()
+
+    def capture(self, rect: Rect) -> tuple[bytes, str]:
+        if not quartz.screen_capture_allowed(True):
+            raise ActionError(
+                "Lura needs Screen Recording permission: System Settings → Privacy & Security → "
+                "Screen Recording, then restart Lura."
+            )
+        return capture.grab_mac(rect, LOOK_MAX_SIDE, LOOK_JPEG_QUALITY)
 
     # ── windows ─────────────────────────────────────────────────────────────
 

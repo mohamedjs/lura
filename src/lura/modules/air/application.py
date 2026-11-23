@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import threading
 import time
@@ -42,6 +43,7 @@ _IDLE_INTERVAL = 1.0 / 8.0
 _QUEUE_MAX = 64
 _POINTER_RESYNC_S = 1.0
 _BOUNDS_CACHE_S = 5.0
+_POINT_EVERY = 0.25  # s between window lookups while the Air cursor moves
 _TWO_MIN_W, _TWO_MIN_H = 400, 300      # px: smallest window a two-hand pinch makes
 _TWO_MAXIMIZE = 0.95                    # final rect >= this share of the monitor in both directions -> maximize
 
@@ -532,6 +534,10 @@ class AirController:
         self._cursor: tuple[float, float] | None = None
         self._last_move_t: float = -1e9
         self._bounds_cache: tuple[float, Rect] | None = None
+        self._pointed: tuple[int, str, str, float] | None = None
+        self._pointed_lock = threading.Lock()
+        self._point_check_t: float = -math.inf
+        self._cursor_wall: float = -math.inf
 
         self._ring_target: tuple[int, str, str] | None = None
         self._ring_labels: tuple[str, str, str, str] | None = None
@@ -688,6 +694,14 @@ class AirController:
             except Exception:
                 log.exception("AirController.process failed for %s", cmd.kind)
 
+    def pointed(self) -> tuple[int, str, str, float] | None:
+        """(window id, app, title, seconds since the Air cursor was last over it), or None."""
+        with self._pointed_lock:
+            p = self._pointed
+        if p is None:
+            return None
+        return (p[0], p[1], p[2], self._clock() - p[3])
+
     def state(self) -> dict:
         fn = getattr(self._air, "engine_state", None)
         est = fn() if callable(fn) else dict(_DEFAULT_ENGINE_STATE)
@@ -707,6 +721,8 @@ class AirController:
                 "grab_progress": float(est.get("grab_progress", 0.0)),
                 "ring_labels": self._ring_labels,
                 "target": target,
+                "cursor": (round(self._cursor[0]), round(self._cursor[1])) if self._cursor else None,
+                "cursor_age": self._clock() - self._cursor_wall,
             }
 
     # ── desktop & event helpers ─────────────────────────────────────────────
@@ -811,6 +827,13 @@ class AirController:
                     self._desktop.pointer_to(round(cx), round(cy))
                 except Exception:
                     log.warning("Air pointer_to failed", exc_info=True)
+                self._cursor_wall = self._clock()
+                if cmd.t - self._point_check_t >= _POINT_EVERY:
+                    self._point_check_t = cmd.t
+                    hit = self._window_at(round(cx), round(cy))
+                    if hit:
+                        with self._pointed_lock:
+                            self._pointed = (*hit, self._clock())
                 return
 
             if k == "ring_open":
@@ -846,6 +869,8 @@ class AirController:
                 if target is None:
                     self._feedback("window_move", False, "No window under the cursor.")
                     return
+                with self._pointed_lock:
+                    self._pointed = (*target, self._clock())
                 wid, app, title = target
                 self._desktop.run("window_focus", {"window": wid})
                 try:
@@ -920,6 +945,8 @@ class AirController:
                 if target is None:
                     self._feedback("window_resize", False, "No window under the cursor.")
                     return
+                with self._pointed_lock:
+                    self._pointed = (*target, self._clock())
                 wid, app, title = target
                 self._desktop.run("window_focus", {"window": wid})
                 try:

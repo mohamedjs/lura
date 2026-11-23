@@ -168,6 +168,9 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
             self._set_mask()
             self.update()
 
+        def face_center(self) -> tuple[int, int]:
+            return (self._face_pos.x() + self._size // 2, self._face_pos.y() + self._size // 2)
+
         def _set_mask(self) -> None:
             """Clicks land only on the drawn pixels and the subtitles; the
             mask is grown a cell so the faint glow is not clipped."""
@@ -316,6 +319,8 @@ def run(shared: OverlayState, stop: threading.Event, actions: dict, labels: dict
                              QtGui.QImage.Format_ARGB32_Premultiplied)
         clock["n"] = clock.get("n", 0) + 1
         rects = hit_rects(surface, threshold=3, grow=1) if clock["n"] % 5 == 1 else None
+        if clock["n"] % 15 == 1:
+            shared.set_face_centers([face.face_center() for face in list(faces.values())])
         for face in list(faces.values()):
             face.resize_face(size)
             face.show_frame(image, rects)

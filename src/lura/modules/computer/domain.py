@@ -421,6 +421,25 @@ DESKTOP_TOOL = ToolSpec(
     },
 )
 
+LOOK_MAX_SIDE = 1568        # px: longest side sent to the brain (larger costs tokens, no gain)
+LOOK_POINT_SECONDS = 20.0   # a pointed window older than this is not "pointed" any more
+LOOK_JPEG_QUALITY = 85
+LOOK_TOOL = ToolSpec(
+    "look_at_screen",
+    "See the user's screen: returns a screenshot. target 'pointed' (default) = the window the "
+    "user is pointing at with their hand (Lura Air), or the window under the mouse when they are "
+    "not pointing; 'active' = the focused window; 'screen' = the whole monitor under the mouse. "
+    "Call it when the user asks you to look, or says 'this'/'here' about something on screen. "
+    "Never read passwords, keys or other secrets aloud.",
+    {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "enum": ["pointed", "active", "screen"]},
+        },
+        "required": [],
+    },
+)
+
 
 # ── validation ──────────────────────────────────────────────────────────────
 

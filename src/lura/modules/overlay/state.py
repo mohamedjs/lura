@@ -32,6 +32,7 @@ class AirView:
     pulse_age: float = 99.0             # s since that action
     message: str = ""                   # last Air message (action result / hint / welcome)
     message_age: float = 99.0
+    gaze: tuple[float, float] | None = None   # direction from face to Air cursor, each axis -1..1 (x right, y down)
 
 
 class State(enum.Enum):
@@ -57,6 +58,7 @@ class OverlayState:
         self._amp = 0.0
         self._amp_ts = 0.0
         self._tools: dict[str, float] = {}
+        self._face_centers: list[tuple[int, int]] = []
         self._air_err_logged = False
         self._lock = threading.Lock()
 
@@ -121,6 +123,14 @@ class OverlayState:
         with self._lock:
             return (self._captions.get("you", ""), self._captions.get("lura", ""),
                     time.monotonic() - self._caption_ts)
+
+    def set_face_centers(self, centers: list[tuple[int, int]]) -> None:
+        with self._lock:
+            self._face_centers = list(centers)
+
+    def face_centers(self) -> list[tuple[int, int]]:
+        with self._lock:
+            return list(self._face_centers)
 
     #: Subtitles under the face, switched live from the dashboard or the tray.
     subtitles_enabled: bool = True

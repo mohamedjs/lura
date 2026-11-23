@@ -26,6 +26,9 @@ REPLY_RESERVE = 8000
 AIR_NOTE_SECONDS = 15.0
 #: How early a thumbs answer may arrive while Lura is still finishing her question.
 ANSWER_GRACE = 4.0
+BLIND_NOTE = (" (The picture could not be sent: this model does not take images. "
+              "Tell the user to choose a model that can see images.)")
+LOOK_IMAGE_TOKENS = 1500
 
 _AIR_NOTE_PREFIX = "[The user is pointing at a window: "
 
@@ -41,7 +44,7 @@ def air_note(app: str, title: str) -> str:
         target = f'"{title[:80]}"'
     else:
         target = app
-    return f'{_AIR_NOTE_PREFIX}{target}. "This"/"here" means that window.]'
+    return f'{_AIR_NOTE_PREFIX}{target}. "This"/"here" means that window; call look_at_screen to see it.]'
 
 
 def answer_word(intent: str, language: str) -> str:
@@ -183,10 +186,11 @@ def system_prompt(persona: str, assistant_name: str, user_name: str, language: s
             "run_command or open_url, or say that service is not connected."
             + (f"\n{services}" if services else ""))
     parts.append(
-        f"{name} Air: the user may also use hand gestures. A note like [The user is pointing at a "
-        f"window: …] in their message tells you what \"this\" or \"here\" means; for a browser "
-        f"window you can read the page with the browser tools. A turn that is only \"Yes.\"/\"No.\" "
-        f"may come from a thumbs up or down.")
+        f"{name} Air: the user may use hand gestures. A note like [The user is pointing at a "
+        f"window: …] tells you what \"this\" or \"here\" means. When they ask you to look, or talk "
+        f"about what is on their screen, call look_at_screen — it shows you the window they point "
+        f"at; then answer from what you see. A turn that is only \"Yes.\"/\"No.\" may come from a "
+        f"thumbs up or down. Pinching with both hands resizes windows.")
     custom = persona.strip()
     if custom and custom != LEGACY_PERSONA:
         parts.append("The user's own instructions for you:\n" + _safe_format(custom, name=name))
@@ -245,6 +249,8 @@ def message_tokens(message: Message) -> int:
     cost = tokens(message.text) + 4
     if message.audio_wav:
         cost += len(message.audio_wav) // AUDIO_BYTES_PER_TOKEN
+    if message.image:
+        cost += LOOK_IMAGE_TOKENS
     for call in message.tool_calls:
         cost += tokens(call.name + str(call.arguments))
     return cost
@@ -282,6 +288,7 @@ def fit_history(history: list[Message], budget: int) -> list[Message]:
     text, and the newest goes without its transcript, or the brain reads it twice.
     """
     last_audio = max((i for i, m in enumerate(history) if m.audio_wav), default=-1)
+    last_image = max((i for i, m in enumerate(history) if m.image), default=-1)
     view = []
     for i, m in enumerate(history):
         if m.audio_wav and i != last_audio and m.text:
@@ -290,6 +297,9 @@ def fit_history(history: list[Message], budget: int) -> list[Message]:
         elif m.audio_wav and i == last_audio and m.text:
             note = m.text.split("\n", 1)[0] if m.text.startswith(_AIR_NOTE_PREFIX) else ""
             m = Message("user", note, audio_wav=m.audio_wav)
+        if m.image and i != last_image:
+            m = dataclasses.replace(m, image=None, image_mime="",
+                                    text=m.text + " (The picture is no longer attached.)")
         view.append(m)
     starts = [i for i, m in enumerate(view) if m.role == "user" and not m.tool_call_id]
     if not starts:

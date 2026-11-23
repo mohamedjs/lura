@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ..domain import Monitor, Rect, Window
+from ..domain import ActionError, Monitor, Rect, Window
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +47,9 @@ class UnsupportedBackend:
 
     def pointer(self) -> tuple[int, int]:
         raise NotImplementedError(self._reason)
+
+    def capture(self, rect: Rect) -> tuple[bytes, str]:
+        raise ActionError(f"Looking at the screen is not available: {self._reason}")
 
     def activate(self, wid: int) -> None:
         raise NotImplementedError(self._reason)

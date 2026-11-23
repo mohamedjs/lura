@@ -8,6 +8,7 @@ the next request.
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
 from typing import Any, Iterator
@@ -52,8 +53,17 @@ class AnthropicChat:
         out: list[dict[str, Any]] = []
         for message in history:
             if message.role == "tool":
+                if message.image:
+                    b64 = base64.b64encode(message.image).decode()
+                    content: Any = [
+                        {"type": "text", "text": message.text or "(picture)"},
+                        {"type": "image", "source": {
+                            "type": "base64", "media_type": message.image_mime, "data": b64}},
+                    ]
+                else:
+                    content = message.text
                 block = {"type": "tool_result", "tool_use_id": message.tool_call_id,
-                         "content": message.text, **({"is_error": True} if message.is_error else {})}
+                         "content": content, **({"is_error": True} if message.is_error else {})}
                 # Every result of one assistant turn goes in ONE user message;
                 # splitting them teaches Claude to stop calling tools in parallel.
                 if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list) \

@@ -31,7 +31,7 @@ LIVE = {"air_thumb_click", "onboarded", "subtitles", "ui_language", "input_devic
         "language", "brain_provider", "models", "voice_provider", "mode", "wake_word",
         "daily_briefing", "check_updates",
         "overlay_style", "overlay_theme", "overlay_colors", "overlay_scale",
-        "air_enabled", "air_camera", "air_app_kinds", "air_thumb_click",
+        "air_enabled", "air_camera", "air_app_kinds", "air_thumb_click", "look_enabled",
         "openrouter_voice_model", "openrouter_voice",
         "elevenlabs_model", "elevenlabs_voice_female", "elevenlabs_voice_male"}
 

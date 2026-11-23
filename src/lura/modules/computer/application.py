@@ -11,12 +11,14 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Protocol
 
-from ..brain import ToolSpec
+from ..brain import ToolReply, ToolSpec
 from .domain import (
     ACTIONS,
     ACTIONS_BY_NAME,
     CONFIRM,
     DESKTOP_TOOL,
+    LOOK_POINT_SECONDS,
+    LOOK_TOOL,
     ActionError,
     ActionResult,
     Layout,
@@ -67,6 +69,7 @@ class Backend(Protocol):
     def desktops(self) -> tuple[int, int]: ...
     def showing_desktop(self) -> bool: ...
     def pointer(self) -> tuple[int, int]: ...
+    def capture(self, rect: Rect) -> tuple[bytes, str]: ...
     # windows
     def activate(self, wid: int) -> None: ...
     def move_resize(self, wid: int, frame: Rect) -> None: ...
@@ -115,6 +118,18 @@ class ComputerService:
         self._lock = threading.RLock()
         self._probe: dict[str, bool] | None = None
         self._monitors_cache: tuple[float, list[Monitor]] | None = None
+        self._pointed: Callable[[], tuple[int, str, str, float] | None] = lambda: None
+        self._look_enabled: Callable[[], bool] = lambda: True
+
+    def configure_look(
+        self,
+        pointed: Callable[[], tuple[int, str, str, float] | None] | None = None,
+        enabled: Callable[[], bool] | None = None,
+    ) -> None:
+        if pointed is not None:
+            self._pointed = pointed
+        if enabled is not None:
+            self._look_enabled = enabled
 
     def _get_probe(self, refresh: bool = False) -> dict[str, bool]:
         if refresh or self._probe is None:
@@ -147,12 +162,14 @@ class ComputerService:
     # ── ToolProvider ────────────────────────────────────────────────────────
 
     def tool_specs(self) -> list[ToolSpec]:
-        return [DESKTOP_TOOL]
+        return [DESKTOP_TOOL] + ([LOOK_TOOL] if self._look_enabled() else [])
 
     def owns(self, name: str) -> bool:
-        return name == DESKTOP_TOOL.name
+        return name == DESKTOP_TOOL.name or (name == LOOK_TOOL.name and bool(self._look_enabled()))
 
-    def call(self, name: str, arguments: dict) -> str:
+    def call(self, name: str, arguments: dict) -> str | ToolReply:
+        if name == LOOK_TOOL.name:
+            return self.look(str((arguments or {}).get("target") or "pointed"))
         raw = dict(arguments or {})
         action = str(raw.pop("action", "") or "")
         raw_conf = raw.pop("confirmed", False)
@@ -163,6 +180,54 @@ class ComputerService:
         else:
             confirmed = bool(raw_conf)
         return self.run(action, raw, confirmed=confirmed).to_text()
+
+    def look(self, target: str = "pointed") -> ToolReply:
+        if target not in ("pointed", "active", "screen"):
+            target = "pointed"
+        try:
+            with self._lock:
+                mons = self._backend.monitors()
+                if target == "screen":
+                    px, py = self._backend.pointer()
+                    rect = monitor_for(Rect(px, py, 1, 1), mons).rect
+                    label = "the screen"
+                else:
+                    wid: int | None = None
+                    if target == "pointed":
+                        p = self._pointed()
+                        if p and p[3] <= LOOK_POINT_SECONDS:
+                            wid = p[0]
+                        else:
+                            hit = self.window_at(*self._backend.pointer())
+                            if hit is not None:
+                                wid = hit[0]
+                    if wid is None:
+                        aw = self._backend.active_window()
+                        if aw is not None:
+                            w_act = self._backend.window(aw)
+                            if w_act is not None and is_target(w_act, self._backend.own_pids()):
+                                wid = aw
+                    if wid is None:
+                        return ToolReply("Could not look: that window is not on screen.")
+                    w = self._backend.window(wid)
+                    if w is None or w.minimized:
+                        return ToolReply("Could not look: that window is not on screen.")
+                    clipped = w.rect.intersect(bounds(mons)) if mons else w.rect
+                    if clipped is None:
+                        return ToolReply("Could not look: that window is not on screen.")
+                    rect = clipped
+                    label = f'the window "{w.title[:80]}" ({w.app})'
+            data, mime = self._backend.capture(rect)
+            log.info("look_at_screen %s %dx%d %d KB", target, rect.width, rect.height, len(data) // 1024)
+            return ToolReply(
+                f"Here is a screenshot of {label} ({rect.width}×{rect.height} px). "
+                f"Use what you see to answer; do not describe it unless asked.",
+                data,
+                mime,
+            )
+        except Exception as exc:
+            log.warning("look_at_screen failed: %s", exc)
+            return ToolReply(f"Could not look: {exc}")
 
     # ── dispatch ────────────────────────────────────────────────────────────
 

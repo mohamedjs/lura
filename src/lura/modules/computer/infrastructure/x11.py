@@ -8,6 +8,8 @@ import shutil
 import time
 
 from ..domain import (
+    LOOK_JPEG_QUALITY,
+    LOOK_MAX_SIDE,
     Monitor,
     Rect,
     Window,
@@ -18,7 +20,7 @@ from ..domain import (
     prop_ints,
     window_from_props,
 )
-from . import xlib
+from . import capture, xlib
 from .controls import LinuxControls
 from .runner import run
 
@@ -159,6 +161,10 @@ class X11Backend:
         if pos is None:
             raise RuntimeError(f"Could not parse pointer position: {out.strip()[:120]}")
         return pos
+
+    def capture(self, rect: Rect) -> tuple[bytes, str]:
+        rgb = capture.grab_x11(rect)
+        return capture.encode(capture.downscale(rgb, LOOK_MAX_SIDE), LOOK_JPEG_QUALITY)
 
     # ── windows & workspaces ────────────────────────────────────────────────
 

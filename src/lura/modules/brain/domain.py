@@ -32,6 +32,14 @@ class ToolCall:
     raw_arguments: str = ""
 
 
+@dataclass(frozen=True)
+class ToolReply:
+    """A tool result with an optional picture for the brain."""
+    text: str
+    image: bytes | None = None
+    image_mime: str = ""
+
+
 @dataclass
 class Message:
     role: str                        # "user" | "assistant" | "tool"
@@ -42,6 +50,8 @@ class Message:
     tool_name: str = ""
     is_error: bool = False
     native: tuple[str, Any] | None = None   # (provider, provider-shaped turn)
+    image: bytes | None = None
+    image_mime: str = ""
 
 
 def retext(message: Message, text: str) -> None:

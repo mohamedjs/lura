@@ -304,6 +304,7 @@ let lastPerms = "";
 function renderAir() {
   bindCheck("#air-enabled", "air_enabled");
   bindCheck("#air-thumb-click", "air_thumb_click");
+  bindCheck("#look-enabled", "look_enabled");
   const box = $("#air-status");
   const on = !!S.settings.air_enabled;
   if (!on || !airStatus) { box.hidden = true; }

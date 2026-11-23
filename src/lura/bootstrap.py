@@ -70,6 +70,7 @@ def build(presence: Presence | None = None) -> Container:
         lambda name, payload: bus.publish(name, **payload),
         app_kinds=lambda: settings.current.air_app_kinds,
     )
+    computer.configure_look(pointed=air_control.pointed, enabled=lambda: settings.current.look_enabled)
     from . import __version__
     updates = UpdateService(__version__, lambda: settings.current.check_updates,
                             lambda how: bus.publish(events.RESTART_REQUESTED if how == "restart"
@@ -79,7 +80,7 @@ def build(presence: Presence | None = None) -> Container:
     tools.add_provider(computer)
     tools.add_provider(air_control)
     assistant = Assistant(settings, brain, voice, tools, bus, presence, memory=memory,
-                          extra_prompt=skills.prompt_block)
+                          extra_prompt=skills.prompt_block, air_pointed=air_control.pointed)
 
     def on_settings(payload: dict) -> None:
         if "start_at_login" in payload.get("changed", ()):

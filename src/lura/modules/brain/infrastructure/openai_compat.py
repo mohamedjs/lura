@@ -52,11 +52,32 @@ class OpenAICompatChat:
         return headers
 
     def _payload(self, system: str, history: list[Message], tools: list[ToolSpec]) -> dict:
+        messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
+        pending_images: list[Message] = []
+        for i, m in enumerate(history):
+            messages.append(self._wire(m))
+            if m.role == "tool":
+                if m.image:
+                    pending_images.append(m)
+                next_is_tool = i + 1 < len(history) and history[i + 1].role == "tool"
+                if not next_is_tool and pending_images:
+                    parts: list[dict[str, Any]] = [
+                        {"type": "text", "text": "(The picture from the tool result above.)"},
+                        *[
+                            {"type": "image_url", "image_url": {
+                                "url": f"data:{img.image_mime};base64,{base64.b64encode(img.image).decode()}"}}
+                            for img in pending_images if img.image
+                        ],
+                    ]
+                    messages.append({"role": "user", "content": parts})
+                    pending_images.clear()
+            else:
+                pending_images.clear()
         payload: dict[str, Any] = {
             "model": self.model,
             # The system message and the tools are the cached prefix: they
             # must be byte-identical turn to turn. Nothing time-varying there.
-            "messages": [{"role": "system", "content": system}, *map(self._wire, history)],
+            "messages": messages,
             "stream": True,
         }
         if tools:

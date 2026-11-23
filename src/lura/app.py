@@ -212,13 +212,34 @@ def cmd_run(args) -> int:
 
     c.bus.subscribe(events.AIR_ACTION, on_air_action)
 
+    gaze_state: list[tuple[float, float] | None] = [None]
+
     def air_view():
         snap = c.air.snapshot()
         if snap.camera != "on":
+            gaze_state[0] = None
             return None
         st = c.air_control.state()
         now = time.monotonic()
         last = last_air[0]
+        target = None
+        cursor = st.get("cursor")
+        centers = overlay.state.face_centers()
+        if st["engaged"] and cursor and st.get("cursor_age", 99) < 3.0 and centers:
+            cx, cy = cursor
+            fx, fy = min(centers, key=lambda p: (cx - p[0]) ** 2 + (cy - p[1]) ** 2)
+            target = (
+                max(-1.0, min(1.0, (cx - fx) / 800.0)),
+                max(-1.0, min(1.0, (cy - fy) / 600.0)),
+            )
+        g = gaze_state[0]
+        if target is not None:
+            g = target if g is None else (g[0] + 0.2 * (target[0] - g[0]), g[1] + 0.2 * (target[1] - g[1]))
+        elif g is not None:
+            g = (g[0] * 0.85, g[1] * 0.85)
+            if abs(g[0]) < 0.02 and abs(g[1]) < 0.02:
+                g = None
+        gaze_state[0] = g
         return AirView(
             on=True,
             engaged=st["engaged"],
@@ -233,6 +254,7 @@ def cmd_run(args) -> int:
             pulse_age=now - last["t"],
             message=last["message"],
             message_age=now - last["t"],
+            gaze=g,
         )
 
     overlay.state.air_source = air_view

@@ -601,7 +601,7 @@ def check_tool_service() -> None:
     ts = ToolService()
     ts.add_provider(svc)
     assert svc.owns("desktop_action") and not svc.owns("other")
-    assert len(svc.tool_specs()) == 1 and svc.tool_specs()[0].name == "desktop_action"
+    assert [s.name for s in svc.tool_specs()] == ["desktop_action", "look_at_screen"]
     out, ended = ts.dispatch("desktop_action", {"action": "window_list"})
     assert not ended and "Terminal — zsh" in out
 
