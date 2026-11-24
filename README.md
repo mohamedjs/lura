@@ -96,6 +96,18 @@ Hold your hand close to the camera:
 
 The thumb-tap click can be switched off in the **Hands** tab (`air_thumb_click`).
 
+**Two hands:**
+
+- **Resize / move a window:** pinch thumb and index on both hands to grab the window under the
+  cursor (or the active one). Spread your hands to make it bigger, bring them together to make it smaller,
+  and move both hands to move it. Let go with either hand to drop it; spread it to nearly the
+  whole screen and it maximizes.
+
+**Point and ask:** point at a window and say "Lura, look at this" (or «لورا بصي على ده»). She
+  takes one screenshot of that window, only when asked, and talks about what she sees, and her
+  face turns towards your finger while you point. It needs a brain that can see images; she tells
+  you if yours can't. Switch it off in the **Hands** tab (`look_enabled`).
+
 ### Lura Air on macOS
 
 Turning on **Lura Air** (hand control) on a Mac asks for two privacy permissions:
