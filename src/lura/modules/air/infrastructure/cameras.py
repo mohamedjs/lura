@@ -95,7 +95,9 @@ class OpenCVCamera:
     overlaps hand detection instead of adding to it (a serial read waits up to a frame period).
     """
 
-    def __init__(self, info: CameraInfo, width: int = 640, height: int = 360, fps: int = 30) -> None:
+    # 960 px wide: measured on a recorded hand (Nov 2026) the fingertip's frame-to-frame jitter
+    # p90 fell from 7.4 px (640) to 4.0 px at the same detect time (~19.5 ms); 1280 was no better.
+    def __init__(self, info: CameraInfo, width: int = 960, height: int = 540, fps: int = 30) -> None:
         self._info = info
         self._width = width
         self._height = height

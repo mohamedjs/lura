@@ -126,6 +126,9 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   `mac_camera_info` ranks built-in first, never Camo/OBS/iPhone unless named; `GET /api/air/cameras`
   + a picker (`air_camera`). `AirController(glide=True)` (bootstrap only) glides the pointer in 8 ms
   steps (`PointerGlide`); every non-cursor command flushes to the target first.
+  2.9.1: the camera is read at 960×540 (was 640×360). Measured on a recorded hand: fingertip
+  jitter p90 7.4 → 4.0 px, same ~19.5 ms detect, 100 % detection either way (1280 was no better). The
+  same recording showed Air ignoring an open hand is by design — the cursor needs one finger pointing.
 - **2.8 — Air + voice together (docs/012, docs/013; Gemini 4 Neon built both, Claude reviewed):**
   - Two-hand pinch (engine phase `"two"`, Commands `two_start/two_move/two_end`): both hands pinch
     → the window under the Air cursor is held; hands apart/together scale it around its centre
