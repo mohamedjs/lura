@@ -69,6 +69,7 @@ def build(presence: Presence | None = None) -> Container:
         computer,
         lambda name, payload: bus.publish(name, **payload),
         app_kinds=lambda: settings.current.air_app_kinds,
+        glide=True,
     )
     computer.configure_look(pointed=air_control.pointed, enabled=lambda: settings.current.look_enabled)
     from . import __version__

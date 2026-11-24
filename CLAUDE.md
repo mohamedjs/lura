@@ -118,6 +118,14 @@ is an **editable install**, so editing `src/` + restarting the service is enough
   the newest user turn of each request (not stored): with old untashkeeled replies in the history,
   deepseek-v4-flash copied them (3% marked) until the note (81–98%). `LURA_OFFLINE_VOICE=1` makes
   `_OfflineFallback` always speak offline, to hear the offline voices.
+- **2.9 — see what Air sees (docs/014; Gemini 4 Neon built it, Claude reviewed):** Hands tab polls
+  `GET /api/air/preview` (~15 fps, single JPEGs via `server.Raw`, CSP `img-src blob:`) only while the
+  tab is open; `AirService.preview_jpeg()` keeps frames only for 2 s after the last ask,
+  `air/infrastructure/preview.py` draws 21 yellow joints + bones + a `PreviewFlash` label. macOS lists
+  cameras via AVFoundation in OpenCV's index order (`devicesWithMediaType` video + muxed) and
+  `mac_camera_info` ranks built-in first, never Camo/OBS/iPhone unless named; `GET /api/air/cameras`
+  + a picker (`air_camera`). `AirController(glide=True)` (bootstrap only) glides the pointer in 8 ms
+  steps (`PointerGlide`); every non-cursor command flushes to the target first.
 - **2.8 — Air + voice together (docs/012, docs/013; Gemini 4 Neon built both, Claude reviewed):**
   - Two-hand pinch (engine phase `"two"`, Commands `two_start/two_move/two_end`): both hands pinch
     → the window under the Air cursor is held; hands apart/together scale it around its centre

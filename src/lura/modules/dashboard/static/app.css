@@ -267,6 +267,10 @@ select { appearance: none; cursor: pointer; padding-inline-end: 34px;
 @media (max-width: 560px) { .update-banner { flex-wrap: wrap; } }
 
 .air-list { margin: .2em 0 .8em; padding-inline-start: 1.2em; line-height: 1.9; }
+.air-preview { position: relative; margin: .8em 0; border-radius: var(--radius); overflow: hidden;
+  background: #111; min-height: 140px; display: grid; place-items: center; }
+.air-preview img { display: block; width: 100%; height: auto; }
+.air-preview-wait { color: #ccc; margin: 0; padding: 1em; text-align: center; }
 #air-status { margin-top: 4px; }
 .air-perm { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
 .air-perm b { font-weight: 600; }

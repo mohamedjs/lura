@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable
@@ -20,7 +21,9 @@ from ..settings import (ELEVENLABS, KEY_PROVIDERS, PROVIDERS, SUGGESTED_MODELS, 
 from ..skills import SkillsService
 from ..updates import UpdateService
 from ..voice import VoiceService
-from .server import ApiError
+from .server import ApiError, Raw
+
+log = logging.getLogger(__name__)
 
 #: Settings that apply the moment they change, so they never ask for a restart.
 #: The rest is read again at the start of every conversation.
@@ -56,6 +59,8 @@ class DashboardApi:
     #: "downloading": bool}. None for the standalone dashboard.
     air: Callable[[], dict] | None = None
     air_permission: Callable[[str], dict] | None = None
+    air_preview: Callable[[], bytes | None] | None = None
+    air_cameras: Callable[[], list[dict]] | None = None
     _pending: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -76,6 +81,8 @@ class DashboardApi:
         r("POST", "/api/update/install", lambda b, m: self.update_install())
         r("GET", "/api/state", lambda b, m: self.state())
         r("GET", "/api/air", lambda b, m: self.air_status())
+        r("GET", "/api/air/preview", lambda b, m: self.air_preview_frame())
+        r("GET", "/api/air/cameras", lambda b, m: self.air_camera_list())
         r("POST", "/api/air/permission", lambda b, m: self.air_permission_open(b))
         r("GET", "/api/status", lambda b, m: {"status": self.status(),
                                               "capabilities": self.settings.capabilities().to_dict(),
@@ -142,6 +149,21 @@ class DashboardApi:
         if self.air is None:
             return {"camera": "off", "detail": "", "downloading": False, "running": False, "permissions": {}}
         return {**self.air(), "running": True}
+
+    def air_preview_frame(self) -> Raw:
+        data = self.air_preview() if self.air_preview is not None else None
+        if data:
+            return Raw(data, "image/jpeg")
+        return Raw(b"", "image/jpeg", 204)
+
+    def air_camera_list(self) -> dict:
+        cams: list[dict] = []
+        if self.air_cameras is not None:
+            try:
+                cams = self.air_cameras() or []
+            except Exception:
+                log.debug("Air camera listing failed", exc_info=True)
+        return {"cameras": cams, "wanted": self.settings.current.air_camera}
 
     def air_permission_open(self, body: dict) -> dict:
         pane = str((body or {}).get("pane", ""))

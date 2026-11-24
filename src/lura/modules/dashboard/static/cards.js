@@ -197,6 +197,7 @@ function showTab(name) {
   store.set("lura-tab", name);
   $$("#tabs button").forEach((b) => { b.classList.toggle("on", b.dataset.tab === name); b.setAttribute("aria-selected", b.dataset.tab === name); });
   $$(".panel").forEach((p) => p.classList.toggle("on", p.dataset.tab === name));
+  if (name === "air") airPreviewLoop();
 }
 
 function renderTabs() {
@@ -319,6 +320,9 @@ function renderAir() {
     box.hidden = false;
   }
   renderAirPerms(on ? airStatus : null);
+  $("#air-preview").hidden = !on;
+  $("#air-camera-field").hidden = !on;
+  if (on) { airPreviewLoop(); loadAirCameras(); }
   // Ask for the camera's state only while Air is on.
   if (on && !airTimer) { loadAir(); airTimer = setInterval(loadAir, 2000); }
   if (!on && airTimer) { clearInterval(airTimer); airTimer = null; airStatus = null; }
@@ -365,4 +369,49 @@ function renderAirPerms(a) {
 async function loadAir() {
   try { airStatus = await api("GET", "/api/air"); } catch (_) { airStatus = null; }
   if (S) renderAir();
+}
+
+let airPreviewRunning = false;
+let airPreviewUrl = null;
+const airPreviewWanted = () => !!(S && S.settings.air_enabled) && tab === "air" && !document.hidden;
+async function airPreviewLoop() {
+  if (airPreviewRunning) return;
+  airPreviewRunning = true;
+  const img = $("#air-preview-img"), wait = $("#air-preview-wait");
+  img.alt = t("air.preview.alt");
+  while (airPreviewWanted()) {
+    const started = performance.now();
+    let shown = false;
+    try {
+      const res = await fetch("/api/air/preview", { headers: { "X-Lura-Token": TOKEN }, cache: "no-store" });
+      if (res.status === 200) {
+        const url = URL.createObjectURL(await res.blob());
+        img.src = url;
+        if (airPreviewUrl) URL.revokeObjectURL(airPreviewUrl);
+        airPreviewUrl = url;
+        shown = true;
+      }
+    } catch (_) { /* daemon restarting: keep waiting */ }
+    img.hidden = !shown;
+    wait.hidden = shown;
+    await new Promise((r) => setTimeout(r, Math.max(10, 66 - (performance.now() - started))));
+  }
+  airPreviewRunning = false;
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) airPreviewLoop(); });
+
+let airCamerasLoaded = false;
+async function loadAirCameras() {
+  if (airCamerasLoaded) return;
+  airCamerasLoaded = true;
+  let data = { cameras: [], wanted: "" };
+  try { data = await api("GET", "/api/air/cameras"); } catch (_) { airCamerasLoaded = false; return; }
+  const sel = $("#air-camera");
+  sel.replaceChildren(el("option", { value: "", textContent: t("air.camera.auto") }),
+    ...data.cameras.map((c) => el("option", {
+      value: c.name,
+      textContent: c.usable ? c.name : `${c.name} · ${t(c.driver === "continuity" ? "air.camera.phone" : "air.camera.virtual")}`,
+    })));
+  sel.value = data.cameras.some((c) => c.name === data.wanted) ? data.wanted : "";
+  sel.onchange = () => save({ air_camera: sel.value });
 }

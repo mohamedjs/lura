@@ -57,6 +57,23 @@ SNAP_PX = 40                        # releasing a window within this many px of 
 PLACE_MIN_PX = 4                    # skip a place() that moves less than this
 CONTROL_HZ = 30                     # controller poll timeout rate
 
+#: AVFoundation transport types (FourCC) and device types used to tell cameras apart.
+MAC_TRANSPORT_BUILTIN = 0x626C746E      # 'bltn'
+MAC_TRANSPORT_VIRTUAL = 0x76697274      # 'virt'
+MAC_TYPE_BUILTIN = "AVCaptureDeviceTypeBuiltInWideAngleCamera"
+MAC_TYPE_CONTINUITY = "AVCaptureDeviceTypeContinuityCamera"
+#: Name hints of software cameras that show nothing unless their app runs.
+VIRTUAL_CAMERA_HINTS = ("camo", "obs", "virtual", "snap camera", "mmhmm", "ndi", "elgato",
+                        "manycam", "xsplit", "zoom", "teams")
+#: Name hints of phone cameras (Continuity Camera and its Desk View).
+PHONE_CAMERA_HINTS = ("iphone", "desk view", "ipad")
+
+PREVIEW_FLASH_S = 0.6     # s a gesture label stays on the preview chip
+PREVIEW_DOUBLE_S = 0.5    # s between two clicks shown as "DOUBLE CLICK"
+GLIDE_TICK = 0.008        # s between pointer steps of a glide (~120 Hz)
+GLIDE_SPAN_MIN = 0.016    # s a glide lasts at least
+GLIDE_SPAN_MAX = 0.05     # s a glide lasts at most (a stalled camera never drags it out)
+
 HINT_EDGE = 0.10        # a hand within this of the left/right frame edge, or below 1 - this, is "at the edge"
 HINT_AFTER = 1.5        # s at the edge before the hint
 HINT_EVERY = 10.0       # s between two hints
@@ -713,24 +730,41 @@ class Stats:
         }
 
 
+def mac_camera_info(index: int, name: str, device_type: str, transport: int) -> CameraInfo:
+    """Classify a macOS AVFoundation camera device into a CameraInfo."""
+    low = name.lower()
+    if transport == MAC_TRANSPORT_VIRTUAL or any(h in low for h in VIRTUAL_CAMERA_HINTS):
+        driver, usable = "virtual", False
+    elif device_type == MAC_TYPE_CONTINUITY or any(h in low for h in PHONE_CAMERA_HINTS):
+        driver, usable = "continuity", False
+    elif transport == MAC_TRANSPORT_BUILTIN or device_type == MAC_TYPE_BUILTIN:
+        driver, usable = "builtin", True
+    else:
+        driver, usable = "usb", True
+    return CameraInfo(index=index, name=name or f"Camera {index}", driver=driver, usable=usable)
+
+
 def pick_camera(cams: list[CameraInfo], wanted: str = "") -> CameraInfo | None:
     """Choose the best usable camera, optionally matching a name substring or index.
 
-    A virtual camera (a phone through v4l2loopback) is never picked by itself — it shows nothing
-    unless its app is running — but naming it (``wanted``) selects it. Metadata nodes never are.
+    A virtual camera (a phone through v4l2loopback on Linux, or Camo, OBS or an iPhone on macOS)
+    is never picked by itself — it shows nothing unless its app is running — but naming it
+    (``wanted``) selects it. Metadata nodes never are.
     """
     usable = [c for c in cams if c.usable]
     needle = wanted.strip()
     if needle:
         low = needle.lower()
-        named = usable + [c for c in cams if not c.usable and c.driver in ("v4l2loopback", "virtual")]
+        named = usable + [
+            c for c in cams if not c.usable and c.driver in ("v4l2loopback", "virtual", "continuity")
+        ]
         for cam in named:
             if low in cam.name.lower() or str(cam.index) == needle:
                 return cam
         return None
     if not usable:
         return None
-    return min(usable, key=lambda c: (0 if c.driver == "uvcvideo" else 1, c.index))
+    return min(usable, key=lambda c: (0 if c.driver in ("uvcvideo", "builtin") else 1, c.index))
 
 
 def camera_candidates(cams: list[CameraInfo], wanted: str = "") -> list[CameraInfo]:
@@ -885,3 +919,79 @@ def framing_hint(views: tuple[HandView, ...]) -> str | None:
     if any(h.x < HINT_EDGE or h.x > 1.0 - HINT_EDGE for h in views):
         return "Move your hand towards the middle."
     return None
+
+
+# ── preview flash & pointer glide ───────────────────────────────────────────
+
+_FLASH_LABELS: dict[str, str] = {
+    "click": "CLICK",
+    "right_click": "RIGHT CLICK",
+    "press": "HOLD",
+    "release": "RELEASE",
+    "scroll": "SCROLL",
+    "swipe": "SWIPE",
+    "two_start": "TWO HANDS",
+    "engage": "AIR ON",
+    "disengage": "AIR OFF",
+}
+
+
+class PreviewFlash:
+    """Which gesture label the camera preview shows: the newest action for a moment, else the phase."""
+
+    def __init__(self) -> None:
+        self._label = ""
+        self._t = -math.inf
+        self._last_click_t = -math.inf
+
+    def note(self, kind: str, t: float) -> None:
+        if kind not in _FLASH_LABELS:
+            return
+        label = _FLASH_LABELS[kind]
+        if kind == "click":
+            if t - self._last_click_t <= PREVIEW_DOUBLE_S:
+                label = "DOUBLE CLICK"
+            self._last_click_t = t
+        self._label, self._t = label, t
+
+    def label(self, t: float, phase: str) -> str:
+        if self._label and t - self._t <= PREVIEW_FLASH_S:
+            return self._label
+        return (phase or "").replace("_", " ").upper()
+
+
+class PointerGlide:
+    """Linear glide of the mouse pointer from where it is drawn to the newest target."""
+
+    def __init__(self) -> None:
+        self._from: tuple[float, float] | None = None
+        self._to: tuple[float, float] | None = None
+        self._t0 = 0.0
+        self._span = GLIDE_SPAN_MIN
+
+    def retarget(self, start: tuple[float, float], target: tuple[float, float], now: float, span: float) -> None:
+        cur = self.at(now)
+        self._from = cur if cur is not None else start
+        self._to = target
+        self._t0 = now
+        self._span = max(GLIDE_SPAN_MIN, min(GLIDE_SPAN_MAX, span))
+
+    def at(self, now: float) -> tuple[float, float] | None:
+        if self._to is None or self._from is None:
+            return None
+        f = (now - self._t0) / self._span
+        if f >= 1.0:
+            return self._to
+        f = max(0.0, f)
+        return (
+            self._from[0] + (self._to[0] - self._from[0]) * f,
+            self._from[1] + (self._to[1] - self._from[1]) * f,
+        )
+
+    def done(self, now: float) -> bool:
+        return self._to is None or (now - self._t0) >= self._span
+
+    def finish(self) -> tuple[float, float] | None:
+        to = self._to
+        self._from = self._to = None
+        return to

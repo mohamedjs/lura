@@ -1,6 +1,6 @@
 # 014 — Lura Air: live camera preview, the Mac's own camera, smoother pointer
 
-Status: Ready     Builds on: docs/003-air-hand-tracking.md, docs/009-air-interaction-engine.md,
+Status: Implemented     Builds on: docs/003-air-hand-tracking.md, docs/009-air-interaction-engine.md,
 docs/012-air-two-hands.md, docs/ARCHITECTURE.md
 
 ## 1. Goal
@@ -559,3 +559,10 @@ Do not commit.
 - Preview is pulled as single JPEGs (no MJPEG stream): the server is a plain
   `ThreadingHTTPServer` with JSON routes, a fetch per frame needs the token header anyway, and it
   stops by itself when the tab closes.
+- (Executor question, glide vs existing tests) **Option B.** `AirController.__init__` gets
+  `glide: bool = False` (keyword, after `app_kinds`). With `glide=False` the `cursor` branch calls
+  `pointer_to` directly exactly as before (and sets `_drawn`), `start()` starts no `air-glide`
+  thread, and flushes are no-ops — so tests/test_air_engine.py and tests/test_air_control.py stay
+  unchanged and pass. With `glide=True` everything in §7.10 applies. `src/lura/bootstrap.py`
+  (added to §3) passes `glide=True` to the `AirController(...)` it builds. test_air_preview.py
+  check 7 constructs the controller with `glide=True`.

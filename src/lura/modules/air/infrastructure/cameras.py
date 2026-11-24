@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from ....shared.platform import IS_LINUX, IS_MAC
-from ..domain import CameraInfo
-from .macos_camera import authorization as camera_authorization
+from ..domain import CameraInfo, mac_camera_info
+from .macos_camera import authorization as camera_authorization, list_devices as list_mac_devices
 
 log = logging.getLogger(__name__)
 
@@ -45,8 +45,15 @@ def _read_driver(entry: Path) -> str:
 
 
 def list_cameras(root: Path = _DEFAULT_SYSFS) -> list[CameraInfo]:
-    """List video capture devices; on Linux reads sysfs to skip metadata and loopback nodes."""
+    """List video capture devices; on Linux reads sysfs and on macOS reads AVFoundation."""
     if not IS_LINUX and root == _DEFAULT_SYSFS:
+        if IS_MAC:
+            devices = list_mac_devices()
+            if devices:
+                return [
+                    mac_camera_info(i, name, kind, transport)
+                    for i, (name, kind, transport) in enumerate(devices)
+                ]
         return [CameraInfo(index=0, name="Default camera", driver="", usable=True)]
     if not root.exists():
         return []

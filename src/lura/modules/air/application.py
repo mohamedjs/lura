@@ -15,6 +15,7 @@ from ...shared import events
 from ..brain import ToolSpec
 from ..computer import Rect, WindowGrip
 from .domain import (
+    GLIDE_TICK,
     MODES,
     WELCOME,
     AirState,
@@ -23,6 +24,8 @@ from .domain import (
     Hand,
     HandFrame,
     HandView,
+    PointerGlide,
+    PreviewFlash,
     Recognizer,
     Stats,
     app_kind,
@@ -40,6 +43,7 @@ _MISS_LIMIT = 15
 _RETRY_DELAY = 2.0
 _IDLE_AFTER = 10.0
 _IDLE_INTERVAL = 1.0 / 8.0
+_PREVIEW_HOLD = 2.0   # s the camera keeps frames for the preview after the dashboard last asked
 _QUEUE_MAX = 64
 _POINTER_RESYNC_S = 1.0
 _BOUNDS_CACHE_S = 5.0
@@ -140,6 +144,12 @@ class AirService:
         self._last_gesture_t = 0.0
         self._cpu_last_proc = time.process_time()
         self._cpu_last_wall = time.monotonic()
+        self._preview_lock = threading.Lock()
+        self._preview_until = -math.inf
+        self._preview_src: tuple[int, object, tuple[Hand, ...], str] | None = None
+        self._preview_seq = 0
+        self._preview_cache: tuple[int, bytes] | None = None
+        self._flash = PreviewFlash()
 
     @property
     def running(self) -> bool:
@@ -173,6 +183,26 @@ class AirService:
     def engine_state(self) -> dict:
         with self._lock:
             return dict(self._engine_state)
+
+    def preview_jpeg(self) -> bytes | None:
+        """Render and cache the newest camera frame with hand overlay while the dashboard asks."""
+        with self._preview_lock:
+            self._preview_until = time.monotonic() + _PREVIEW_HOLD
+            src, cache = self._preview_src, self._preview_cache
+        if src is None:
+            return None
+        seq, frame, hands, label = src
+        if cache is not None and cache[0] == seq:
+            return cache[1]
+        from .infrastructure.preview import render_preview
+        try:
+            data = render_preview(frame, hands, label)
+        except Exception:
+            log.debug("Air preview failed", exc_info=True)
+            return None
+        with self._preview_lock:
+            self._preview_cache = (seq, data)
+        return data
 
     def stats(self) -> dict:
         with self._lock:
@@ -432,6 +462,16 @@ class AirService:
                         cmds = []
                         eng_state = None
 
+                    for c in cmds:
+                        self._flash.note(c.kind, t)
+                    if time.monotonic() < self._preview_until:
+                        phase = str((eng_state or {}).get("phase", "")) if hands else ""
+                        with self._preview_lock:
+                            self._preview_seq += 1
+                            self._preview_src = (
+                                self._preview_seq, frame, hands, self._flash.label(t, phase),
+                            )
+
                     self._dispatch_events(evs)
                     self._dispatch_commands(cmds)
                     loop_ms = (time.perf_counter() - loop_start) * 1000.0
@@ -447,13 +487,16 @@ class AirService:
                     )
 
                     # Idle throttle: slow to at most 8 fps after 10 s without any hand.
-                    if not hands and (t - last_hand_t) >= _IDLE_AFTER:
+                    if not hands and (t - last_hand_t) >= _IDLE_AFTER and time.monotonic() >= self._preview_until:
                         remaining = _IDLE_INTERVAL - (time.perf_counter() - loop_start)
                         if remaining > 0.0:
                             self._stop.wait(remaining)
         except Exception:
             log.exception("Air camera thread crashed unexpectedly")
         finally:
+            with self._preview_lock:
+                self._preview_src = None
+                self._preview_cache = None
             self._safe_close(cam)
             self._safe_close(landmarker)
             engine.reset()
@@ -513,12 +556,14 @@ class AirController:
         publish: Callable[[str, dict], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
         app_kinds: Callable[[], dict[str, str]] = lambda: {},
+        glide: bool = False,
     ) -> None:
         self._air = air
         self._desktop = desktop
         self._publish_fn = publish
         self._clock = clock
         self._kinds = app_kinds
+        self._glide_enabled = glide
 
         self._lock = threading.RLock()
         self._q_cond = threading.Condition()
@@ -526,6 +571,11 @@ class AirController:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._subscribed = False
+        self._glide = PointerGlide()
+        self._drawn: tuple[float, float] | None = None
+        self._last_cursor_t: float = -math.inf
+        self._glide_wake = threading.Event()
+        self._glide_thread: threading.Thread | None = None
 
         self._mode: str = "universal"
         self._welcomed: bool = False
@@ -623,17 +673,33 @@ class AirController:
             )
             self._thread = thread
             thread.start()
+            if self._glide_enabled:
+                self._glide_wake.clear()
+                gthread = threading.Thread(
+                    target=self._glide_run,
+                    daemon=True,
+                    name="air-glide",
+                )
+                self._glide_thread = gthread
+                gthread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        self._glide_wake.set()
         with self._q_cond:
             self._q_cond.notify_all()
         with self._lock:
             thread = self._thread
+            gthread = self._glide_thread
         if thread is not None and thread.is_alive() and thread is not threading.current_thread():
             thread.join(timeout=1.0)
+        if gthread is not None and gthread.is_alive() and gthread is not threading.current_thread():
+            gthread.join(timeout=1.0)
         with self._lock:
             self._thread = None
+            self._glide_thread = None
+            self._glide_flush()
+            self._drawn = None
             self._clear_active()
             self._cursor = None
         with self._q_cond:
@@ -680,6 +746,49 @@ class AirController:
                     self._queue.popleft()
                 self._queue.append(cmd)
             self._q_cond.notify()
+
+    def _glide_step(self) -> bool:
+        with self._lock:
+            now = self._clock()
+            pos = self._glide.at(now)
+            if pos is None:
+                return False
+            pt = (round(pos[0]), round(pos[1]))
+            if self._drawn is None or (round(self._drawn[0]), round(self._drawn[1])) != pt:
+                try:
+                    self._desktop.pointer_to(*pt)
+                except Exception:
+                    log.warning("Air pointer_to failed", exc_info=True)
+                self._drawn = (float(pt[0]), float(pt[1]))
+            if self._glide.done(now):
+                self._glide.finish()
+                return False
+            return True
+
+    def _glide_flush(self) -> None:
+        if not self._glide_enabled:
+            return
+        to = self._glide.finish()
+        if to is None:
+            return
+        pt = (round(to[0]), round(to[1]))
+        if self._drawn is None or (round(self._drawn[0]), round(self._drawn[1])) != pt:
+            try:
+                self._desktop.pointer_to(*pt)
+            except Exception:
+                log.warning("Air pointer_to failed", exc_info=True)
+            self._drawn = (float(pt[0]), float(pt[1]))
+
+    def _glide_run(self) -> None:
+        while not self._stop.is_set():
+            self._glide_wake.wait(0.2)
+            self._glide_wake.clear()
+            while not self._stop.is_set():
+                with self._lock:
+                    busy = self._glide_step()
+                if not busy:
+                    break
+                self._stop.wait(GLIDE_TICK)
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -755,6 +864,7 @@ class AirController:
     def _ensure_cursor(self) -> tuple[float, float]:
         if self._cursor is None:
             self._cursor = self._read_pointer()
+            self._drawn = self._cursor
         return self._cursor
 
     def _screen_bounds(self) -> Rect | None:
@@ -789,9 +899,12 @@ class AirController:
     def process(self, cmd: Command) -> None:
         with self._lock:
             k = cmd.kind
+            if k != "cursor":
+                self._glide_flush()
 
             if k == "engage":
                 self._cursor = self._read_pointer()
+                self._drawn = self._cursor
                 self._last_move_t = cmd.t
                 self._bounds_cache = None
                 self._screen_bounds()
@@ -803,6 +916,7 @@ class AirController:
                 return
 
             if k == "disengage":
+                self._drawn = None
                 self._clear_active()
                 self._cursor = None
                 self._feedback("disengage", True, "Air off.")
@@ -815,18 +929,29 @@ class AirController:
             if k == "cursor":
                 if self._cursor is None or (cmd.t - self._last_move_t) > _POINTER_RESYNC_S:
                     self._cursor = self._read_pointer()
-                cx = self._cursor[0] + cmd.dx
-                cy = self._cursor[1] + cmd.dy
+                    self._drawn = self._cursor
+                prev = self._cursor
+                cx = prev[0] + cmd.dx
+                cy = prev[1] + cmd.dy
                 b = self._screen_bounds()
                 if b is not None and b.width > 0 and b.height > 0:
                     cx = max(float(b.x), min(float(b.x + b.width - 1), cx))
                     cy = max(float(b.y), min(float(b.y + b.height - 1), cy))
                 self._cursor = (cx, cy)
                 self._last_move_t = cmd.t
-                try:
-                    self._desktop.pointer_to(round(cx), round(cy))
-                except Exception:
-                    log.warning("Air pointer_to failed", exc_info=True)
+                if self._glide_enabled:
+                    span = cmd.t - self._last_cursor_t
+                    self._last_cursor_t = cmd.t
+                    start = self._drawn if self._drawn is not None else prev
+                    self._glide.retarget(start, (cx, cy), self._clock(), span)
+                    self._glide_wake.set()
+                else:
+                    pt = (round(cx), round(cy))
+                    try:
+                        self._desktop.pointer_to(*pt)
+                    except Exception:
+                        log.warning("Air pointer_to failed", exc_info=True)
+                    self._drawn = (float(pt[0]), float(pt[1]))
                 self._cursor_wall = self._clock()
                 if cmd.t - self._point_check_t >= _POINT_EVERY:
                     self._point_check_t = cmd.t

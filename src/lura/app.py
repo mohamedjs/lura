@@ -100,9 +100,18 @@ def cmd_run(args) -> int:
         open_settings(pane)
         return air_status()
 
+    def air_cameras() -> list[dict]:
+        from .modules.air import list_cameras
+        return [
+            {"index": cam.index, "name": cam.name, "driver": cam.driver, "usable": cam.usable}
+            for cam in list_cameras()
+            if cam.usable or cam.driver in ("v4l2loopback", "virtual", "continuity")
+        ]
+
     server = DashboardServer(DashboardApi(c.settings, c.brain, c.voice, c.connectors,
                                           c.bus, lambda: c.assistant.status, c.memory, c.skills,
-                                          c.updates, air=air_status, air_permission=air_permission),
+                                          c.updates, air=air_status, air_permission=air_permission,
+                                          air_preview=c.air.preview_jpeg, air_cameras=air_cameras),
                              s.dashboard_port)
     try:
         server.start()

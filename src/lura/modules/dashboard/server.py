@@ -15,6 +15,7 @@ import re
 import secrets
 import threading
 import urllib.parse
+from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -55,6 +56,14 @@ class ApiError(Exception):
         self.status, self.extra = status, extra
 
 
+@dataclass(frozen=True)
+class Raw:
+    """A non-JSON route result (e.g. a JPEG frame)."""
+    body: bytes
+    kind: str
+    status: int = 200
+
+
 class DashboardServer:
     def __init__(self, api, port: int):
         self._api = api
@@ -88,7 +97,7 @@ class DashboardServer:
                 self.send_header("Referrer-Policy", "no-referrer")
                 self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
                 self.send_header("Content-Security-Policy",
-                                 "default-src 'self'; img-src 'self' data:; style-src 'self'; "
+                                 "default-src 'self'; img-src 'self' data: blob:; style-src 'self'; "
                                  "script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
                 self.end_headers()
                 self.wfile.write(body)
@@ -130,7 +139,10 @@ class DashboardServer:
                 for m, pattern, handler in server._routes:
                     if m == method and (match := pattern.match(path)):
                         try:
-                            return self._json(200, handler(body, match))
+                            result = handler(body, match)
+                            if isinstance(result, Raw):
+                                return self._send(result.status, result.body, result.kind)
+                            return self._json(200, result)
                         except ApiError as exc:
                             return self._json(exc.status, {"error": str(exc), **exc.extra})
                         except (ValueError, KeyError, HttpError, NeedsSetup) as exc:

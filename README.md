@@ -108,6 +108,11 @@ The thumb-tap click can be switched off in the **Hands** tab (`air_thumb_click`)
   face turns towards your finger while you point. It needs a brain that can see images; she tells
   you if yours can't. Switch it off in the **Hands** tab (`look_enabled`).
 
+**See what Air sees:** with Air on, the **Hands** tab shows the camera live with your hand's
+joints drawn on it and the gesture it just recognised (CLICK, DOUBLE CLICK, HOLD…). Below it you
+can pick the camera; *Automatic* uses the computer's own camera and never a virtual camera (Camo,
+OBS) or an iPhone unless you choose it.
+
 ### Lura Air on macOS
 
 Turning on **Lura Air** (hand control) on a Mac asks for two privacy permissions:
